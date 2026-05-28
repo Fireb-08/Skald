@@ -17,7 +17,7 @@ export interface PickItUpProps {
 export default function PickItUp({ st }: PickItUpProps) {
   const inProg = st.library.filter(b => bookProgress(b, st.mediaProgress) > 0);
 
-  if (inProg.length === 0 || st.filter !== 'all' || st.search || st.contextFilter) {
+  if (inProg.length === 0 || st.search || st.contextFilter) {
     return null;
   }
 

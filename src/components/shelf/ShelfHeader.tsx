@@ -29,8 +29,8 @@ const FILTER_PILLS = [
   { id: 'finished', l: 'Finished' },
 ];
 
-function seriesNameOf(s: string | undefined) { return (s || '').split(' · ')[0]; }
-function seriesVolOf(s: string | undefined)  { return parseInt((s || '').split(' · ')[1] || '0', 10); }
+function seriesNameOf(s: string | undefined) { return (s || '').replace(/#\d+.*$/, '').replace(/\s*·\s*\d+.*$/, '').trim(); }
+function seriesVolOf(s: string | undefined)  { const h = (s || '').match(/#(\d+)/); if (h) return parseInt(h[1], 10); const d = (s || '').match(/·\s*(\d+)/); return d ? parseInt(d[1], 10) : 0; }
 
 export interface ShelfHeaderProps {
   st: OnyxState;
@@ -99,31 +99,48 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
 
   const isLibrary = st.shelfTab === 'library';
 
+  const tabCountText = (() => {
+    switch (st.shelfTab) {
+      case 'series': {
+        const n = new Set(st.library.map(b => seriesNameOf(bookSeries(b))).filter(Boolean)).size;
+        return `${n} series`;
+      }
+      case 'authors': {
+        const n = new Set(st.library.map(b => bookAuthor(b)).filter(Boolean)).size;
+        return `${n} authors`;
+      }
+      case 'narrators': {
+        const n = new Set(st.library.map(b => bookNarrator(b)).filter(Boolean)).size;
+        return `${n} narrators`;
+      }
+      case 'collections':
+        return 'collections';
+      default:
+        return countText;
+    }
+  })();
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 4px 14px' }}>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, minWidth: 0, flexShrink: 0 }}>
-        {isLibrary && (
-          <>
-            <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {st.contextFilter ? st.contextFilter.value : 'The shelf'}
-            </div>
-            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-              {countText}
-            </div>
-            {st.contextFilter && (
-              <button onClick={() => st.setContextFilter(null)} style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 10px',
-                background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', borderRadius: 999,
-                fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}>
-                <span style={{ fontSize: 9, opacity: 0.7 }}>{st.contextFilter.kind.toUpperCase()}</span>
-                {st.contextFilter.value}
-                <span style={{ fontSize: 13, marginLeft: 2, lineHeight: 1 }}>×</span>
-              </button>
-            )}
-          </>
+        <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {isLibrary && st.contextFilter ? st.contextFilter.value : 'The shelf'}
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+          {tabCountText}
+        </div>
+        {isLibrary && st.contextFilter && (
+          <button onClick={() => st.setContextFilter(null)} style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 10px',
+            background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', borderRadius: 999,
+            fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}>
+            <span style={{ fontSize: 9, opacity: 0.7 }}>{st.contextFilter.kind.toUpperCase()}</span>
+            {st.contextFilter.value}
+            <span style={{ fontSize: 13, marginLeft: 2, lineHeight: 1 }}>×</span>
+          </button>
         )}
       </div>
 
@@ -150,22 +167,20 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
         </div>
       </div>
 
-      {isLibrary && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-          <div style={{ marginRight: 6 }}>
-            <ViewModeToggle st={st} />
-          </div>
-          {FILTER_PILLS.map(f => (
-            <button key={f.id} onClick={() => st.setFilter(f.id)} style={{
-              padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
-              background: st.filter === f.id ? 'var(--onyx-accent-dim)' : 'transparent',
-              border: `1px solid ${st.filter === f.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-              color: st.filter === f.id ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
-              fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
-            }}>{f.l}</button>
-          ))}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ marginRight: 6 }}>
+          <ViewModeToggle st={st} />
         </div>
-      )}
+        {FILTER_PILLS.map(f => (
+          <button key={f.id} onClick={() => st.setFilter(f.id)} style={{
+            padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+            background: st.filter === f.id ? 'var(--onyx-accent-dim)' : 'transparent',
+            border: `1px solid ${st.filter === f.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
+            color: st.filter === f.id ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+            fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>{f.l}</button>
+        ))}
+      </div>
 
     </div>
   );

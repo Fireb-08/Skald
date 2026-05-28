@@ -14,11 +14,15 @@ interface SeriesGroup {
 }
 
 function seriesNameOf(s: string | undefined): string {
-  return (s || '').split(' · ')[0];
+  return (s || '').replace(/#\d+.*$/, '').replace(/\s*·\s*\d+.*$/, '').trim();
 }
 
 function seriesVolOf(s: string | undefined): number {
-  return parseInt((s || '').split(' · ')[1] || '0', 10);
+  const hashMatch = (s || '').match(/#(\d+)/);
+  if (hashMatch) return parseInt(hashMatch[1], 10);
+  const dotMatch = (s || '').match(/·\s*(\d+)/);
+  if (dotMatch) return parseInt(dotMatch[1], 10);
+  return 0;
 }
 
 export interface SeriesViewProps {
