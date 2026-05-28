@@ -31,6 +31,7 @@ export interface BookMetadata {
   narratorName: string | null;
   seriesName: string | null;
   genres: string[];
+  description?: string | null;
 }
 
 export interface Chapter {

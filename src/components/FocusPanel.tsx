@@ -61,7 +61,6 @@ function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; ch
     seekAudio(pos).catch(console.error);
     st.setPosition(pos);
     setOpen(false);
-    st.setScreen('player');
   };
 
   return (
@@ -90,17 +89,16 @@ function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; ch
 
       {open && (
         <div style={{
-          position: 'absolute', bottom: 'calc(100% + 8px)', left: -4,
-          width: 340, maxHeight: 420,
+          position: 'absolute', bottom: 'calc(100% + 8px)', left: 0,
+          width: 280, maxWidth: '100%', maxHeight: 320,
           background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)', borderRadius: 10,
           boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,166,74,0.08)',
           padding: 6, zIndex: 100, display: 'flex', flexDirection: 'column',
         }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 8px 4px' }}>
-            <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Jump to chapter</div>
-            <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{chapterCount} TOTAL</div>
+          <div style={{ padding: '6px 8px 4px', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Jump to chapter
           </div>
-          <div ref={listRef} style={{ overflow: 'auto', flex: 1, minHeight: 0 }}>
+          <div ref={listRef} style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
             {chapters.map((c, i) => {
               const chState = i < chIdx ? 'done' : i === chIdx ? 'playing' : 'next';
               return (
@@ -119,7 +117,7 @@ function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; ch
                     {String(c.n).padStart(2, '0')}
                   </div>
                   <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: chState === 'playing' ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: chState === 'done' ? 'var(--onyx-text-mute)' : chState === 'playing' ? 'var(--onyx-accent)' : 'var(--onyx-text)' }}>
-                    {c.t}
+                    {c.t || `Chapter ${c.n}`}
                   </div>
                   {chState === 'done' && (
                     <span style={{ color: 'var(--onyx-text-mute)', flexShrink: 0, display: 'inline-flex' }}>
@@ -246,7 +244,7 @@ function CollapseHandle({ collapsed, onToggle }: { collapsed: boolean; onToggle:
 }
 
 export default function FocusPanel({ st }: FocusPanelProps) {
-  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<'bookmarks' | 'synopsis'>('bookmarks');
 
   const focus = st.currentBook;
   if (!focus) return null;
@@ -337,7 +335,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   return (
     <Glass
       translucent={st.translucent}
-      style={{ width: 360, padding: 28, display: 'flex', flexDirection: 'column', flexShrink: 0, position: 'relative' }}
+      style={{ width: 360, padding: 28, display: 'flex', flexDirection: 'column', flexShrink: 0, position: 'relative', overflow: 'visible' }}
     >
       <CollapseHandle collapsed={false} onToggle={() => st.setFocusCollapsed(true)} />
 
@@ -419,61 +417,74 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         <div style={{ width: `${focusProgress * 100}%`, height: '100%', background: 'var(--onyx-accent)', transition: 'width 0.2s' }} />
       </div>
 
-      <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>
-        <span>{Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} / {chapterCount}</span>
+      <div style={{ marginTop: 6, fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>
+        {Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} / {chapterCount}
+      </div>
+
+      <div style={{ marginTop: 14, display: 'flex', gap: 4 }}>
         <button
-          onClick={() => setBookmarksOpen(o => !o)}
-          title="Show bookmarks"
-          style={{ fontFamily: 'inherit', fontSize: 'inherit', letterSpacing: 'inherit', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: bookmarksOpen ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', display: 'flex', alignItems: 'center', gap: 4 }}
+          onClick={() => setDrawerTab('bookmarks')}
+          style={{
+            fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+            padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            background: drawerTab === 'bookmarks' ? 'var(--onyx-accent-dim)' : 'transparent',
+            border: `1px solid ${drawerTab === 'bookmarks' ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+            color: drawerTab === 'bookmarks' ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}
         >
-          Bookmarked {focusBookmarks.length}×
-          <span style={{ display: 'inline-flex' }}>
-            <Icon name={bookmarksOpen ? 'chevron-down' : 'chevron-right'} size={9} />
-          </span>
+          <Icon name="bookmark" size={9} />
+          Bookmarks{focusBookmarks.length > 0 ? ` (${focusBookmarks.length})` : ''}
+        </button>
+        <button
+          onClick={() => setDrawerTab('synopsis')}
+          style={{
+            fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+            padding: '4px 10px', borderRadius: 6, cursor: 'pointer',
+            background: drawerTab === 'synopsis' ? 'var(--onyx-accent-dim)' : 'transparent',
+            border: `1px solid ${drawerTab === 'synopsis' ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+            color: drawerTab === 'synopsis' ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+          }}
+        >
+          Synopsis
         </button>
       </div>
 
-      {bookmarksOpen ? (
-        <div style={{ marginTop: 14, padding: '12px 12px 4px', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--onyx-line)', borderRadius: 10, animation: 'onyx-fadein 0.18s ease-out' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <span style={{ color: 'var(--onyx-accent)', display: 'inline-flex' }}>
-              <Icon name="bookmark" size={11} />
-            </span>
-            <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Bookmarks</div>
-            <button style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-accent)', letterSpacing: '0.06em', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}>
-              <Icon name="plus" size={10} /> ADD
-            </button>
+      <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto' }}>
+        {drawerTab === 'bookmarks' ? (
+          focusBookmarks.length > 0 ? (
+            <div>
+              {focusBookmarks.map((bm, i) => (
+                <button
+                  key={i}
+                  onClick={() => { st.setPosition(bm.time); st.setScreen('player'); }}
+                  style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', background: 'none', border: 'none', borderTop: i > 0 ? '1px solid var(--onyx-line)' : 'none', width: '100%', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }}
+                >
+                  <div style={{ fontFamily: MONO, fontSize: 10.5, fontWeight: 600, color: 'var(--onyx-accent)', paddingTop: 1, flexShrink: 0 }}>{fmtTime(bm.time)}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, color: 'var(--onyx-text)', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as CSSProperties}>
+                      {bm.title}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', padding: '12px 0' }}>No bookmarks yet.</div>
+          )
+        ) : focus.media.metadata.description ? (
+          <div
+            style={{ fontFamily: SERIF, fontSize: 13.5, lineHeight: 1.55, color: 'var(--onyx-text-dim)', paddingTop: 4 }}
+            dangerouslySetInnerHTML={{ __html: focus.media.metadata.description }}
+          />
+        ) : (
+          <div style={{ fontFamily: SERIF, fontSize: 13.5, lineHeight: 1.55, color: 'var(--onyx-text-dim)', paddingTop: 4 }}>
+            No synopsis available.
           </div>
-          {focusBookmarks.map((bm, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                st.setPosition(bm.time);
-                st.setScreen('player');
-              }}
-              style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0', background: 'none', border: 'none', borderTop: i > 0 ? '1px solid var(--onyx-line)' : 'none', width: '100%', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }}
-            >
-              <div style={{ fontFamily: MONO, fontSize: 10.5, fontWeight: 600, color: 'var(--onyx-accent)', paddingTop: 1, flexShrink: 0 }}>{fmtTime(bm.time)}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: 'var(--onyx-text)', lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } as CSSProperties}>
-                  {bm.title}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      ) : focusSynopsis ? (
-        <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--onyx-line)' }}>
-          <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 8 }}>
-            Synopsis
-          </div>
-          <div style={{ fontFamily: SERIF, fontSize: 13.5, lineHeight: 1.55, color: 'var(--onyx-text-dim)' }}>
-            {focusSynopsis}
-          </div>
-        </div>
-      ) : null}
+        )}
+      </div>
 
-      <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--onyx-line)', display: 'flex', gap: 24 }}>
+      <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--onyx-line)', display: 'flex', gap: 24, overflow: 'visible' }}>
         <Stat label="Duration" value={bookDur(focus)} />
         <ChaptersStat st={st} chIdx={chIdx} chapterCount={chapterCount} chapters={chapters} />
         <SpeedStat st={st} />

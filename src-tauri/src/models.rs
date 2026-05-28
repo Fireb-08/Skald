@@ -95,6 +95,8 @@ pub struct BookMetadata {
     pub series_name: Option<String>,
     #[serde(default)]
     pub genres: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
