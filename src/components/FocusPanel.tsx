@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { OnyxState, Chapter } from '../state/onyx';
-import { openPlaybackSession, playAudio, pauseAudio, seekAudio } from '../api/abs';
+import { openPlaybackSession, playAudio, pauseAudio, seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
 import {
   SPEEDS,
   chapterAt, chapterStart, fmtTime, fmtRemaining,
@@ -188,7 +188,11 @@ function SpeedStat({ st }: { st: OnyxState }) {
           {SPEEDS.map(s => (
             <button
               key={s}
-              onClick={() => { st.setSpeed(s); setOpen(false); }}
+              onClick={() => {
+                st.setSpeed(s);
+                setOpen(false);
+                setAudioSpeed(parseFloat(s)).catch(err => console.error('[speed] failed:', err));
+              }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6,
                 background: s === st.speed ? 'var(--onyx-accent-dim)' : 'transparent',
@@ -406,7 +410,20 @@ export default function FocusPanel({ st }: FocusPanelProps) {
           {st.playing && st.currentBookId === focus.id ? 'Pause' : 'Play'}
         </button>
         <button
-          title="Bookmark this book"
+          title="Bookmark this moment"
+          onClick={async () => {
+            try {
+              const { chapter } = chapterAt(st.currentBookChapters, st.position);
+              const title = chapter?.t
+                ? `${chapter.t} — ${fmtTime(st.position)}`
+                : fmtTime(st.position);
+              await createBookmark(st.serverUrl, st.currentBookId, st.position, title);
+              const me = await getMe(st.serverUrl);
+              st.setBookmarks(me.bookmarks);
+            } catch (err) {
+              console.error('[bookmark] failed:', err);
+            }
+          }}
           style={{ width: 44, height: 44, background: 'var(--onyx-glass-strong)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-dim)', cursor: 'pointer' }}
         >
           <Icon name="bookmark" size={16} />
@@ -450,7 +467,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         </button>
       </div>
 
-      <div style={{ marginTop: 10, maxHeight: 180, overflowY: 'auto' }}>
+      <div style={{ marginTop: 10, flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {drawerTab === 'bookmarks' ? (
           focusBookmarks.length > 0 ? (
             <div>
@@ -484,7 +501,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         )}
       </div>
 
-      <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--onyx-line)', display: 'flex', gap: 24, overflow: 'visible' }}>
+      <div style={{ marginTop: 0, paddingTop: 20, borderTop: '1px solid var(--onyx-line)', display: 'flex', gap: 24, overflow: 'visible' }}>
         <Stat label="Duration" value={bookDur(focus)} />
         <ChaptersStat st={st} chIdx={chIdx} chapterCount={chapterCount} chapters={chapters} />
         <SpeedStat st={st} />

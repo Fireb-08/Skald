@@ -31,7 +31,7 @@ export default function PickItUp({ st }: PickItUpProps) {
   };
 
   return (
-    <div>
+    <div style={{ minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '0 4px 12px' }}>
         <button
           onClick={() => st.setPickItUpCollapsed(!st.pickItUpCollapsed)}
@@ -55,11 +55,11 @@ export default function PickItUp({ st }: PickItUpProps) {
         </button>
       </div>
       {!st.pickItUpCollapsed && (
-        <div style={{ display: 'flex', gap: 14 }}>
+        <div className="pickitup-scroll" style={{ display: 'flex', flexDirection: 'row', width: '100%', minWidth: 0, gap: 14, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', paddingBottom: 8 }}>
           {inProg.map(b => {
             const prog = bookProgress(b, st.mediaProgress);
             return (
-              <Glass key={b.id} translucent={st.translucent} onClick={() => openBook(b.id)} style={{ flex: 1, padding: 14, display: 'flex', gap: 14, minHeight: 110, cursor: 'pointer' }}>
+              <Glass key={b.id} translucent={st.translucent} onClick={() => openBook(b.id)} style={{ flexGrow: 0, flexShrink: 0, flexBasis: 260, padding: 14, display: 'flex', gap: 14, minHeight: 110, cursor: 'pointer' }}>
                 <Cover item={b} size={80} serverUrl={st.serverUrl} />
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{bookSeries(b)}</div>

@@ -128,6 +128,15 @@ input:focus-visible {
   background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.3);
 }
 
+.onyx-hscroll { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+.onyx-hscroll::-webkit-scrollbar { height: 4px; width: 4px; }
+.onyx-hscroll::-webkit-scrollbar-track { background: transparent; }
+.onyx-hscroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
+
+.pickitup-scroll::-webkit-scrollbar { height: 6px; }
+.pickitup-scroll::-webkit-scrollbar-track { background: transparent; }
+.pickitup-scroll::-webkit-scrollbar-thumb { background: var(--onyx-border); border-radius: 3px; }
+
 /* ─── Utility hover classes ──────────────────────────────────────────────── */
 
 .onyx-tile:hover > div:first-child {

@@ -194,6 +194,7 @@ export interface OnyxState {
   mediaProgress: MediaProgress[];
   listeningStats: ListeningStats | null;
   bookmarks: AbsBookmark[];
+  setBookmarks: (bookmarks: AbsBookmark[]) => void;
   // Playback
   screen: string;
   setScreen: (screen: string) => void;
@@ -610,7 +611,7 @@ export function useOnyxState(): OnyxState {
     password, setPassword,
     userId, setUserId,
     authToken, setAuthToken,
-    library, libraryLoading, mediaProgress, listeningStats, bookmarks,
+    library, libraryLoading, mediaProgress, listeningStats, bookmarks, setBookmarks,
     screen, setScreen,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     playing, setPlaying,
