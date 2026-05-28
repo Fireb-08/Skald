@@ -25,6 +25,14 @@ function seriesVolOf(s: string | undefined): number {
   return 0;
 }
 
+function groupMatchesFilter(books: LibraryItem[], st: OnyxState): boolean {
+  if (st.filter === 'all') return true;
+  if (st.filter === 'reading')  return books.some(b  => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return Boolean(p && p.progress > 0 && !p.isFinished); });
+  if (st.filter === 'unread')   return books.some(b  => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return !p || p.progress === 0; });
+  if (st.filter === 'finished') return books.every(b => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return p?.isFinished === true; });
+  return true;
+}
+
 export interface SeriesViewProps {
   st: OnyxState;
   inline?: boolean;
@@ -52,6 +60,10 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
       s.name.toLowerCase().includes(q) ||
       s.books.some(b => bookAuthor(b).toLowerCase().includes(q) || bookTitle(b).toLowerCase().includes(q))
     );
+  }
+
+  if (st.filter !== 'all') {
+    seriesList = seriesList.filter(s => groupMatchesFilter(s.books, st));
   }
 
   const openSeries = (name: string) => {

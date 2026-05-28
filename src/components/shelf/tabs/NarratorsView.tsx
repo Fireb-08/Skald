@@ -14,6 +14,14 @@ interface NarratorGroup {
   books: LibraryItem[];
 }
 
+function groupMatchesFilter(books: LibraryItem[], st: OnyxState): boolean {
+  if (st.filter === 'all') return true;
+  if (st.filter === 'reading')  return books.some(b  => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return Boolean(p && p.progress > 0 && !p.isFinished); });
+  if (st.filter === 'unread')   return books.some(b  => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return !p || p.progress === 0; });
+  if (st.filter === 'finished') return books.every(b => { const p = st.mediaProgress.find(x => x.libraryItemId === b.id);  return p?.isFinished === true; });
+  return true;
+}
+
 export interface NarratorsViewProps {
   st: OnyxState;
   inline?: boolean;
@@ -37,6 +45,10 @@ export default function NarratorsView({ st, inline = false }: NarratorsViewProps
       a.name.toLowerCase().includes(q) ||
       a.books.some(b => bookTitle(b).toLowerCase().includes(q))
     );
+  }
+
+  if (st.filter !== 'all') {
+    list = list.filter(a => groupMatchesFilter(a.books, st));
   }
 
   const open = (name: string) => {
