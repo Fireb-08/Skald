@@ -74,7 +74,20 @@
       "PowerShell($pid1420 = \\(netstat -ano | Select-String \"LISTENING\" | Select-String \":1420\" | ForEach-Object { \\($_ -split '\\\\s+'\\)[-1] } | Select-Object -First 1\\); if \\($pid1420\\) { Stop-Process -Id $pid1420 -Force -ErrorAction SilentlyContinue }; Get-Process -Name \"skald\" -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 1; Write-Host \"clear\")",
       "Bash(taskkill /F /IM skald.exe)",
       "Bash(taskkill /F /IM \"Skald.exe\")",
-      "PowerShell(Stop-Process -Force)"
+      "PowerShell(Stop-Process -Force)",
+      "PowerShell(Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bmp = New-Object System.Drawing.Bitmap\\($screen.Width, $screen.Height\\); $g = [System.Drawing.Graphics]::FromImage\\($bmp\\); $g.CopyFromScreen\\($screen.Location, [System.Drawing.Point]::Empty, $screen.Size\\); $path = \"C:\\\\Users\\\\fireb\\\\AppData\\\\Local\\\\Temp\\\\skald_layout.png\"; $bmp.Save\\($path\\); $g.Dispose\\(\\); $bmp.Dispose\\(\\); Write-Output \"Saved to $path\")",
+      "PowerShell(Get-Process -Name \"skald\",\"node\",\"vite\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process -Name \"skald\",\"node\" -ErrorAction SilentlyContinue)",
+      "Bash(curl -s \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/objects/mediaTypes/Book.js\")",
+      "Bash(python3 -c \"import sys,json,base64; print\\(base64.b64decode\\(json.load\\(sys.stdin\\)['content']\\).decode\\(\\)\\)\")",
+      "Bash(python3 -c \"import sys,json,base64; d=json.load\\(sys.stdin\\); print\\(base64.b64decode\\(d['content']\\).decode\\(\\)\\)\")",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/objects/mediaTypes/Book.js\"; [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($r.content\\)\\) | Select-String -Pattern \"toJSONMinified|chapters\" -Context 0,3 | Select-Object -First 60)",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/models/Book.js\"; $content = [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($r.content -replace \"`n\",\"\"\\)\\); $content | Select-String -Pattern \"chapter\" -Context 2,2 | Select-Object -First 30)",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/models/Book.js\"; $b64 = $r.content -replace \"`n\",\"\" -replace \"`r\",\"\"; $content = [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($b64\\)\\); $content | Select-String -Pattern \"chapter\" -Context 2,4 | Select-Object -First 20 | Format-List)",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/controllers/LibraryItemController.js\"; $b64 = $r.content -replace \"`n\",\"\" -replace \"`r\",\"\"; $content = [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($b64\\)\\); $lines = $content -split \"`n\"; for \\($i=0; $i -lt $lines.Count; $i++\\) { if \\($lines[$i] -match \"getLibraryItem|toOldJSON|toOldJSONExpanded|chapters\"\\) { Write-Output \"$\\($i+1\\): $\\($lines[$i]\\)\" } })",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/advplyr/audiobookshelf/contents/server/models/Book.js\"; $b64 = $r.content -replace \"`n\",\"\" -replace \"`r\",\"\"; $content = [System.Text.Encoding]::UTF8.GetString\\([System.Convert]::FromBase64String\\($b64\\)\\); $lines = $content -split \"`n\"; $idx = 0; foreach \\($l in $lines\\) { $idx++; if \\($l -match \"getTracklist|tracklist|contentUrl|startOffset|AudioTrack\"\\) { Write-Output \"${idx}: $l\" } })",
+      "PowerShell(Get-Process -Name \"skald\",\"node\" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; \\(Get-Item \"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\\\\src-tauri\\\\src\\\\models.rs\"\\).LastWriteTime; \\(Get-Item \"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\\\\src-tauri\\\\target\\\\debug\\\\skald.exe\" -ErrorAction SilentlyContinue\\).LastWriteTime)"
     ]
   }
 }

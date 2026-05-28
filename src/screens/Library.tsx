@@ -1,6 +1,7 @@
 import type { OnyxState } from '../state/onyx';
 import FocusPanel from '../components/FocusPanel';
 import PickItUp from '../components/PickItUp';
+import TopNav from '../components/chrome/TopNav';
 import ShelfHeader from '../components/shelf/ShelfHeader';
 import LibraryShelf from '../components/shelf/LibraryShelf';
 import { SeriesView } from '../components/shelf/tabs';
@@ -18,7 +19,8 @@ export default function Library({ st }: LibraryProps) {
       <FocusPanel st={st} />
 
       {/* RIGHT — shelf column */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+        <TopNav st={st} />
         <PickItUp st={st} />
         <ShelfHeader st={st} />
 

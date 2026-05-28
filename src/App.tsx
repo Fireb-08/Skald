@@ -1,7 +1,6 @@
 import { useOnyxState } from './state/onyx';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
-import TopNav from './components/chrome/TopNav';
 import Home from './screens/Home';
 import Library from './screens/Library';
 import Player from './screens/Player';
@@ -10,7 +9,6 @@ import Settings from './screens/Settings';
 export default function App() {
   const st = useOnyxState();
   const isDark = st.theme !== 'light';
-  const showNav = st.screen === 'library' || st.screen === 'home';
   const z = st.scale / 100;
 
   return (
@@ -27,12 +25,12 @@ export default function App() {
       <OnyxWash isDark={isDark} />
       <Titlebar isDark={isDark} />
       <div style={{
-        flex: 1,
+        position: 'absolute',
+        top: 44,
+        left: 0,
+        right: 0,
+        bottom: 0,
         display: 'flex',
-        flexDirection: 'column',
-        paddingTop: 44,
-        position: 'relative',
-        zIndex: 1,
         minHeight: 0,
       }}>
         {st.libraryLoading ? (
@@ -41,7 +39,6 @@ export default function App() {
           </div>
         ) : (
           <>
-            {showNav && <TopNav st={st} />}
             {st.screen === 'home'     && <Home     st={st} />}
             {st.screen === 'library'  && <Library  st={st} />}
             {st.screen === 'player'   && <Player   st={st} />}

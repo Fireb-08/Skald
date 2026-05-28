@@ -18,7 +18,7 @@ export default function TileMini({ book, st }: TileMiniProps) {
         cursor: 'pointer', fontFamily: 'inherit', color: 'inherit', textAlign: 'left',
       }}
     >
-      <Cover item={book} size={56} />
+      <Cover item={book} size={56} serverUrl={st.serverUrl} />
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ fontSize: 12.5, fontWeight: 500, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookTitle(book)}</div>
         <div style={{ fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 2 }}>{bookAuthor(book)}</div>

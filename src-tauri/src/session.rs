@@ -38,6 +38,7 @@ impl SessionManager {
         item_id: &str,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
+        eprintln!("[start_session] called with item_id: {}", item_id);
         // Stop any tasks from a previous session.
         self.active.store(false, Ordering::Relaxed);
 
@@ -46,6 +47,7 @@ impl SessionManager {
         {
             let mut p = self.player.lock().unwrap();
             if p.is_none() {
+                eprintln!("[start_session] storing player into Arc");
                 *p = Some(AudioPlayer::new()?);
             }
         }

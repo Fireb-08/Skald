@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use crate::{api::AbsClient, auth, models, session::SessionManager};
+use crate::{api::AbsClient, auth, cover_cache, models, session::SessionManager};
 
 #[tauri::command]
 pub async fn login(
@@ -32,23 +32,39 @@ pub async fn open_playback_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<String, String> {
+    eprintln!("[open_playback_session] called with item_id: {}", item_id);
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let mut mgr = state.lock().await;
-    mgr.client = AbsClient::new(server_url).with_token(token);
-    mgr.start_session(&item_id, app).await?;
-    mgr.session_id.clone().ok_or_else(|| "Session ID not set after start".to_string())
+    // Scope the SessionManager lock so it is released before this command
+    // returns — play_audio acquires the same lock and must not see it held.
+    let session_id = {
+        let mut mgr = state.lock().await;
+        mgr.client = AbsClient::new(server_url).with_token(token);
+        let result = mgr.start_session(&item_id, app).await;
+        eprintln!("[open_playback_session] start_session returned: {:?}", result);
+        result?;
+        mgr.session_id.clone().ok_or_else(|| "Session ID not set after start".to_string())?
+    };
+    eprintln!("[open_playback_session] completed, session_id: {}", session_id);
+    Ok(session_id)
 }
 
 #[tauri::command]
 pub async fn play_audio(
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
+    eprintln!("[play_audio] called");
     let player_arc = Arc::clone(&state.lock().await.player);
     let guard = player_arc.lock().unwrap();
     match guard.as_ref() {
-        Some(p) => p.play(),
-        None => Err("No audio player initialized".to_string()),
+        Some(p) => {
+            eprintln!("[play_audio] player found, calling play");
+            p.play()
+        }
+        None => {
+            eprintln!("[play_audio] player is None");
+            Err("No audio player initialized".to_string())
+        }
     }
 }
 
@@ -200,6 +216,24 @@ pub async fn sync_session(
         .with_token(token)
         .sync_session(&session_id, current_time, time_listened)
         .await
+}
+
+#[tauri::command]
+pub async fn get_cover(
+    server_url: String,
+    item_id: String,
+) -> Result<Vec<u8>, String> {
+    if cover_cache::is_cached(&item_id) {
+        return cover_cache::load_cover(&item_id);
+    }
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let bytes = AbsClient::new(server_url)
+        .with_token(token)
+        .fetch_cover(&item_id)
+        .await?;
+    cover_cache::save_cover(&item_id, &bytes)?;
+    Ok(bytes)
 }
 
 #[tauri::command]

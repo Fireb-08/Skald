@@ -62,7 +62,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 22 }}>
           {seriesList.map(s => (
             <button key={s.name} onClick={() => openSeries(s.name)} className="onyx-poster" style={posterTile()}>
-              <CoverFan books={s.books.slice(0, 5)} />
+              <CoverFan books={s.books.slice(0, 5)} serverUrl={st.serverUrl} />
               <div style={{ padding: '18px 16px 16px', textAlign: 'center' }}>
                 <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--onyx-text)', letterSpacing: '-0.01em' }}>{s.name}</div>
                 <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)', marginTop: 6, fontStyle: 'italic' }}>{bookAuthor(s.books[0])}</div>
@@ -86,7 +86,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
           rows={seriesList.map(s => ({
             key: s.name,
             onClick: () => openSeries(s.name),
-            leading: <Cover item={s.books[0]} size={28} />,
+            leading: <Cover item={s.books[0]} size={28} serverUrl={st.serverUrl} />,
             sort: {
               name:   s.name,
               author: bookAuthor(s.books[0]),

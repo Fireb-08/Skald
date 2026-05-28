@@ -40,7 +40,7 @@ export interface Chapter {
   title: string;
 }
 
-export interface AudioTrack {
+export interface AudioFile {
   index: number;
   startOffset: number;
   duration: number;
@@ -48,10 +48,14 @@ export interface AudioTrack {
   contentUrl: string;
 }
 
+// Keep AudioTrack as an alias — used by PlaySession.audioTracks.
+export type AudioTrack = AudioFile;
+
 export interface BookMedia {
   metadata: BookMetadata;
   chapters: Chapter[];
-  tracks: AudioTrack[];
+  audioFiles: AudioFile[];
+  tags: string[];
   duration: number;
 }
 
@@ -191,6 +195,10 @@ export function syncSession(
   timeListened: number,
 ): Promise<void> {
   return invoke('sync_session', { serverUrl, sessionId, currentTime, timeListened });
+}
+
+export function getCover(serverUrl: string, itemId: string): Promise<number[]> {
+  return invoke('get_cover', { serverUrl, itemId });
 }
 
 export function closeSession(

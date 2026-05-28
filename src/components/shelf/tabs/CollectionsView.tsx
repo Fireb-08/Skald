@@ -16,11 +16,7 @@ interface Collection {
   bookIds: string[];
 }
 
-const SEED_COLLECTIONS: Collection[] = [
-  { name: 'Sword & Sorcery',    subtitle: 'High fantasy with knightly leads',         bookIds: [] },
-  { name: 'LitRPG Marathon',    subtitle: 'Long-running progression epics',            bookIds: [] },
-  { name: 'Listening Comfort',  subtitle: 'Re-listen anytime',                         bookIds: [] },
-];
+const SEED_COLLECTIONS: Collection[] = [];
 
 export interface CollectionsViewProps {
   st: OnyxState;
@@ -74,7 +70,7 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
             return (
               <button key={c.name} onClick={() => openCollection(c)} className="onyx-poster" style={posterTile()}>
                 {books.length > 0 ? (
-                  <CoverMosaic books={books} />
+                  <CoverMosaic books={books} serverUrl={st.serverUrl} />
                 ) : (
                   <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontStyle: 'italic', fontSize: 14, background: 'linear-gradient(180deg, rgba(212,166,74,0.06), rgba(0,0,0,0.12))', borderBottom: '1px solid var(--onyx-line)' }}>
                     Empty collection
@@ -121,7 +117,7 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
                 key: c.name,
                 onClick: () => openCollection(c),
                 leading: books[0]
-                  ? <Cover item={books[0]} size={28} />
+                  ? <Cover item={books[0]} size={28} serverUrl={st.serverUrl} />
                   : <div style={{ width: 28, height: 28, borderRadius: 4, background: 'var(--onyx-glass)', border: '1px dashed var(--onyx-glass-edge)' }} />,
                 sort: { name: c.name, subtitle: c.subtitle, titles: books.length },
                 cells: {
