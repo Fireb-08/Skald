@@ -23,25 +23,8 @@ export default function BrowseView({
 }: BrowseViewProps) {
   if (inline) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '8px 4px 14px', gap: 16 }}>
-          <div style={{ flexShrink: 0, minWidth: 0 }}>
-            {subtitle && (
-              <div style={{ fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{subtitle}</div>
-            )}
-          </div>
-          {shelfTabsSlot && (
-            <div style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }}>
-              {shelfTabsSlot}
-            </div>
-          )}
-          <div style={{ flexShrink: 0 }}>
-            {showModeToggle && <ViewModeToggle st={st} />}
-          </div>
-        </div>
-        <div style={{ flex: 1, overflow: 'auto', minHeight: 0, paddingRight: 4 }}>
-          {children}
-        </div>
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0, paddingRight: 4 }}>
+        {children}
       </div>
     );
   }
