@@ -52,17 +52,17 @@ The `design-handoff/` folder holds the original React/JSX prototype. **This is t
 
 | File | Defines |
 |---|---|
-| `design-handoff/library.jsx` | Library screen, Focus card, popovers, shelf header, ShelfList |
-| `design-handoff/player.jsx` | Player, waveform, transport, sleep timer, bookmark-this-moment |
-| `design-handoff/browse.jsx` | Series, Authors, Narrators, Collections views + Home dashboard |
-| `design-handoff/settings.jsx` | All settings sections |
-| `design-handoff/chrome.jsx` | OnyxWash, Titlebar, Glass, TopNav, VolumeControl, DeviceSelector |
-| `design-handoff/state.jsx` | Theme palettes (`ONYX_DARK_BASE`, `ONYX_FOLIO_BASE`), tokens, mock data |
-| `design-handoff/books.jsx` | Cover placeholder system (six typographic templates) |
-| `design-handoff/icons.jsx` | Icon set + Waveform component |
+| `design-handoff/source/app/library.jsx` | Library screen, Focus card, popovers, shelf header, ShelfList |
+| `design-handoff/source/app/player.jsx` | Player, waveform, transport, sleep timer, bookmark-this-moment |
+| `design-handoff/source/app/browse.jsx` | Series, Authors, Narrators, Collections views + Home dashboard |
+| `design-handoff/source/app/settings.jsx` | All settings sections |
+| `design-handoff/source/app/chrome.jsx` | OnyxWash, Titlebar, Glass, TopNav, VolumeControl, DeviceSelector |
+| `design-handoff/source/app/state.jsx` | Theme palettes (`ONYX_DARK_BASE`, `ONYX_FOLIO_BASE`), tokens, mock data |
+| `design-handoff/source/app/icons.jsx` | Icon set + Waveform component |
+| `design-handoff/source/books.jsx` | Cover placeholder system (six typographic templates) |
 | `design-handoff/README.md` | Token tables, spacing, copy, interaction descriptions |
 
-Open `design-handoff/Skald_App.html` in a browser to see the prototype run live. Confirm visual fidelity against it after each UI step. **Do not modify files inside `design-handoff/`; it is read-only reference material.**
+Open `design-handoff/source/Skald_App.html` in a browser to see the prototype run live. Confirm visual fidelity against it after each UI step. **Do not modify files inside `design-handoff/`; it is read-only reference material.**
 
 ---
 
