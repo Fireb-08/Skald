@@ -53,7 +53,7 @@ export default function NarratorsView({ st, inline = false }: NarratorsViewProps
             const genres = [...new Set(a.books.map(b => bookGenre(b)).filter(Boolean))];
             return (
               <button key={a.name} onClick={() => open(a.name)} className="onyx-poster" style={posterTile()}>
-                <CoverMosaic books={a.books} />
+                <CoverMosaic books={a.books} serverUrl={st.serverUrl} />
                 <div style={{ padding: '18px 16px 16px', textAlign: 'center' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <Icon name="headphones" size={13} color="var(--onyx-text-mute)" />

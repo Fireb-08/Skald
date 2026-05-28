@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, saveToken, fetchListeningStats, getMe } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe } from '../api/abs';
 import {
   applyTheme,
   ONYX_DARK_BASE,
@@ -97,6 +97,14 @@ export function bookSynopsis(_b: LibraryItem): string | undefined {
   return undefined;
 }
 
+export function bookChapters(b: LibraryItem): Chapter[] {
+  return (b.media.chapters || []).map((c, i) => ({
+    n: i + 1,
+    t: c.title,
+    dur: c.end - c.start,
+  }));
+}
+
 const PALETTES: [string, string, string][] = [
   ['#0a0a0e', '#2a2a36', '#c9a35a'],
   ['#1a1612', '#3a2f24', '#d4a14a'],
@@ -170,6 +178,8 @@ export interface OnyxState {
   setServerUrl: (url: string) => void;
   sessionId: string;
   setSessionId: (id: string) => void;
+  sessionReady: boolean;
+  setSessionReady: (ready: boolean) => void;
   username: string;
   setUsername: (u: string) => void;
   password: string;
@@ -190,6 +200,7 @@ export interface OnyxState {
   currentBook: LibraryItem | undefined;
   currentBookId: string;
   setCurrentBookId: (id: string) => void;
+  currentBookChapters: Chapter[];
   playing: boolean;
   setPlaying: Dispatch<SetStateAction<boolean>>;
   position: number;
@@ -267,6 +278,10 @@ export function fmtRemaining(secs: number): string {
 }
 
 export function chapterAt(chapters: Chapter[], pos: number): ChapterPosition {
+  if (chapters.length === 0) {
+    const stub: Chapter = { n: 1, t: '', dur: 0 };
+    return { idx: 0, local: 0, chapter: stub };
+  }
   let acc = 0;
   for (let i = 0; i < chapters.length; i++) {
     if (pos < acc + chapters[i].dur) {
@@ -410,11 +425,24 @@ export function useOnyxState(): OnyxState {
   // ── Playback ─────────────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('library');
   const [currentBookId, setCurrentBookId] = useState('');
+  const [currentBookChapters, setCurrentBookChapters] = useState<Chapter[]>([]);
+
+  useEffect(() => {
+    if (!serverUrl || !authToken || !currentBookId) { setCurrentBookChapters([]); return; }
+    let cancelled = false;
+    fetchItem(serverUrl, currentBookId)
+      .then(item => { if (!cancelled) setCurrentBookChapters(bookChapters(item)); })
+      .catch(e => console.error('[chapters] fetchItem failed:', e));
+    return () => { cancelled = true; };
+  }, [currentBookId, serverUrl, authToken]);
+
+  const [sessionReady, setSessionReady] = useState(false);
+
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [volume, setVolume] = useState(0.68);
   const [muted, setMuted] = useState(false);
-  const [speed, setSpeed] = useState('1.25');
+  const [speed, setSpeed] = useState('1.0');
   const [device, setDevice] = useState('sennheiser');
   const [deviceOpen, setDeviceOpen] = useState(false);
 
@@ -577,13 +605,14 @@ export function useOnyxState(): OnyxState {
   return {
     serverUrl, setServerUrl,
     sessionId, setSessionId,
+    sessionReady, setSessionReady,
     username, setUsername,
     password, setPassword,
     userId, setUserId,
     authToken, setAuthToken,
     library, libraryLoading, mediaProgress, listeningStats, bookmarks,
     screen, setScreen,
-    currentBook, currentBookId, setCurrentBookId,
+    currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     playing, setPlaying,
     position, setPosition, bookSecs,
     volume, setVolume, muted, setMuted,

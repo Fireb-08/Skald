@@ -6,7 +6,7 @@ import {
 import type { CSSProperties } from 'react';
 import type { OnyxState, Bookmark } from '../state/onyx';
 import {
-  CHAPTERS, BOOKMARKS, SPEEDS, chapterAt, chapterStart, fmtTime,
+  BOOKMARKS, SPEEDS, chapterAt, chapterStart, fmtTime,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
@@ -54,7 +54,8 @@ export default function Player({ st }: PlayerProps) {
   const b = st.currentBook;
   if (!b) return null;
 
-  const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(CHAPTERS, st.position);
+  const chapters = st.currentBookChapters;
+  const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
 
   const [userBookmarks, setUserBookmarks] = useState<SessionBookmark[]>([]);
   const addBookmarkHere = () => {
@@ -129,7 +130,7 @@ export default function Player({ st }: PlayerProps) {
   const onScrub = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
-    const chStart = chapterStart(CHAPTERS, chIdx);
+    const chStart = chapterStart(chapters, chIdx);
     seekAudio(chStart + frac * curCh.dur).catch(console.error);
   };
 
@@ -155,7 +156,7 @@ export default function Player({ st }: PlayerProps) {
         <div style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
           <div style={{ position: 'absolute', inset: '5% 5% 0 5%', borderRadius: 24, background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.28), transparent 70%)', filter: 'blur(60px)', zIndex: 0 }} />
           <div style={{ position: 'relative', zIndex: 1 }}>
-            <Cover item={b} size={420} />
+            <Cover item={b} size={420} serverUrl={st.serverUrl} />
           </div>
           <div style={{ marginTop: 32, textAlign: 'center', position: 'relative', zIndex: 1 }}>
             <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 8 }}>{bSeries}</div>
@@ -264,13 +265,13 @@ export default function Player({ st }: PlayerProps) {
             <Glass translucent={st.translucent} style={{ flex: 1.2, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{CHAPTERS.length} · {bookDur(b)} total</div>
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{chapters.length} · {bookDur(b)} total</div>
               </div>
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
-                {CHAPTERS.map((c, i) => {
+                {chapters.map((c, i) => {
                   const state = i < chIdx ? 'done' : i === chIdx ? 'playing' : 'next';
                   return (
-                    <button key={c.n} onClick={() => st.setPosition(chapterStart(CHAPTERS, i))} style={{
+                    <button key={c.n} onClick={() => st.setPosition(chapterStart(chapters, i))} style={{
                       display: 'flex', alignItems: 'center', padding: '8px 12px', borderRadius: 8, gap: 12,
                       background: state === 'playing' ? 'var(--onyx-accent-dim)' : 'transparent',
                       border: `1px solid ${state === 'playing' ? 'var(--onyx-accent-edge)' : 'transparent'}`,
@@ -298,7 +299,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {allBookmarks.map((bm, i) => (
-                  <button key={'id' in bm ? bm.id : i} onClick={() => st.setPosition(chapterStart(CHAPTERS, bm.ch - 1) + bm.secs)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < allBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
+                  <button key={'id' in bm ? bm.id : i} onClick={() => st.setPosition(chapterStart(chapters, bm.ch - 1) + bm.secs)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < allBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                       <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)' }}>{bm.ts}</div>
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Ch. {bm.ch} · {bm.date}</div>

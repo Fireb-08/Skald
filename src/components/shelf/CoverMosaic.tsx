@@ -3,9 +3,10 @@ import type { LibraryItem } from '../../state/onyx';
 
 export interface CoverMosaicProps {
   books: LibraryItem[];
+  serverUrl?: string;
 }
 
-export default function CoverMosaic({ books }: CoverMosaicProps) {
+export default function CoverMosaic({ books, serverUrl }: CoverMosaicProps) {
   const slots = books.slice(0, 4);
   return (
     <div style={{
@@ -21,7 +22,7 @@ export default function CoverMosaic({ books }: CoverMosaicProps) {
       {slots.map(b => (
         <div key={b.id} style={{ position: 'relative', overflow: 'hidden', zIndex: 1 }}>
           <div style={{ position: 'absolute', inset: 0 }}>
-            <CoverFill book={b} />
+            <CoverFill book={b} serverUrl={serverUrl} />
           </div>
         </div>
       ))}

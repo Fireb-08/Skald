@@ -3,9 +3,10 @@ import type { LibraryItem } from '../../state/onyx';
 
 export interface CoverFanProps {
   books: LibraryItem[];
+  serverUrl?: string;
 }
 
-export default function CoverFan({ books }: CoverFanProps) {
+export default function CoverFan({ books, serverUrl }: CoverFanProps) {
   const lead = books[0];
   const back = books.slice(1, 5);
   const leadW = 200;
@@ -37,12 +38,12 @@ export default function CoverFan({ books }: CoverFanProps) {
             opacity: 1 - Math.abs(slot) * 0.15,
             filter: 'brightness(0.7) saturate(0.85)',
           }}>
-            <Cover item={b} size={backW} />
+            <Cover item={b} size={backW} serverUrl={serverUrl} />
           </div>
         );
       })}
       <div style={{ position: 'relative', zIndex: 5, filter: 'drop-shadow(0 16px 36px rgba(0,0,0,0.55))' }}>
-        <Cover item={lead} size={leadW} />
+        <Cover item={lead} size={leadW} serverUrl={serverUrl} />
       </div>
     </div>
   );

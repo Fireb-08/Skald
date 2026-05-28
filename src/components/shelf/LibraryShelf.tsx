@@ -109,7 +109,7 @@ function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxStat
             }}
           >
             <div style={{ position: 'relative' }}>
-              <Cover item={b} size={40} />
+              <Cover item={b} size={40} serverUrl={st.serverUrl} />
               {st.showProgressOverlay && prog > 0 && (
                 <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 2, background: 'rgba(0,0,0,0.4)' }}>
                   <div style={{ width: `${prog * 100}%`, height: '100%', background: 'var(--onyx-accent)' }} />
@@ -227,7 +227,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
                   filter: b.id === st.currentBookId ? 'drop-shadow(0 12px 24px rgba(212,166,74,0.35))' : 'none',
                   transition: 'transform 0.15s, filter 0.15s',
                 }}>
-                  <Cover item={b} size={coverW} />
+                  <Cover item={b} size={coverW} serverUrl={st.serverUrl} />
                   {b.id === st.currentBookId && (
                     <div style={{ position: 'absolute', inset: 0, border: '2px solid var(--onyx-accent)', borderRadius: 4, pointerEvents: 'none' }} />
                   )}

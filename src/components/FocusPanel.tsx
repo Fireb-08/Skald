@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { OnyxState } from '../state/onyx';
+import type { OnyxState, Chapter } from '../state/onyx';
+import { openPlaybackSession, playAudio, pauseAudio } from '../api/abs';
 import {
-  CHAPTERS, SPEEDS,
+  SPEEDS,
   chapterAt, chapterStart, fmtTime, fmtRemaining,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
   bookProgress, bookCurrentTime, bookSynopsis,
@@ -35,7 +36,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ChaptersStat({ st, chIdx }: { st: OnyxState; chIdx: number }) {
+function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; chIdx: number; chapterCount: number; chapters: Chapter[] }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -56,7 +57,7 @@ function ChaptersStat({ st, chIdx }: { st: OnyxState; chIdx: number }) {
   }, [open]);
 
   const jump = (i: number) => {
-    st.setPosition(chapterStart(CHAPTERS, i));
+    st.setPosition(chapterStart(chapters, i));
     setOpen(false);
     st.setScreen('player');
   };
@@ -77,7 +78,7 @@ function ChaptersStat({ st, chIdx }: { st: OnyxState; chIdx: number }) {
         <div>
           <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Chapters</div>
           <div style={{ marginTop: 3, fontSize: 16, fontWeight: 500, color: open ? 'var(--onyx-accent)' : 'var(--onyx-text)' }}>
-            {CHAPTERS.length}
+            {chapterCount}
           </div>
         </div>
         <span style={{ color: 'var(--onyx-text-mute)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s', alignSelf: 'center', marginTop: 8, display: 'inline-flex' }}>
@@ -95,10 +96,10 @@ function ChaptersStat({ st, chIdx }: { st: OnyxState; chIdx: number }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '6px 8px 4px' }}>
             <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Jump to chapter</div>
-            <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{CHAPTERS.length} TOTAL</div>
+            <div style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{chapterCount} TOTAL</div>
           </div>
           <div ref={listRef} style={{ overflow: 'auto', flex: 1, minHeight: 0 }}>
-            {CHAPTERS.map((c, i) => {
+            {chapters.map((c, i) => {
               const chState = i < chIdx ? 'done' : i === chIdx ? 'playing' : 'next';
               return (
                 <button
@@ -258,7 +259,9 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   const remaining = st.currentBookId === focus.id
     ? totalSecs - st.position
     : totalSecs * (1 - bookProgress(focus, st.mediaProgress));
-  const { idx: chIdx } = chapterAt(CHAPTERS, st.position);
+  const chapters = st.currentBookChapters;
+  const { idx: chIdx } = chapterAt(chapters, st.position);
+  const chapterCount = chapters.length;
   const seriesLabel = seriesNameOf(bookSeries(focus));
 
   const toggleContext = (kind: CtxKind, value: string) => {
@@ -281,6 +284,24 @@ export default function FocusPanel({ st }: FocusPanelProps) {
     st.setScreen('player');
   };
 
+  const handleContinue = async () => {
+    try {
+      if (!st.sessionReady || focus.id !== st.currentBookId) {
+        const sessionId = await openPlaybackSession(st.serverUrl, focus.id);
+        st.setCurrentBookId(focus.id);
+        st.setSessionId(sessionId);
+        st.setSessionReady(true);
+        await playAudio();
+      } else if (st.playing) {
+        await pauseAudio();
+      } else {
+        await playAudio();
+      }
+    } catch (err) {
+      console.error('[handleContinue] failed:', err);
+    }
+  };
+
   if (st.focusCollapsed) {
     return (
       <Glass
@@ -289,7 +310,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
       >
         <CollapseHandle collapsed onToggle={() => st.setFocusCollapsed(false)} />
         <div onClick={() => openBook(focus.id)} style={{ cursor: 'pointer' }}>
-          <Cover item={focus} size={48} />
+          <Cover item={focus} size={48} serverUrl={st.serverUrl} />
         </div>
         <button
           onClick={() => { st.setPlaying(p => !p); openBook(focus.id); }}
@@ -324,7 +345,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
       </div>
 
       <div onClick={() => openBook(focus.id)} style={{ cursor: 'pointer' }}>
-        <Cover item={focus} size={300} />
+        <Cover item={focus} size={300} serverUrl={st.serverUrl} />
       </div>
 
       {focusSeries && (
@@ -379,11 +400,11 @@ export default function FocusPanel({ st }: FocusPanelProps) {
 
       <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
         <button
-          onClick={() => { st.setPlaying(p => !p); openBook(focus.id); }}
+          onClick={handleContinue}
           style={{ flex: 1, height: 44, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', border: 'none', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}
         >
           <Icon name={st.playing && st.currentBookId === focus.id ? 'pause' : 'play'} size={14} />
-          {st.playing && st.currentBookId === focus.id ? 'Pause' : 'Continue'} · {fmtRemaining(remaining)}
+          {st.playing && st.currentBookId === focus.id ? 'Pause' : 'Play'}
         </button>
         <button
           title="Bookmark this book"
@@ -398,7 +419,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
       </div>
 
       <div style={{ marginTop: 6, display: 'flex', justifyContent: 'space-between', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>
-        <span>{Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} / {CHAPTERS.length}</span>
+        <span>{Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} / {chapterCount}</span>
         <button
           onClick={() => setBookmarksOpen(o => !o)}
           title="Show bookmarks"
@@ -453,7 +474,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
 
       <div style={{ marginTop: 'auto', paddingTop: 20, borderTop: '1px solid var(--onyx-line)', display: 'flex', gap: 24 }}>
         <Stat label="Duration" value={bookDur(focus)} />
-        <ChaptersStat st={st} chIdx={chIdx} />
+        <ChaptersStat st={st} chIdx={chIdx} chapterCount={chapterCount} chapters={chapters} />
         <SpeedStat st={st} />
       </div>
     </Glass>

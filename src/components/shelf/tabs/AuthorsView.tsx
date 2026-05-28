@@ -52,7 +52,7 @@ export default function AuthorsView({ st, inline = false }: AuthorsViewProps) {
             const genres = [...new Set(a.books.map(b => bookGenre(b)).filter(Boolean))];
             return (
               <button key={a.name} onClick={() => open(a.name)} className="onyx-poster" style={posterTile()}>
-                <CoverMosaic books={a.books} />
+                <CoverMosaic books={a.books} serverUrl={st.serverUrl} />
                 <div style={{ padding: '18px 16px 16px', textAlign: 'center' }}>
                   <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, lineHeight: 1.1, letterSpacing: '-0.01em' }}>{a.name}</div>
                   <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)', marginTop: 6, fontStyle: 'italic' }}>{genres.join(' · ') || '—'}</div>

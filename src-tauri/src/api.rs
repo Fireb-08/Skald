@@ -257,6 +257,26 @@ impl AbsClient {
         resp.json().await.map_err(|e| e.to_string())
     }
 
+    /// GET /api/items/{id}/cover — returns raw image bytes.
+    pub async fn fetch_cover(&self, item_id: &str) -> Result<Vec<u8>, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/items/{item_id}/cover", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("fetch_cover failed: HTTP {}", resp.status()));
+        }
+
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| e.to_string())
+    }
+
     /// POST /api/session/{id}/close  (confirmed against ApiRouter.js)
     pub async fn close_session(
         &self,

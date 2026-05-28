@@ -1,5 +1,15 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// Treat a JSON `null` the same as a missing key: use T::default().
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
 
 /// Stored server connection — url and auth token.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,10 +54,15 @@ pub struct LibraryItem {
 #[serde(rename_all = "camelCase")]
 pub struct BookMedia {
     pub metadata: BookMetadata,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub chapters: Vec<Chapter>,
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub audio_files: Vec<Value>,
     #[serde(default)]
-    pub tracks: Vec<AudioTrack>,
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub ebook_file: Option<Value>,
+    #[serde(default)]
     pub duration: f64,
 }
 
@@ -93,7 +108,7 @@ pub struct Chapter {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct AudioTrack {
+pub struct AudioFile {
     pub index: i64,
     pub start_offset: f64,
     pub duration: f64,
@@ -166,5 +181,5 @@ pub struct PlaySession {
     pub id: String,
     pub current_time: f64,
     #[serde(default)]
-    pub audio_tracks: Vec<AudioTrack>,
+    pub audio_tracks: Vec<AudioFile>,
 }

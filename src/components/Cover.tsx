@@ -1,6 +1,7 @@
-import type { CSSProperties } from 'react';
+import { useState, useEffect, type CSSProperties } from 'react';
 import type { LibraryItem } from '../state/onyx';
 import { bookPalette, bookTpl, bookTitle, bookAuthor, bookSeries } from '../state/onyx';
+import { getCover } from '../api/abs';
 
 export interface CoverProps {
   item: LibraryItem;
@@ -9,9 +10,25 @@ export interface CoverProps {
   className?: string;
   style?: CSSProperties;
   onClick?: () => void;
+  serverUrl?: string;
 }
 
-export default function Cover({ item, size = 180, scale = 1, className, style, onClick }: CoverProps) {
+export default function Cover({ item, size = 180, scale = 1, className, style, onClick, serverUrl }: CoverProps) {
+  const [coverSrc, setCoverSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    let cancelled = false;
+    getCover(serverUrl, item.id)
+      .then(bytes => {
+        if (cancelled) return;
+        const binary = new Uint8Array(bytes).reduce((s, b) => s + String.fromCharCode(b), '');
+        setCoverSrc(`data:image/jpeg;base64,${btoa(binary)}`);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [serverUrl, item.id]);
+
   const [bg, mid, accent] = bookPalette(item);
   const tpl = bookTpl(item);
   const title = bookTitle(item);
@@ -33,6 +50,14 @@ export default function Cover({ item, size = 180, scale = 1, className, style, o
   };
   const titleSize = Math.max(11, size * 0.095);
   const authorSize = Math.max(8, size * 0.052);
+
+  if (coverSrc) {
+    return (
+      <div style={base} className={className} onClick={onClick}>
+        <img src={coverSrc} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
+      </div>
+    );
+  }
 
   if (tpl === 'split') {
     return (

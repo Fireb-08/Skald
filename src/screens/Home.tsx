@@ -1,6 +1,6 @@
 import type { OnyxState } from '../state/onyx';
 import {
-  CHAPTERS, chapterAt, fmtRemaining,
+  chapterAt, fmtRemaining,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress, bookCurrentTime,
 } from '../state/onyx';
 import Cover from '../components/Cover';
@@ -24,7 +24,8 @@ export default function Home({ st }: HomeProps) {
 
   const focusProgress = st.position / (st.bookSecs || 1);
   const remaining     = st.bookSecs - st.position;
-  const { idx: chIdx } = chapterAt(CHAPTERS, st.position);
+  const chapters = st.currentBookChapters;
+  const { idx: chIdx } = chapterAt(chapters, st.position);
 
   const openBook = (id: string) => {
     st.setCurrentBookId(id);
@@ -51,7 +52,7 @@ export default function Home({ st }: HomeProps) {
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <div style={{ position: 'absolute', inset: -12, borderRadius: 16, background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.2), transparent 70%)', filter: 'blur(40px)', zIndex: 0 }} />
           <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => openBook(focus.id)}>
-            <Cover item={focus} size={170} />
+            <Cover item={focus} size={170} serverUrl={st.serverUrl} />
           </div>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -63,7 +64,7 @@ export default function Home({ st }: HomeProps) {
             <div style={{ width: `${focusProgress * 100}%`, height: '100%', background: 'var(--onyx-accent)' }} />
           </div>
           <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>
-            {Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} of {CHAPTERS.length} · {fmtRemaining(remaining)} remaining
+            {Math.round(focusProgress * 100)}% · Ch. {chIdx + 1} of {chapters.length} · {fmtRemaining(remaining)} remaining
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
             <button
@@ -96,7 +97,7 @@ export default function Home({ st }: HomeProps) {
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
           {recent.map(b => (
             <button key={b.id} onClick={() => openBook(b.id)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', color: 'inherit', width: 120 }}>
-              <Cover item={b} size={120} />
+              <Cover item={b} size={120} serverUrl={st.serverUrl} />
               <div style={{ marginTop: 7, fontSize: 12, fontWeight: 500, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookTitle(b)}</div>
               <div style={{ marginTop: 1, fontSize: 11, color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookAuthor(b)}</div>
             </button>
