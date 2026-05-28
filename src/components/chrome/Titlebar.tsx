@@ -9,9 +9,9 @@ export interface TitlebarProps {
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
 
 const BUTTONS = [
-  { glyph: '–', label: 'Minimize', kind: 'min'   },
-  { glyph: '□', label: 'Maximize', kind: 'max'   },
-  { glyph: '✕', label: 'Close',    kind: 'close' },
+  { glyph: '–',      label: 'Minimize', kind: 'min',   font: undefined },
+  { glyph: '', label: 'Maximize', kind: 'max',   font: '"Segoe MDL2 Assets", "Segoe Fluent Icons"' },
+  { glyph: '✕',      label: 'Close',    kind: 'close', font: undefined },
 ] as const;
 
 const HANDLERS: Record<string, () => void> = {
@@ -65,8 +65,9 @@ export default function Titlebar({ subtitle, isDark }: TitlebarProps) {
               width: 46, height: 44, borderRadius: 0,
               background: 'transparent', border: 'none',
               color: 'var(--onyx-text-dim)',
-              fontSize: b.kind === 'max' ? 11 : 13, lineHeight: 1,
-              cursor: 'pointer', padding: 0, fontFamily: 'inherit',
+              fontSize: b.kind === 'max' ? 11 : 16, lineHeight: 1,
+              cursor: 'pointer', padding: 0,
+              fontFamily: b.font ?? "'Segoe UI', system-ui, -apple-system, sans-serif",
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >{b.glyph}</button>
