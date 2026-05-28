@@ -6,7 +6,22 @@
       "Bash(Get-Content \"C:\\\\Users\\\\fireb\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-fireb-Documents-Skald\\\\1f41981a-f9c8-4aa7-b7b5-9914132975a3\\\\tasks\\\\b97idpkpf.output\" -Tail 40)",
       "Bash(git init *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/124.0.0.0 Safari/537.36' 'https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap')",
+      "Bash(curl -sL \"https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2\" -o \"inter-latin.woff2\")",
+      "Bash(curl -sL \"https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbY2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKxTOlOV.woff2\" -o \"jetbrains-mono-latin.woff2\")",
+      "Bash(curl -sL \"https://fonts.gstatic.com/s/sourceserif4/v14/vEFF2_tTDB4M7-auWDN0ahZJW3IX2ih5nk3AucvUHf6kDXr4.woff2\" -o \"source-serif-4-latin.woff2\")",
+      "Bash(curl -sL \"https://fonts.gstatic.com/s/sourceserif4/v14/vEF02_tTDB4M7-auWDN0ahZJW1ge6NmXpVAHV83Bfb_US2D2QYxoUKIkn98pRl9tDMQC.woff2\" -o \"source-serif-4-italic-latin.woff2\")",
+      "Bash(wait)",
+      "Bash(netstat -ano)",
+      "Bash(awk '{print $5}')",
+      "Bash(xargs -I{} taskkill //PID {} //F)",
+      "PowerShell(taskkill /PID 13608 /F)",
+      "PowerShell(taskkill /PID 21948 /F)",
+      "PowerShell(cd \"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\"; $proc = Start-Process -FilePath \"pnpm\" -ArgumentList \"tauri\",\"dev\" -PassThru -NoNewWindow; $proc.Id)",
+      "PowerShell(cd \"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\"; $proc = Start-Process -FilePath \"cmd.exe\" -ArgumentList \"/c\",\"pnpm tauri dev\" -PassThru; Start-Sleep -Seconds 25; $proc.Id)",
+      "Bash(pnpm exec *)"
     ]
   }
 }

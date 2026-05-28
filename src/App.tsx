@@ -1,51 +1,47 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useOnyxState } from './state/onyx';
+import OnyxWash from './components/chrome/OnyxWash';
+import Titlebar from './components/chrome/Titlebar';
+import TopNav from './components/chrome/TopNav';
+import Home from './screens/Home';
+import Library from './screens/Library';
+import Player from './screens/Player';
+import Settings from './screens/Settings';
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
-
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+export default function App() {
+  const st = useOnyxState();
+  const isDark = st.theme !== 'light';
+  const showNav = st.screen === 'library' || st.screen === 'home';
+  const z = st.scale / 100;
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div style={{
+      position: 'relative',
+      width: `${100 / z}vw`,
+      height: `${100 / z}vh`,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      transform: `scale(${z})`,
+      transformOrigin: 'top left',
+    }}>
+      <OnyxWash isDark={isDark} />
+      <Titlebar isDark={isDark} />
+      {/* Content area — sits below the 44px absolute Titlebar */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        paddingTop: 44,
+        position: 'relative',
+        zIndex: 1,
+        minHeight: 0,
+      }}>
+        {showNav && <TopNav st={st} />}
+        {st.screen === 'home'     && <Home     st={st} />}
+        {st.screen === 'library'  && <Library  st={st} />}
+        {st.screen === 'player'   && <Player   st={st} />}
+        {st.screen === 'settings' && <Settings st={st} />}
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    </div>
   );
 }
-
-export default App;

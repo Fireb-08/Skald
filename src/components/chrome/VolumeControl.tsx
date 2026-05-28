@@ -1,0 +1,53 @@
+import type { OnyxState } from '../../state/onyx';
+import Icon from '../Icon';
+
+export interface VolumeControlProps {
+  st: OnyxState;
+}
+
+export default function VolumeControl({ st }: VolumeControlProps) {
+  const v = st.muted ? 0 : st.volume;
+  const mono = "'JetBrains Mono', ui-monospace, monospace";
+
+  const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    st.setMuted(false);
+    st.setVolume(parseFloat(e.target.value) / 100);
+  };
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px',
+      border: '1px solid var(--onyx-glass-edge)', borderRadius: 8,
+      background: 'var(--onyx-glass)',
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+    }}>
+      <button
+        onClick={() => st.setMuted(!st.muted)}
+        style={{ background: 'none', border: 'none', color: 'var(--onyx-text-dim)', cursor: 'pointer', padding: 2, display: 'flex' }}
+        title="Mute"
+      >
+        <Icon name={st.muted || st.volume < 0.01 ? 'volume-mute' : 'volume'} size={15} />
+      </button>
+      <div style={{ position: 'relative', width: 100, height: 18, display: 'flex', alignItems: 'center' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, height: 2, background: 'rgba(255,255,255,0.12)', borderRadius: 1 }}>
+          <div style={{ width: `${v * 100}%`, height: '100%', background: 'var(--onyx-accent)', borderRadius: 1 }} />
+        </div>
+        <div style={{
+          position: 'absolute', left: `calc(${v * 100}% - 5px)`,
+          width: 10, height: 10, borderRadius: 5,
+          background: 'var(--onyx-text)',
+          boxShadow: '0 0 0 1px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.4)',
+          pointerEvents: 'none',
+        }} />
+        <input
+          type="range" min={0} max={100} value={Math.round(v * 100)}
+          onChange={onChange}
+          style={{ position: 'absolute', inset: 0, width: '100%', opacity: 0, cursor: 'pointer' }}
+        />
+      </div>
+      <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--onyx-text-mute)', minWidth: 22, textAlign: 'right' }}>
+        {Math.round(v * 100)}
+      </span>
+    </div>
+  );
+}

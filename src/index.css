@@ -1,0 +1,157 @@
+/* ─── Vendored fonts ─────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/assets/fonts/source-serif-4-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/assets/fonts/source-serif-4-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/assets/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/assets/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ─── Onyx dark theme tokens ─────────────────────────────────────────────── */
+
+:root {
+  /* Accent — mirrored by applyTheme() / setAccentColor() at runtime */
+  --onyx-accent:   #d4a64a;
+  --onyx-accent-r: 212;
+  --onyx-accent-g: 166;
+  --onyx-accent-b: 74;
+  --onyx-accent-bright: #e9bb5e;
+  --onyx-accent-dim:    rgba(212, 166, 74, 0.18);
+  --onyx-accent-edge:   rgba(212, 166, 74, 0.35);
+
+  /* Backgrounds */
+  --onyx-bg:      #0b0b0e;
+  --onyx-bg-deep: #08080b;
+
+  /* Panels */
+  --onyx-panel:  #131319;
+  --onyx-panel2: #1a1a22;
+
+  /* Lines / dividers */
+  --onyx-line: rgba(255, 255, 255, 0.06);
+
+  /* Text */
+  --onyx-text:      #ebe7df;
+  --onyx-text-dim:  rgba(235, 231, 223, 0.62);
+  --onyx-text-mute: rgba(235, 231, 223, 0.38);
+
+  /* Glass surfaces */
+  --onyx-glass:       rgba(255, 255, 255, 0.04);
+  --onyx-glass-strong: rgba(255, 255, 255, 0.07);
+  --onyx-glass-edge:  rgba(255, 255, 255, 0.09);
+  --onyx-glass-hover: rgba(255, 255, 255, 0.10);
+
+  /* Shadows */
+  --onyx-shadow-deep: rgba(0, 0, 0, 0.50);
+}
+
+/* ─── Global base ────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #0d0d0f;
+  color: var(--onyx-text);
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+button { font-family: inherit; color: inherit; }
+
+/* ─── Focus & selection ──────────────────────────────────────────────────── */
+
+button:focus-visible {
+  outline: 2px solid var(--onyx-accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible {
+  outline: none;
+  border-color: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.5) !important;
+}
+
+::selection {
+  background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35);
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.3);
+}
+
+/* ─── Utility hover classes ──────────────────────────────────────────────── */
+
+.onyx-tile:hover > div:first-child {
+  transform: translateY(-3px);
+  filter: drop-shadow(0 12px 24px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.18));
+}
+
+.onyx-winbtn:hover {
+  background: var(--onyx-glass-hover) !important;
+  color: var(--onyx-text) !important;
+}
+
+.onyx-row:hover {
+  background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.06) !important;
+}
+
+.onyx-poster:hover {
+  transform: translateY(-3px);
+  border-color: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.4) !important;
+  box-shadow: 0 18px 40px var(--onyx-shadow-deep),
+              0 0 24px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.15) !important;
+}
+
+@keyframes onyx-fadein {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
