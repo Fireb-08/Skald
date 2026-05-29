@@ -51,6 +51,9 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
       <Row label="Translucent surfaces" hint="The glass effect on cards. Turn off for performance on older hardware.">
         <Toggle on={st.translucent} onChange={st.setTranslucent} />
       </Row>
+      <Row label="Show Home tab" hint="Display the Home tab in the navigation bar. When disabled, the app opens to Library.">
+        <Toggle on={st.showHome} onChange={st.setShowHome} />
+      </Row>
       <Row label="Interface scale" hint="Zooms the entire app. Useful on 4K displays or when reading from across the room.">
         <div style={{ display: 'flex', gap: 6 }}>
           {SCALE_OPTIONS.map(v => (

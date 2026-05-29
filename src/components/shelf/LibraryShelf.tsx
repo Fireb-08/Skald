@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookGenre,
@@ -20,15 +20,18 @@ function seriesVolOf(s: string | undefined)  { return parseInt((s || '').split('
 type SortDir = 'asc' | 'desc';
 interface SortState { col: string; dir: SortDir }
 
-const GRID = '52px minmax(220px, 2.2fr) minmax(140px, 1.4fr) minmax(110px, 1fr) minmax(140px, 1.4fr) 80px';
+type ColWidths = { title: number; author: number; genre: number; narrator: number; duration: number };
+type ResizableCol = Exclude<keyof ColWidths, 'duration'>;
 
-const COLS = [
-  { id: 'title',    label: 'Title',    align: 'left'  as const },
-  { id: 'author',   label: 'Author',   align: 'left'  as const },
-  { id: 'genre',    label: 'Genre',    align: 'left'  as const },
-  { id: 'narrator', label: 'Narrator', align: 'left'  as const },
-  { id: 'duration', label: 'Duration', align: 'right' as const },
+const COL_META: Array<{ id: keyof ColWidths; label: string; align: 'left' | 'right' }> = [
+  { id: 'title',    label: 'Title',    align: 'left'  },
+  { id: 'author',   label: 'Author',   align: 'left'  },
+  { id: 'genre',    label: 'Genre',    align: 'left'  },
+  { id: 'narrator', label: 'Narrator', align: 'left'  },
+  { id: 'duration', label: 'Duration', align: 'right' },
 ];
+
+const DEFAULT_COL_WIDTHS: ColWidths = { title: 300, author: 200, genre: 160, narrator: 200, duration: 80 };
 
 function getVal(b: LibraryItem, key: string): string | number {
   switch (key) {
@@ -43,6 +46,29 @@ function getVal(b: LibraryItem, key: string): string | number {
 
 function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxState; openBook: (id: string) => void }) {
   const [sort, setSort] = useState<SortState | null>(null);
+  const [cw, setCw] = useState<ColWidths>(DEFAULT_COL_WIDTHS);
+
+  const startDrag = (col: ResizableCol, e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = cw[col];
+
+    const onMove = (me: MouseEvent) => {
+      const newWidth = Math.max(60, startWidth + (me.clientX - startX));
+      setCw(w => ({ ...w, [col]: newWidth }));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   const onHeader = (col: string) => {
     if (sort?.col === col) setSort({ col, dir: sort.dir === 'asc' ? 'desc' : 'asc' });
@@ -60,6 +86,10 @@ function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxStat
     });
   }, [books, sort]);
 
+  const TRUNC: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+  const HANDLE: React.CSSProperties = { flex: '0 0 4px', alignSelf: 'stretch', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const SPACER: React.CSSProperties = { flex: '0 0 4px', flexShrink: 0 };
+
   if (sorted.length === 0) {
     return (
       <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
@@ -70,26 +100,40 @@ function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxStat
 
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 14, padding: '8px 12px 10px', borderBottom: '1px solid var(--onyx-line)' }}>
-        <div />
-        {COLS.map(c => {
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px 10px', borderBottom: '1px solid var(--onyx-line)' }}>
+        <div style={{ flex: '0 0 48px' }} />
+        {COL_META.map((c, idx) => {
           const active = sort?.col === c.id;
+          const isResizable = c.id !== 'duration';
           return (
-            <button key={c.id} onClick={() => onHeader(c.id)} style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              justifyContent: c.align === 'right' ? 'flex-end' : 'flex-start',
-              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-              fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase',
-              color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
-              textAlign: c.align,
-            }}>
-              {c.label}
-              <SortIndicator active={active} dir={sort?.dir ?? 'asc'} />
-            </button>
+            <React.Fragment key={c.id}>
+              <button onClick={() => onHeader(c.id)} style={{
+                flex: `0 0 ${cw[c.id]}px`, minWidth: 0, overflow: 'hidden',
+                display: 'flex', alignItems: 'center', gap: 6,
+                justifyContent: c.align === 'right' ? 'flex-end' : 'flex-start',
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase',
+                color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+                textAlign: c.align,
+              }}>
+                <span style={TRUNC}>{c.label}</span>
+                <SortIndicator active={active} dir={sort?.dir ?? 'asc'} />
+              </button>
+              {isResizable && idx < COL_META.length - 1 && (
+                <div
+                  onMouseDown={(e) => startDrag(c.id as ResizableCol, e)}
+                  style={{ ...HANDLE, cursor: 'col-resize' }}
+                >
+                  <div style={{ width: 1, height: '60%', background: 'var(--onyx-line)' }} />
+                </div>
+              )}
+            </React.Fragment>
           );
         })}
       </div>
 
+      {/* Data rows */}
       {sorted.map((b, i) => {
         const active = b.id === st.currentBookId;
         const prog = bookProgress(b, st.mediaProgress);
@@ -99,16 +143,17 @@ function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxStat
             onClick={() => openBook(b.id)}
             className="onyx-row"
             style={{
-              display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 14,
+              display: 'flex', alignItems: 'center',
               padding: '8px 12px', width: '100%', textAlign: 'left',
               background: active ? 'var(--onyx-accent-dim)' : (i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'),
               border: 'none',
               borderTop: i === 0 ? 'none' : '1px solid var(--onyx-line)',
               borderLeft: active ? '2px solid var(--onyx-accent)' : '2px solid transparent',
-              cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
+              cursor: 'pointer', fontFamily: 'inherit', color: 'inherit', boxSizing: 'border-box',
             }}
           >
-            <div style={{ position: 'relative' }}>
+            {/* Cover */}
+            <div style={{ flex: '0 0 48px', flexShrink: 0, position: 'relative' }}>
               <Cover item={b} size={40} serverUrl={st.serverUrl} />
               {st.showProgressOverlay && prog > 0 && (
                 <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 2, background: 'rgba(0,0,0,0.4)' }}>
@@ -116,29 +161,41 @@ function ShelfList({ books, st, openBook }: { books: LibraryItem[]; st: OnyxStat
                 </div>
               )}
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: SERIF, fontSize: 14.5, fontWeight: 500, color: active ? 'var(--onyx-accent)' : 'var(--onyx-text)', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookTitle(b)}</div>
+            {/* Title + series */}
+            <div style={{ flex: `0 0 ${cw.title}px`, minWidth: 0, overflow: 'hidden' }}>
+              <div style={{ fontFamily: SERIF, fontSize: 14.5, fontWeight: 500, color: active ? 'var(--onyx-accent)' : 'var(--onyx-text)', lineHeight: 1.2, ...TRUNC }}>{bookTitle(b)}</div>
               {bookSeries(b) && (
-                <div style={{ marginTop: 2, fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookSeries(b)}</div>
+                <div style={{ marginTop: 2, fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', ...TRUNC }}>{bookSeries(b)}</div>
               )}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookAuthor(b)}</div>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={SPACER} />
+            {/* Author */}
+            <div style={{ flex: `0 0 ${cw.author}px`, minWidth: 0, overflow: 'hidden' }}>
+              <span style={{ display: 'block', fontSize: 12.5, color: 'var(--onyx-text-dim)', ...TRUNC }}>{bookAuthor(b)}</span>
+            </div>
+            <div style={SPACER} />
+            {/* Genre */}
+            <div style={{ flex: `0 0 ${cw.genre}px`, minWidth: 0, overflow: 'hidden' }}>
               {bookGenre(b) ? (
                 <span style={{
                   display: 'inline-block', padding: '2px 8px', borderRadius: 999,
                   background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
                   fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-dim)', letterSpacing: '0.06em', textTransform: 'uppercase',
+                  maxWidth: '100%', ...TRUNC,
                 }}>{bookGenre(b)}</span>
               ) : <span style={{ color: 'var(--onyx-text-mute)' }}>—</span>}
             </div>
-            <div style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+            <div style={SPACER} />
+            {/* Narrator */}
+            <div style={{ flex: `0 0 ${cw.narrator}px`, minWidth: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ display: 'inline-flex', color: 'var(--onyx-text-mute)', flexShrink: 0 }}>
                 <Icon name="headphones" size={11} />
               </span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookNarrator(b)}</span>
+              <span style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', ...TRUNC }}>{bookNarrator(b)}</span>
             </div>
-            <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', textAlign: 'right' }}>{bookDur(b)}</div>
+            <div style={SPACER} />
+            {/* Duration */}
+            <div style={{ flex: `0 0 ${cw.duration}px`, flexShrink: 0, fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', textAlign: 'right' }}>{bookDur(b)}</div>
           </button>
         );
       })}
