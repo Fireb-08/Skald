@@ -54,7 +54,7 @@ export default function Cover({ item, size = 180, scale = 1, className, style, o
   if (coverSrc) {
     return (
       <div style={base} className={className} onClick={onClick}>
-        <img src={coverSrc} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
+        <img src={coverSrc} draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
       </div>
     );
   }

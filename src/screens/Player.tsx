@@ -2,11 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import {
   openPlaybackSession, playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
+  createBookmark, getMe,
 } from '../api/abs';
 import type { CSSProperties } from 'react';
-import type { OnyxState, Bookmark } from '../state/onyx';
+import type { OnyxState } from '../state/onyx';
 import {
-  BOOKMARKS, SPEEDS, chapterAt, chapterStart, fmtTime,
+  SPEEDS, chapterAt, chapterStart, fmtTime,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
@@ -20,8 +21,6 @@ const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
 type SleepMode = null | number | 'chapter';
-
-interface SessionBookmark extends Bookmark { id: number; }
 
 const SLEEP_OPTIONS: { id: SleepMode; label: string }[] = [
   { id: null,      label: 'Off'            },
@@ -57,18 +56,20 @@ export default function Player({ st }: PlayerProps) {
   const chapters = st.currentBookChapters;
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
 
-  const [userBookmarks, setUserBookmarks] = useState<SessionBookmark[]>([]);
-  const addBookmarkHere = () => {
-    setUserBookmarks(prev => [{
-      id: Date.now(),
-      ts: fmtTime(st.position),
-      secs: chLocal,
-      ch: curCh.n,
-      label: `Bookmark in "${curCh.t}"`,
-      date: 'Just now',
-    }, ...prev]);
+  const playerBookmarks = st.bookmarks.filter(bm => bm.libraryItemId === st.currentBookId);
+
+  const addBookmark = async () => {
+    try {
+      const title = curCh.t
+        ? `${curCh.t} — ${fmtTime(st.position)}`
+        : fmtTime(st.position);
+      await createBookmark(st.serverUrl, st.currentBookId, st.position, title);
+      const me = await getMe(st.serverUrl);
+      st.setBookmarks(me.bookmarks);
+    } catch (err) {
+      console.error('[bookmark] create failed:', err);
+    }
   };
-  const allBookmarks: (SessionBookmark | Bookmark)[] = [...userBookmarks, ...BOOKMARKS];
 
   const [sleepMode, setSleepMode] = useState<SleepMode>(null);
   const [sleepRemain, setSleepRemain] = useState(0);
@@ -245,7 +246,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
 
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={addBookmarkHere} style={transportBtnSmall()} title="Bookmark this moment">
+                <button onClick={addBookmark} style={transportBtnSmall()} title="Bookmark this moment">
                   <Icon name="bookmark" size={15} />
                 </button>
                 <div ref={sleepRef} style={{ position: 'relative' }}>
@@ -318,19 +319,20 @@ export default function Player({ st }: PlayerProps) {
             <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Bookmarks</div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{allBookmarks.length}</div>
-                <button onClick={addBookmarkHere} style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }} title="Bookmark current moment">
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{playerBookmarks.length}</div>
+                <button onClick={addBookmark} style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }} title="Bookmark current moment">
                   <Icon name="plus" size={11} /> ADD HERE
                 </button>
               </div>
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
-                {allBookmarks.map((bm, i) => (
-                  <button key={'id' in bm ? bm.id : i} onClick={() => st.setPosition(chapterStart(chapters, bm.ch - 1) + bm.secs)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < allBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                      <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)' }}>{bm.ts}</div>
-                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Ch. {bm.ch} · {bm.date}</div>
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--onyx-text)', lineHeight: 1.3 }}>{bm.label}</div>
+                {playerBookmarks.length === 0 ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
+                    No bookmarks yet
+                  </div>
+                ) : playerBookmarks.map((bm, i) => (
+                  <button key={`${bm.time}-${i}`} onClick={() => seekAudio(bm.time).catch(console.error)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < playerBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
+                    <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)', marginBottom: 4 }}>{fmtTime(bm.time)}</div>
+                    <div style={{ fontSize: 13, color: 'var(--onyx-text)', lineHeight: 1.3 }}>{bm.title}</div>
                   </button>
                 ))}
               </div>

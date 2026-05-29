@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookDur,
@@ -21,6 +21,16 @@ export default function PickItUp({ st }: PickItUpProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const onWindowMouseUp = () => {
+      if (dragRef.current) {
+        setIsDragging(false);
+      }
+    };
+    window.addEventListener('mouseup', onWindowMouseUp);
+    return () => window.removeEventListener('mouseup', onWindowMouseUp);
+  }, []);
 
   if (inProg.length === 0 || st.search || st.contextFilter) {
     return null;
@@ -93,6 +103,8 @@ export default function PickItUp({ st }: PickItUpProps) {
         <div
           ref={scrollRef}
           onMouseDown={onMouseDown}
+          onMouseLeave={() => { if (dragRef.current) { setIsDragging(false); dragRef.current = null; } }}
+          onDragStart={e => e.preventDefault()}
           onClickCapture={onClickCapture}
           className="pickitup-scroll"
           style={{ display: 'flex', flexDirection: 'row', width: '100%', minWidth: 0, gap: 14, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', paddingBottom: 8, cursor: isDragging ? 'grabbing' : 'grab', userSelect: isDragging ? 'none' : undefined }}
