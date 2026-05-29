@@ -18,6 +18,9 @@ export interface ReviewData {
   googleRating: number | null;
   googleCount: number | null;
   googleLink: string | null;
+  hardcoverRating: number | null;
+  hardcoverCount: number | null;
+  hardcoverLink: string | null;
 }
 
 interface CacheEntry {
@@ -72,6 +75,38 @@ function persist(): void {
   }
 }
 
+// ── Hardcover ─────────────────────────────────────────────────────────────────
+
+export async function fetchHardcoverData(
+  title: string,
+  author: string,
+  isbn?: string,
+): Promise<{ rating: number | null; count: number | null; link: string | null }> {
+  const query = isbn ? isbn : `${title} ${author}`;
+  try {
+    const res = await fetch('https://api.hardcover.app/v1/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query SearchBook($query: String!) { search(query: $query, query_type: "Book", per_page: 1) { results } }`,
+        variables: { query },
+      }),
+    });
+    const json = await res.json() as { data?: { search?: { results?: unknown } } };
+    const raw = json?.data?.search?.results;
+    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { hits?: { document?: Record<string, unknown> }[] } | null;
+    const hit = parsed?.hits?.[0]?.document ?? null;
+    if (!hit) return { rating: null, count: null, link: null };
+    const rating = typeof hit.rating === 'number' ? hit.rating : null;
+    const count = typeof hit.ratings_count === 'number' ? hit.ratings_count : null;
+    const slug = typeof hit.slug === 'string' ? hit.slug : null;
+    const link = slug ? `https://hardcover.app/books/${slug}` : null;
+    return { rating, count, link };
+  } catch {
+    return { rating: null, count: null, link: null };
+  }
+}
+
 // ── Prefetch helpers ──────────────────────────────────────────────────────────
 
 function itemTitle(item: LibraryItem): string {
@@ -86,39 +121,45 @@ function itemAuthor(item: LibraryItem): string {
   return (a as { name: string }).name;
 }
 
-async function fetchReviewData(item: LibraryItem, apiKey: string): Promise<ReviewData> {
+async function fetchReviewData(
+  item: LibraryItem,
+  apiKey: string,
+  opts: { enableOpenLibrary?: boolean; enableHardcover?: boolean } = {},
+): Promise<ReviewData> {
+  const { enableOpenLibrary = true, enableHardcover = true } = opts;
   const meta = item.media?.metadata;
   const isbn = meta?.isbn13 || meta?.isbn10 || meta?.isbn;
 
   // ── Open Library ────────────────────────────────────────────────────────────
-  let rawWorkId: string | null = null;
-  if (isbn) {
-    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-    const data = await res.json() as Record<string, { works?: { key: string }[] }>;
-    rawWorkId  = data[`ISBN:${isbn}`]?.works?.[0]?.key ?? null;
-  }
-  if (!rawWorkId) {
-    const res  = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(itemTitle(item))}&author=${encodeURIComponent(itemAuthor(item))}&limit=1`);
-    const data = await res.json() as { docs?: { key: string }[] };
-    rawWorkId  = data.docs?.[0]?.key ?? null;
-  }
-
   let olWorkKey: string | null = null;
   let olRatings: OLRatings | null = null;
   let olShelves: OLShelves | null = null;
 
-  if (rawWorkId) {
-    olWorkKey = rawWorkId.replace(/^\/works\//, '');
-    const [ratRes, shRes] = await Promise.all([
-      fetch(`https://openlibrary.org/works/${olWorkKey}/ratings.json`),
-      fetch(`https://openlibrary.org/works/${olWorkKey}/bookshelves.json`),
-    ]);
-    const [ratData, shData] = await Promise.all([
-      ratRes.json() as Promise<{ summary?: { average: number; count: number } }>,
-      shRes.json()  as Promise<{ counts?: { want_to_read: number; currently_reading: number; already_read: number } }>,
-    ]);
-    olRatings = { average: ratData.summary?.average ?? null, count: ratData.summary?.count ?? null };
-    olShelves = { wantToRead: shData.counts?.want_to_read ?? null, reading: shData.counts?.currently_reading ?? null, alreadyRead: shData.counts?.already_read ?? null };
+  if (enableOpenLibrary) {
+    let rawWorkId: string | null = null;
+    if (isbn) {
+      const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+      const data = await res.json() as Record<string, { works?: { key: string }[] }>;
+      rawWorkId  = data[`ISBN:${isbn}`]?.works?.[0]?.key ?? null;
+    }
+    if (!rawWorkId) {
+      const res  = await fetch(`https://openlibrary.org/search.json?title=${encodeURIComponent(itemTitle(item))}&author=${encodeURIComponent(itemAuthor(item))}&limit=1`);
+      const data = await res.json() as { docs?: { key: string }[] };
+      rawWorkId  = data.docs?.[0]?.key ?? null;
+    }
+    if (rawWorkId) {
+      olWorkKey = rawWorkId.replace(/^\/works\//, '');
+      const [ratRes, shRes] = await Promise.all([
+        fetch(`https://openlibrary.org/works/${olWorkKey}/ratings.json`),
+        fetch(`https://openlibrary.org/works/${olWorkKey}/bookshelves.json`),
+      ]);
+      const [ratData, shData] = await Promise.all([
+        ratRes.json() as Promise<{ summary?: { average: number; count: number } }>,
+        shRes.json()  as Promise<{ counts?: { want_to_read: number; currently_reading: number; already_read: number } }>,
+      ]);
+      olRatings = { average: ratData.summary?.average ?? null, count: ratData.summary?.count ?? null };
+      olShelves = { wantToRead: shData.counts?.want_to_read ?? null, reading: shData.counts?.currently_reading ?? null, alreadyRead: shData.counts?.already_read ?? null };
+    }
   }
 
   // ── Google Books ─────────────────────────────────────────────────────────────
@@ -142,7 +183,19 @@ async function fetchReviewData(item: LibraryItem, apiKey: string): Promise<Revie
     }
   }
 
-  return { olWorkKey, olRatings, olShelves, googleRating, googleCount, googleLink };
+  // ── Hardcover ────────────────────────────────────────────────────────────────
+  let hardcoverRating: number | null = null;
+  let hardcoverCount:  number | null = null;
+  let hardcoverLink:   string | null = null;
+
+  if (enableHardcover) {
+    const hc = await fetchHardcoverData(itemTitle(item), itemAuthor(item), isbn ?? undefined);
+    hardcoverRating = hc.rating;
+    hardcoverCount  = hc.count;
+    hardcoverLink   = hc.link;
+  }
+
+  return { olWorkKey, olRatings, olShelves, googleRating, googleCount, googleLink, hardcoverRating, hardcoverCount, hardcoverLink };
 }
 
 /**
@@ -150,11 +203,17 @@ async function fetchReviewData(item: LibraryItem, apiKey: string): Promise<Revie
  * writing results to the cache after each fetch. No React state is touched.
  * Returns a cancel function; call it on component unmount to stop the queue.
  */
-export function prefetchReviews(items: LibraryItem[], _serverUrl: string): () => void {
+export function prefetchReviews(
+  items: LibraryItem[],
+  _serverUrl: string,
+  enableOpenLibrary = true,
+  enableHardcover = true,
+): () => void {
   const queue = items.filter(item => getCachedReview(item.id) === null);
   if (queue.length === 0) return () => {};
 
   const apiKey = localStorage.getItem('skald.googleBooksApiKey') ?? '';
+  const opts = { enableOpenLibrary, enableHardcover };
   let cancelled = false;
   let timerId: ReturnType<typeof setTimeout> | null = null;
 
@@ -162,7 +221,7 @@ export function prefetchReviews(items: LibraryItem[], _serverUrl: string): () =>
     if (cancelled || remaining.length === 0) return;
     const [head, ...tail] = remaining;
 
-    fetchReviewData(head, apiKey)
+    fetchReviewData(head, apiKey, opts)
       .then(data => { if (!cancelled) setCachedReview(head.id, data); })
       .catch(() => { /* silently skip failures */ })
       .finally(() => {

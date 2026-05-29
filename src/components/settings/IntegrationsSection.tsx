@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { OnyxState } from '../../state/onyx';
-import { SectionHead, Row, MONO } from './shared';
+import { SectionHead, Row, Toggle, MONO } from './shared';
 
 export interface IntegrationsSectionProps { st: OnyxState; }
 
@@ -10,6 +10,18 @@ export default function IntegrationsSection({ st }: IntegrationsSectionProps) {
   return (
     <div>
       <SectionHead title="Integrations" subtitle="Connect third-party services for additional metadata and reviews." />
+      <Row
+        label="Open Library"
+        hint="Community ratings and shelf data"
+      >
+        <Toggle on={st.enableOpenLibrary} onChange={st.setEnableOpenLibrary} />
+      </Row>
+      <Row
+        label="Hardcover"
+        hint="Ratings and reviews from the Hardcover community"
+      >
+        <Toggle on={st.enableHardcover} onChange={st.setEnableHardcover} />
+      </Row>
       <Row
         label="Google Books API key"
         hint="Used to fetch ratings and reviews on the Player screen. Get a free key at console.cloud.google.com → APIs & Services → Credentials."
