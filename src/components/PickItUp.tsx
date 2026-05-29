@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookDur,
@@ -17,9 +18,43 @@ export interface PickItUpProps {
 export default function PickItUp({ st }: PickItUpProps) {
   const inProg = st.library.filter(b => bookProgress(b, st.mediaProgress) > 0);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
   if (inProg.length === 0 || st.search || st.contextFilter) {
     return null;
   }
+
+  const onMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    dragRef.current = { startX: e.clientX, startScrollLeft: el.scrollLeft, didDrag: false };
+    setIsDragging(true);
+
+    const onMove = (me: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = me.clientX - dragRef.current.startX;
+      if (Math.abs(delta) > 5) dragRef.current.didDrag = true;
+      el.scrollLeft = dragRef.current.startScrollLeft - delta;
+    };
+
+    const onUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const onClickCapture = (e: React.MouseEvent) => {
+    if (dragRef.current?.didDrag) {
+      e.stopPropagation();
+      dragRef.current.didDrag = false;
+    }
+  };
 
   const openBook = (id: string) => {
     st.setCurrentBookId(id);
@@ -55,7 +90,13 @@ export default function PickItUp({ st }: PickItUpProps) {
         </button>
       </div>
       {!st.pickItUpCollapsed && (
-        <div className="pickitup-scroll" style={{ display: 'flex', flexDirection: 'row', width: '100%', minWidth: 0, gap: 14, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', paddingBottom: 8 }}>
+        <div
+          ref={scrollRef}
+          onMouseDown={onMouseDown}
+          onClickCapture={onClickCapture}
+          className="pickitup-scroll"
+          style={{ display: 'flex', flexDirection: 'row', width: '100%', minWidth: 0, gap: 14, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch', paddingBottom: 8, cursor: isDragging ? 'grabbing' : 'grab', userSelect: isDragging ? 'none' : undefined }}
+        >
           {inProg.map(b => {
             const prog = bookProgress(b, st.mediaProgress);
             return (
