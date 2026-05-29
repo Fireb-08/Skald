@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   openPlaybackSession, playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
@@ -7,7 +7,7 @@ import {
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
-  SPEEDS, chapterAt, chapterStart, fmtTime,
+  SPEEDS, chapterAt, chapterStart, fmtTime, fmtRemaining,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
@@ -19,6 +19,12 @@ import DeviceSelector from '../components/chrome/DeviceSelector';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
+
+interface GBooksInfo {
+  averageRating?: number;
+  ratingsCount?: number;
+  infoLink?: string;
+}
 
 type SleepMode = null | number | 'chapter';
 
@@ -70,6 +76,37 @@ export default function Player({ st }: PlayerProps) {
       console.error('[bookmark] create failed:', err);
     }
   };
+
+  const [gBooksInfo, setGBooksInfo] = useState<GBooksInfo | null>(null);
+
+  useEffect(() => {
+    const apiKey = st.googleBooksApiKey;
+    if (!apiKey || !b) { setGBooksInfo(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const meta = b.media?.metadata;
+        const isbn = meta?.isbn13 || meta?.isbn10 || meta?.isbn;
+        const q = isbn
+          ? `isbn:${isbn}`
+          : `intitle:${encodeURIComponent(bookTitle(b))}+inauthor:${encodeURIComponent(bookAuthor(b))}`;
+        const res = await fetch(
+          `https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=1&key=${apiKey}`,
+        );
+        const data = await res.json();
+        if (cancelled) return;
+        const info = data.items?.[0]?.volumeInfo ?? null;
+        setGBooksInfo(info ? {
+          averageRating: info.averageRating,
+          ratingsCount: info.ratingsCount,
+          infoLink: info.canonicalVolumeLink ?? info.infoLink,
+        } : null);
+      } catch (e) {
+        console.error('[gbooks] fetch failed:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [st.currentBookId, st.googleBooksApiKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sleepMode, setSleepMode] = useState<SleepMode>(null);
   const [sleepRemain, setSleepRemain] = useState(0);
@@ -179,16 +216,19 @@ export default function Player({ st }: PlayerProps) {
               <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 8 }}>
                 Synopsis
               </div>
-              {b.media?.metadata?.description ? (
-                <div
-                  style={{ flex: 1, overflowY: 'auto', fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
-                  dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
-                />
-              ) : (
-                <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
-                  No synopsis available.
-                </div>
-              )}
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {b.media?.metadata?.description ? (
+                  <div
+                    style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
+                    dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
+                  />
+                ) : (
+                  <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
+                    No synopsis available.
+                  </div>
+                )}
+
+              </div>
             </div>
           </div>
         </div>
@@ -289,7 +329,88 @@ export default function Player({ st }: PlayerProps) {
 
           <div style={{ flex: 1, display: 'flex', gap: 18, minHeight: 0 }}>
 
-            <Glass translucent={st.translucent} style={{ flex: 1.2, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* ── Details panel ─────────────────────────────────────── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 14 }}>Details</div>
+              <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
+                {(() => {
+                  const meta = b.media?.metadata;
+                  const prog = st.mediaProgress.find(p => p.libraryItemId === st.currentBookId);
+                  const dash = '—';
+                  const detailRow = (label: string, value: React.ReactNode) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 0', borderBottom: '1px solid var(--onyx-line)', gap: 12 }}>
+                      <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', flexShrink: 0, paddingTop: 1 }}>{label}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', textAlign: 'right', minWidth: 0 }}>{value ?? dash}</div>
+                    </div>
+                  );
+                  const tags = b.media?.tags ?? [];
+                  const genres = meta?.genres?.filter(Boolean) ?? [];
+                  return (
+                    <>
+                      {/* Book details */}
+                      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 4, paddingBottom: 4 }}>Book</div>
+                      {detailRow('Publisher',  meta?.publisher    || dash)}
+                      {detailRow('Genre',      genres.join(', ')  || dash)}
+                      {detailRow('Year',       meta?.publishedYear || dash)}
+                      {detailRow('Language',   meta?.language      || dash)}
+                      {detailRow('Duration',   bookDur(b))}
+                      {tags.length > 0 && detailRow('Tags',
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
+                          {tags.map(t => (
+                            <span key={t} style={{ padding: '1px 7px', borderRadius: 999, background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Listening stats */}
+                      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Listening</div>
+                      {prog ? (
+                        <>
+                          {detailRow('Progress',
+                            <span style={{ color: prog.isFinished ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
+                              {Math.round(prog.progress * 100)}%{prog.isFinished && ' ✓'}
+                            </span>
+                          )}
+                          {detailRow('Listened',   fmtTime(prog.currentTime))}
+                          {detailRow('Remaining',  fmtRemaining(Math.max(0, prog.duration - prog.currentTime)))}
+                          {detailRow('Last played', new Date(prog.lastUpdate * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))}
+                        </>
+                      ) : (
+                        <div style={{ padding: '12px 0', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>Not started</div>
+                      )}
+
+                      {/* Ratings */}
+                      {gBooksInfo && (gBooksInfo.averageRating != null || gBooksInfo.ratingsCount != null) && (
+                        <>
+                          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Ratings</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--onyx-line)' }}>
+                            {gBooksInfo.averageRating != null && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 20, fontWeight: 600, color: 'var(--onyx-accent)' }}>{gBooksInfo.averageRating.toFixed(1)}</span>
+                                <span style={{ fontSize: 13, color: 'var(--onyx-text-mute)' }}>/ 5</span>
+                              </div>
+                            )}
+                            {gBooksInfo.ratingsCount != null && (
+                              <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
+                                {gBooksInfo.ratingsCount.toLocaleString()} ratings
+                              </span>
+                            )}
+                          </div>
+                          {gBooksInfo.infoLink && (
+                            <a href={gBooksInfo.infoLink} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 10, fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase', textDecoration: 'none' }}>
+                              View on Google Books ↗
+                            </a>
+                          )}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            </Glass>
+
+            {/* ── Chapters panel ────────────────────────────────────── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{chapters.length} · {bookDur(b)} total</div>

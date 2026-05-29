@@ -251,6 +251,8 @@ export interface OnyxState {
   setPickItUpCollapsed: (collapsed: boolean) => void;
   scale: number;
   setScale: (scale: number) => void;
+  googleBooksApiKey: string;
+  setGoogleBooksApiKey: (key: string) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -532,6 +534,13 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('onyx.uiScale', String(v)); setScaleRaw(v);
   }, []);
 
+  const [googleBooksApiKey, setGoogleBooksApiKeyRaw] = useState(
+    () => localStorage.getItem('skald.googleBooksApiKey') ?? '',
+  );
+  const setGoogleBooksApiKey = useCallback((v: string) => {
+    localStorage.setItem('skald.googleBooksApiKey', v); setGoogleBooksApiKeyRaw(v);
+  }, []);
+
   const accentRef = useRef(accentColor);
   const themeRef  = useRef(theme);
 
@@ -636,5 +645,6 @@ export function useOnyxState(): OnyxState {
     shelfTab, setShelfTab,
     pickItUpCollapsed, setPickItUpCollapsed,
     scale, setScale,
+    googleBooksApiKey, setGoogleBooksApiKey,
   };
 }

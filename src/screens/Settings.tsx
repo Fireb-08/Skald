@@ -13,6 +13,7 @@ import {
   AppearanceSection,
   KeyboardSection,
   AboutSection,
+  IntegrationsSection,
 } from '../components/settings';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -21,7 +22,7 @@ export interface SettingsProps { st: OnyxState; }
 
 type SectionId =
   | 'account' | 'server' | 'playback' | 'audio'
-  | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about';
+  | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about' | 'integrations';
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
 
@@ -34,7 +35,8 @@ const NAV: NavSection[] = [
   { id: 'downloads',  label: 'Downloads',  icon: 'bookmark'   },
   { id: 'appearance', label: 'Appearance', icon: 'speaker'    },
   { id: 'keyboard',   label: 'Keyboard',   icon: 'kbd'        },
-  { id: 'about',      label: 'About',      icon: 'dot'        },
+  { id: 'integrations', label: 'Integrations', icon: 'airplay'  },
+  { id: 'about',        label: 'About',        icon: 'dot'      },
 ];
 
 export default function Settings({ st }: SettingsProps) {
@@ -108,8 +110,9 @@ export default function Settings({ st }: SettingsProps) {
           {section === 'library'    && <LibrarySection st={st} />}
           {section === 'downloads'  && <DownloadsSection />}
           {section === 'appearance' && <AppearanceSection st={st} />}
-          {section === 'keyboard'   && <KeyboardSection />}
-          {section === 'about'      && <AboutSection />}
+          {section === 'keyboard'      && <KeyboardSection />}
+          {section === 'integrations' && <IntegrationsSection st={st} />}
+          {section === 'about'         && <AboutSection />}
         </Glass>
       </div>
     </div>

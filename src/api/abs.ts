@@ -32,6 +32,12 @@ export interface BookMetadata {
   seriesName: string | null;
   genres: string[];
   description?: string | null;
+  publisher?: string | null;
+  publishedYear?: string | null;
+  language?: string | null;
+  isbn?: string | null;
+  isbn10?: string | null;
+  isbn13?: string | null;
 }
 
 export interface Chapter {
