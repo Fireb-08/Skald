@@ -2,7 +2,11 @@ import type { LibraryItem, OnyxState } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
 import { updateProgress, deleteProgress, getMe } from '../../api/abs';
 
-export function buildItemContextMenu(item: LibraryItem, st: OnyxState): ContextMenuItem[] {
+export function buildItemContextMenu(
+  item: LibraryItem,
+  st: OnyxState,
+  setMatchItem?: (item: LibraryItem) => void,
+): ContextMenuItem[] {
   const isAdmin = st.user?.type === 'root' || st.user?.type === 'admin';
 
   const refreshProgress = async () => {
@@ -42,7 +46,7 @@ export function buildItemContextMenu(item: LibraryItem, st: OnyxState): ContextM
   if (isAdmin) {
     items.push(
       { label: 'Re-Scan (coming soon)', onClick: () => {}, disabled: true },
-      { label: 'Match (coming soon)',   onClick: () => {}, disabled: true },
+      { label: 'Match', onClick: () => setMatchItem?.(item), disabled: !setMatchItem },
       { label: 'Delete (coming soon)',  onClick: () => {}, disabled: true, danger: true },
     );
   }
