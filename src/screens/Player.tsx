@@ -16,18 +16,11 @@ import Icon from '../components/Icon';
 import Waveform from '../components/Waveform';
 import VolumeControl from '../components/chrome/VolumeControl';
 import DeviceSelector from '../components/chrome/DeviceSelector';
-import { getCachedReview, setCachedReview, fetchHardcoverData } from '../api/reviewCache';
+import { getCachedReview, setCachedReview } from '../api/reviewCache';
 import type { OLRatings, OLShelves } from '../api/reviewCache';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
-
-interface GBooksInfo {
-  averageRating?: number;
-  ratingsCount?: number;
-  infoLink?: string;
-}
-
 
 type SleepMode = null | number | 'chapter';
 
@@ -80,21 +73,15 @@ export default function Player({ st }: PlayerProps) {
     }
   };
 
-  const [gBooksInfo, setGBooksInfo] = useState<GBooksInfo | null>(null);
-
   // undefined = not fetched yet, null = fetched but not found, string = OL work key
   const [olWorkKey, setOlWorkKey] = useState<string | null | undefined>(undefined);
   const [olRatings, setOlRatings] = useState<OLRatings | null>(null);
   const [olShelves, setOlShelves] = useState<OLShelves | null>(null);
 
-  const [hardcoverInfo, setHardcoverInfo] = useState<{ rating: number | null; count: number | null; link: string | null } | null>(null);
-
   useEffect(() => {
-    setGBooksInfo(null);
     setOlWorkKey(undefined);
     setOlRatings(null);
     setOlShelves(null);
-    setHardcoverInfo(null);
     if (!b) return;
 
     // Serve from cache immediately if fresh — no network request.
@@ -105,22 +92,10 @@ export default function Player({ st }: PlayerProps) {
         setOlRatings(cached.olRatings);
         setOlShelves(cached.olShelves);
       }
-      if (cached.googleRating != null || cached.googleCount != null || cached.googleLink != null) {
-        setGBooksInfo({
-          averageRating: cached.googleRating ?? undefined,
-          ratingsCount:  cached.googleCount  ?? undefined,
-          infoLink:      cached.googleLink   ?? undefined,
-        });
-      }
-      if (st.enableHardcover) {
-        setHardcoverInfo({ rating: cached.hardcoverRating, count: cached.hardcoverCount, link: cached.hardcoverLink });
-      }
-      console.log('[review] cache hit — google:', { googleRating: cached.googleRating, googleCount: cached.googleCount }, 'hardcover:', { hardcoverRating: cached.hardcoverRating, hardcoverCount: cached.hardcoverCount, hardcoverLink: cached.hardcoverLink });
       return;
     }
 
-    // Cache miss — fetch Open Library, Google Books, and Hardcover.
-    const apiKey = st.googleBooksApiKey;
+    // Cache miss — fetch Open Library.
     let cancelled = false;
 
     (async () => {
@@ -128,7 +103,6 @@ export default function Player({ st }: PlayerProps) {
         const meta = b.media?.metadata;
         const isbn = meta?.isbn13 || meta?.isbn10 || meta?.isbn;
 
-        // ── Open Library ──────────────────────────────────────────────────────
         let olKey: string | null = null;
         let olRat: OLRatings | null = null;
         let olSh: OLShelves | null = null;
@@ -161,41 +135,6 @@ export default function Player({ st }: PlayerProps) {
           }
         }
 
-        // ── Google Books ──────────────────────────────────────────────────────
-        let googleRating: number | null = null;
-        let googleCount:  number | null = null;
-        let googleLink:   string | null = null;
-
-        if (apiKey) {
-          try {
-            const q = isbn
-              ? `isbn:${isbn}`
-              : `intitle:${encodeURIComponent(bookTitle(b))}+inauthor:${encodeURIComponent(bookAuthor(b))}`;
-            const res  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=1&key=${apiKey}`);
-            const data = await res.json();
-            const info = data.items?.[0]?.volumeInfo ?? null;
-            if (info) {
-              googleRating = info.averageRating ?? null;
-              googleCount  = info.ratingsCount  ?? null;
-              googleLink   = info.canonicalVolumeLink ?? info.infoLink ?? null;
-            }
-          } catch (e) {
-            console.error('[gbooks] fetch failed:', e);
-          }
-        }
-
-        // ── Hardcover ─────────────────────────────────────────────────────────
-        let hardcoverRating: number | null = null;
-        let hardcoverCount:  number | null = null;
-        let hardcoverLink:   string | null = null;
-
-        if (st.enableHardcover) {
-          const hc = await fetchHardcoverData(bookTitle(b), bookAuthor(b), isbn ?? undefined);
-          hardcoverRating = hc.rating;
-          hardcoverCount  = hc.count;
-          hardcoverLink   = hc.link;
-        }
-
         if (cancelled) return;
 
         if (st.enableOpenLibrary) {
@@ -203,29 +142,33 @@ export default function Player({ st }: PlayerProps) {
           setOlRatings(olRat);
           setOlShelves(olSh);
         }
-        if (googleRating != null || googleCount != null || googleLink != null) {
-          setGBooksInfo({ averageRating: googleRating ?? undefined, ratingsCount: googleCount ?? undefined, infoLink: googleLink ?? undefined });
-        }
-        if (st.enableHardcover) {
-          setHardcoverInfo({ rating: hardcoverRating, count: hardcoverCount, link: hardcoverLink });
-        }
 
-        console.log('[review] fetch done — google:', { googleRating, googleCount, googleLink }, 'hardcover:', { hardcoverRating, hardcoverCount, hardcoverLink }, 'ol:', { olKey });
-
-        setCachedReview(b.id, { olWorkKey: olKey, olRatings: olRat, olShelves: olSh, googleRating, googleCount, googleLink, hardcoverRating, hardcoverCount, hardcoverLink });
+        setCachedReview(b.id, { olWorkKey: olKey, olRatings: olRat, olShelves: olSh });
       } catch (e) {
         console.error('[review] fetch failed:', e);
         if (!cancelled) setOlWorkKey(null);
       }
     })();
     return () => { cancelled = true; };
-  }, [st.currentBookId, st.googleBooksApiKey, st.enableOpenLibrary, st.enableHardcover]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.currentBookId, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sleepMode, setSleepMode] = useState<SleepMode>(null);
   const [sleepRemain, setSleepRemain] = useState(0);
   const [sleepOpen, setSleepOpen] = useState(false);
   const sleepRef = useRef<HTMLDivElement>(null);
   const chapterAtStart = useRef(chIdx);
+
+  const waveformRef = useRef<HTMLDivElement>(null);
+  const [waveWidth, setWaveWidth] = useState(600);
+
+  useEffect(() => {
+    if (!waveformRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      setWaveWidth(entries[0].contentRect.width);
+    });
+    ro.observe(waveformRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (typeof sleepMode === 'number') setSleepRemain(sleepMode * 60);
@@ -361,8 +304,8 @@ export default function Player({ st }: PlayerProps) {
               </div>
             </div>
 
-            <div onClick={onScrub} style={{ cursor: 'pointer', position: 'relative' }}>
-              <Waveform width={680} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
+            <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
+              <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
             </div>
 
             <div style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -492,37 +435,6 @@ export default function Player({ st }: PlayerProps) {
                         <div style={{ padding: '12px 0', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>Not started</div>
                       )}
 
-                      {/* Ratings (Google Books) — always shown for diagnostics */}
-                      <>
-                        <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Ratings (Google Books)</div>
-                        {gBooksInfo && (gBooksInfo.averageRating != null || gBooksInfo.ratingsCount != null) ? (
-                          <>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--onyx-line)' }}>
-                              {gBooksInfo.averageRating != null && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                  <span style={{ fontSize: 20, fontWeight: 600, color: 'var(--onyx-accent)' }}>{gBooksInfo.averageRating.toFixed(1)}</span>
-                                  <span style={{ fontSize: 13, color: 'var(--onyx-text-mute)' }}>/ 5</span>
-                                </div>
-                              )}
-                              {gBooksInfo.ratingsCount != null && (
-                                <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
-                                  {gBooksInfo.ratingsCount.toLocaleString()} ratings
-                                </span>
-                              )}
-                            </div>
-                            {gBooksInfo.infoLink && (
-                              <a href={gBooksInfo.infoLink} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginTop: 10, fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase', textDecoration: 'none' }}>
-                                View on Google Books ↗
-                              </a>
-                            )}
-                          </>
-                        ) : (
-                          <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
-                            {st.googleBooksApiKey ? 'Loading…' : 'No API key set'}
-                          </div>
-                        )}
-                      </>
-
                       {/* Open Library */}
                       {olWorkKey !== undefined && (
                         <>
@@ -559,36 +471,6 @@ export default function Player({ st }: PlayerProps) {
                         </>
                       )}
 
-                      {/* Hardcover — always shown when enabled, for diagnostics */}
-                      {st.enableHardcover && (
-                        <>
-                          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Hardcover</div>
-                          {hardcoverInfo ? (
-                            <>
-                              <div style={{ padding: '8px 0', borderBottom: '1px solid var(--onyx-line)', fontSize: 12.5, color: 'var(--onyx-text-dim)' }}>
-                                {hardcoverInfo.rating != null
-                                  ? `${hardcoverInfo.rating.toFixed(1)} / 5`
-                                  : '—'}
-                                {hardcoverInfo.count != null
-                                  ? <span style={{ color: 'var(--onyx-text-mute)', fontFamily: MONO, fontSize: 10 }}>{' '}· {hardcoverInfo.count.toLocaleString()} ratings</span>
-                                  : null}
-                              </div>
-                              {hardcoverInfo.link && (
-                                <a
-                                  href={hardcoverInfo.link}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{ display: 'inline-block', marginTop: 10, fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase', textDecoration: 'none' }}
-                                >
-                                  View on Hardcover ↗
-                                </a>
-                              )}
-                            </>
-                          ) : (
-                            <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>Loading…</div>
-                          )}
-                        </>
-                      )}
                     </>
                   );
                 })()}

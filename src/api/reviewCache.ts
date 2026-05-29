@@ -15,12 +15,6 @@ export interface ReviewData {
   olWorkKey: string | null;
   olRatings: OLRatings | null;
   olShelves: OLShelves | null;
-  googleRating: number | null;
-  googleCount: number | null;
-  googleLink: string | null;
-  hardcoverRating: number | null;
-  hardcoverCount: number | null;
-  hardcoverLink: string | null;
 }
 
 interface CacheEntry {
@@ -28,23 +22,28 @@ interface CacheEntry {
   fetchedAt: number;
 }
 
+const CACHE_VERSION = 5;
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_ENTRIES = 200;
 const STORAGE_KEY = 'skald.reviewCache';
+const STORAGE_VERSION_KEY = 'skald.reviewCacheVersion';
 
 const cache = new Map<string, CacheEntry>();
 
-// Load from localStorage on module init.
-try {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    const entries = JSON.parse(stored) as [string, CacheEntry][];
-    for (const [key, entry] of entries) {
-      cache.set(key, entry);
+// Version-check on module init: wipe stale entries on schema change.
+if (localStorage.getItem(STORAGE_VERSION_KEY) !== String(CACHE_VERSION)) {
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.setItem(STORAGE_VERSION_KEY, String(CACHE_VERSION));
+} else {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const entries = JSON.parse(stored) as [string, CacheEntry][];
+      for (const [key, entry] of entries) cache.set(key, entry);
     }
+  } catch {
+    // Ignore parse errors — start with empty cache.
   }
-} catch {
-  // Ignore parse errors — start with empty cache.
 }
 
 export function getCachedReview(itemId: string): ReviewData | null {
@@ -57,6 +56,12 @@ export function getCachedReview(itemId: string): ReviewData | null {
 export function setCachedReview(itemId: string, data: ReviewData): void {
   cache.set(itemId, { data, fetchedAt: Date.now() });
   persist();
+}
+
+export function clearReviewCache(): void {
+  cache.clear();
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(STORAGE_VERSION_KEY);
 }
 
 function persist(): void {
@@ -72,38 +77,6 @@ function persist(): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch {
     // Ignore storage errors (e.g. quota exceeded).
-  }
-}
-
-// ── Hardcover ─────────────────────────────────────────────────────────────────
-
-export async function fetchHardcoverData(
-  title: string,
-  author: string,
-  isbn?: string,
-): Promise<{ rating: number | null; count: number | null; link: string | null }> {
-  const query = isbn ? isbn : `${title} ${author}`;
-  try {
-    const res = await fetch('https://api.hardcover.app/v1/graphql', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: `query SearchBook($query: String!) { search(query: $query, query_type: "Book", per_page: 1) { results } }`,
-        variables: { query },
-      }),
-    });
-    const json = await res.json() as { data?: { search?: { results?: unknown } } };
-    const raw = json?.data?.search?.results;
-    const parsed = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { hits?: { document?: Record<string, unknown> }[] } | null;
-    const hit = parsed?.hits?.[0]?.document ?? null;
-    if (!hit) return { rating: null, count: null, link: null };
-    const rating = typeof hit.rating === 'number' ? hit.rating : null;
-    const count = typeof hit.ratings_count === 'number' ? hit.ratings_count : null;
-    const slug = typeof hit.slug === 'string' ? hit.slug : null;
-    const link = slug ? `https://hardcover.app/books/${slug}` : null;
-    return { rating, count, link };
-  } catch {
-    return { rating: null, count: null, link: null };
   }
 }
 
@@ -123,10 +96,9 @@ function itemAuthor(item: LibraryItem): string {
 
 async function fetchReviewData(
   item: LibraryItem,
-  apiKey: string,
-  opts: { enableOpenLibrary?: boolean; enableHardcover?: boolean } = {},
+  opts: { enableOpenLibrary?: boolean } = {},
 ): Promise<ReviewData> {
-  const { enableOpenLibrary = true, enableHardcover = true } = opts;
+  const { enableOpenLibrary = true } = opts;
   const meta = item.media?.metadata;
   const isbn = meta?.isbn13 || meta?.isbn10 || meta?.isbn;
 
@@ -162,40 +134,7 @@ async function fetchReviewData(
     }
   }
 
-  // ── Google Books ─────────────────────────────────────────────────────────────
-  let googleRating: number | null = null;
-  let googleCount:  number | null = null;
-  let googleLink:   string | null = null;
-
-  if (apiKey) {
-    try {
-      const q    = isbn ? `isbn:${isbn}` : `intitle:${encodeURIComponent(itemTitle(item))}+inauthor:${encodeURIComponent(itemAuthor(item))}`;
-      const res  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${q}&maxResults=1&key=${apiKey}`);
-      const data = await res.json() as { items?: { volumeInfo: { averageRating?: number; ratingsCount?: number; canonicalVolumeLink?: string; infoLink?: string } }[] };
-      const info = data.items?.[0]?.volumeInfo ?? null;
-      if (info) {
-        googleRating = info.averageRating ?? null;
-        googleCount  = info.ratingsCount  ?? null;
-        googleLink   = info.canonicalVolumeLink ?? info.infoLink ?? null;
-      }
-    } catch {
-      // Google Books failure is non-fatal.
-    }
-  }
-
-  // ── Hardcover ────────────────────────────────────────────────────────────────
-  let hardcoverRating: number | null = null;
-  let hardcoverCount:  number | null = null;
-  let hardcoverLink:   string | null = null;
-
-  if (enableHardcover) {
-    const hc = await fetchHardcoverData(itemTitle(item), itemAuthor(item), isbn ?? undefined);
-    hardcoverRating = hc.rating;
-    hardcoverCount  = hc.count;
-    hardcoverLink   = hc.link;
-  }
-
-  return { olWorkKey, olRatings, olShelves, googleRating, googleCount, googleLink, hardcoverRating, hardcoverCount, hardcoverLink };
+  return { olWorkKey, olRatings, olShelves };
 }
 
 /**
@@ -207,13 +146,11 @@ export function prefetchReviews(
   items: LibraryItem[],
   _serverUrl: string,
   enableOpenLibrary = true,
-  enableHardcover = true,
 ): () => void {
   const queue = items.filter(item => getCachedReview(item.id) === null);
   if (queue.length === 0) return () => {};
 
-  const apiKey = localStorage.getItem('skald.googleBooksApiKey') ?? '';
-  const opts = { enableOpenLibrary, enableHardcover };
+  const opts = { enableOpenLibrary };
   let cancelled = false;
   let timerId: ReturnType<typeof setTimeout> | null = null;
 
@@ -221,7 +158,7 @@ export function prefetchReviews(
     if (cancelled || remaining.length === 0) return;
     const [head, ...tail] = remaining;
 
-    fetchReviewData(head, apiKey, opts)
+    fetchReviewData(head, opts)
       .then(data => { if (!cancelled) setCachedReview(head.id, data); })
       .catch(() => { /* silently skip failures */ })
       .finally(() => {

@@ -257,12 +257,8 @@ export interface OnyxState {
   setPickItUpCollapsed: (collapsed: boolean) => void;
   scale: number;
   setScale: (scale: number) => void;
-  googleBooksApiKey: string;
-  setGoogleBooksApiKey: (key: string) => void;
   enableOpenLibrary: boolean;
   setEnableOpenLibrary: (on: boolean) => void;
-  enableHardcover: boolean;
-  setEnableHardcover: (on: boolean) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -561,27 +557,12 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('onyx.uiScale', String(v)); setScaleRaw(v);
   }, []);
 
-  const [googleBooksApiKey, setGoogleBooksApiKeyRaw] = useState(
-    () => localStorage.getItem('skald.googleBooksApiKey') ?? '',
-  );
-  const setGoogleBooksApiKey = useCallback((v: string) => {
-    localStorage.setItem('skald.googleBooksApiKey', v); setGoogleBooksApiKeyRaw(v);
-  }, []);
-
   const [enableOpenLibrary, setEnableOpenLibraryRaw] = useState(() => {
     const v = localStorage.getItem('skald.enableOpenLibrary');
     return v === null ? true : v === 'true';
   });
   const setEnableOpenLibrary = useCallback((v: boolean) => {
     localStorage.setItem('skald.enableOpenLibrary', String(v)); setEnableOpenLibraryRaw(v);
-  }, []);
-
-  const [enableHardcover, setEnableHardcoverRaw] = useState(() => {
-    const v = localStorage.getItem('skald.enableHardcover');
-    return v === null ? true : v === 'true';
-  });
-  const setEnableHardcover = useCallback((v: boolean) => {
-    localStorage.setItem('skald.enableHardcover', String(v)); setEnableHardcoverRaw(v);
   }, []);
 
   const accentRef = useRef(accentColor);
@@ -689,8 +670,6 @@ export function useOnyxState(): OnyxState {
     shelfTab, setShelfTab,
     pickItUpCollapsed, setPickItUpCollapsed,
     scale, setScale,
-    googleBooksApiKey, setGoogleBooksApiKey,
     enableOpenLibrary, setEnableOpenLibrary,
-    enableHardcover, setEnableHardcover,
   };
 }
