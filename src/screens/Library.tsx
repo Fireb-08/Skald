@@ -18,9 +18,9 @@ export interface LibraryProps {
 export default function Library({ st }: LibraryProps) {
   useEffect(() => {
     if (!st.library.length || !st.serverUrl) return;
-    const cancel = prefetchReviews(st.library, st.serverUrl, st.enableOpenLibrary, st.enableHardcover);
+    const cancel = prefetchReviews(st.library, st.serverUrl, st.enableOpenLibrary);
     return cancel;
-  }, [st.library, st.serverUrl, st.enableOpenLibrary, st.enableHardcover]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.library, st.serverUrl, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>

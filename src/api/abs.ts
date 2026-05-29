@@ -240,3 +240,4 @@ export function closeSession(
 ): Promise<void> {
   return invoke('close_session', { serverUrl, sessionId, currentTime, timeListened });
 }
+
