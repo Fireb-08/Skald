@@ -15,7 +15,7 @@ export interface LibraryProps {
 
 export default function Library({ st }: LibraryProps) {
   return (
-    <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0 }}>
+    <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
       <FocusPanel st={st} />
 
       {/* RIGHT — shelf column */}

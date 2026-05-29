@@ -32,6 +32,9 @@ export default function App() {
         bottom: 0,
         display: 'flex',
         minHeight: 0,
+        width: '100%',
+        maxWidth: '100%',
+        overflow: 'hidden',
       }}>
         {st.libraryLoading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontSize: 14, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: '0.08em' }}>

@@ -162,16 +162,33 @@ export default function Player({ st }: PlayerProps) {
 
       <div style={{ flex: 1, display: 'flex', gap: 32, alignItems: 'stretch', minHeight: 0 }}>
 
-        <div style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexShrink: 0 }}>
+        <div style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexShrink: 0, minHeight: 0 }}>
           <div style={{ position: 'absolute', inset: '5% 5% 0 5%', borderRadius: 24, background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.28), transparent 70%)', filter: 'blur(60px)', zIndex: 0 }} />
           <div style={{ position: 'relative', zIndex: 1 }}>
             <Cover item={b} size={420} serverUrl={st.serverUrl} />
           </div>
-          <div style={{ marginTop: 32, textAlign: 'center', position: 'relative', zIndex: 1 }}>
+          <div style={{ marginTop: 32, textAlign: 'center', position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
             <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 8 }}>{bSeries}</div>
             <div style={{ fontFamily: SERIF, fontSize: 48, fontWeight: 500, lineHeight: 1, letterSpacing: '-0.02em' }}>{bookTitle(b)}</div>
             <div style={{ marginTop: 10, fontSize: 16, color: 'var(--onyx-text-dim)' }}>by {bookAuthor(b)}</div>
             <div style={{ marginTop: 2, fontSize: 13, color: 'var(--onyx-text-mute)' }}>narrated by {bookNarrator(b)}</div>
+
+            {/* Synopsis */}
+            <div style={{ marginTop: 24, width: '100%', textAlign: 'left', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 8 }}>
+                Synopsis
+              </div>
+              {b.media?.metadata?.description ? (
+                <div
+                  style={{ flex: 1, overflowY: 'auto', fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
+                  dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
+                />
+              ) : (
+                <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
+                  No synopsis available.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

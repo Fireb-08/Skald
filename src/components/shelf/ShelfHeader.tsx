@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress,
@@ -37,6 +38,22 @@ export interface ShelfHeaderProps {
 }
 
 export default function ShelfHeader({ st }: ShelfHeaderProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(9999);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      setContainerWidth(entries[0]?.contentRect.width ?? el.clientWidth);
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  const pillsInline  = containerWidth >= 900;
+  const toggleInline = containerWidth >= 700;
   const filtered = st.library.filter(b => {
     if (st.contextFilter) {
       const { kind, value, bookIds } = st.contextFilter;
@@ -99,7 +116,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
 
   const isLibrary = st.shelfTab === 'library';
 
-  const tabCountText = (() => {
+  const subtitleText = (() => {
     switch (st.shelfTab) {
       case 'series': {
         const n = new Set(st.library.map(b => seriesNameOf(bookSeries(b))).filter(Boolean)).size;
@@ -115,72 +132,94 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
       }
       case 'collections':
         return 'collections';
-      default:
-        return countText;
+      default: {
+        let t = `${filtered.length} title${filtered.length === 1 ? '' : 's'}`;
+        if (st.search) t += ` matching "${st.search}"`;
+        return t;
+      }
     }
   })();
 
+  const filterPills = FILTER_PILLS.map(f => (
+    <button key={f.id} onClick={() => st.setFilter(f.id)} style={{
+      padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
+      background: st.filter === f.id ? 'var(--onyx-accent-dim)' : 'transparent',
+      border: `1px solid ${st.filter === f.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
+      color: st.filter === f.id ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+      fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+    }}>{f.l}</button>
+  ));
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 4px 14px' }}>
+    <div ref={containerRef} style={{ padding: '8px 4px 14px' }}>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, minWidth: 0, flexShrink: 0 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {isLibrary && st.contextFilter ? st.contextFilter.value : 'The shelf'}
-        </div>
-        <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-          {tabCountText}
-        </div>
-        {isLibrary && st.contextFilter && (
-          <button onClick={() => st.setContextFilter(null)} style={{
-            display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 10px',
-            background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', borderRadius: 999,
-            fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase',
-            cursor: 'pointer',
-          }}>
-            <span style={{ fontSize: 9, opacity: 0.7 }}>{st.contextFilter.kind.toUpperCase()}</span>
-            {st.contextFilter.value}
-            <span style={{ fontSize: 13, marginLeft: 2, lineHeight: 1 }}>×</span>
-          </button>
-        )}
-      </div>
+      {/* Main row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
 
-      <div style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
-          background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
-          borderRadius: 10, alignSelf: 'flex-start',
-        }}>
-          {TABS.map(t => {
-            const active = st.shelfTab === t.id;
-            return (
-              <button key={t.id} onClick={() => st.setShelfTab(t.id)} style={{
-                padding: '7px 14px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
-                background: active ? 'var(--onyx-accent-dim)' : 'transparent',
-                border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-                color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
-                fontSize: 12.5, fontWeight: active ? 600 : 500,
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {isLibrary && st.contextFilter ? st.contextFilter.value : 'The shelf'}
+            </div>
+            {isLibrary && st.contextFilter && (
+              <button onClick={() => st.setContextFilter(null)} style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 10px',
+                background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', borderRadius: 999,
+                fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase',
+                cursor: 'pointer',
               }}>
-                {t.label}
+                <span style={{ fontSize: 9, opacity: 0.7 }}>{st.contextFilter.kind.toUpperCase()}</span>
+                {st.contextFilter.value}
+                <span style={{ fontSize: 13, marginLeft: 2, lineHeight: 1 }}>×</span>
               </button>
-            );
-          })}
+            )}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {subtitleText}
+          </div>
         </div>
+
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
+            background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
+            borderRadius: 10, alignSelf: 'flex-start',
+          }}>
+            {TABS.map(t => {
+              const active = st.shelfTab === t.id;
+              return (
+                <button key={t.id} onClick={() => st.setShelfTab(t.id)} style={{
+                  padding: '7px 14px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
+                  background: active ? 'var(--onyx-accent-dim)' : 'transparent',
+                  border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,
+                  color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
+                  fontSize: 12.5, fontWeight: active ? 600 : 500,
+                }}>
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {toggleInline && (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ marginRight: pillsInline ? 6 : 0 }}>
+              <ViewModeToggle st={st} />
+            </div>
+            {pillsInline && filterPills}
+          </div>
+        )}
+
       </div>
 
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
-        <div style={{ marginRight: 6 }}>
-          <ViewModeToggle st={st} />
+      {/* Second row — shown below 900px */}
+      {!pillsInline && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
+          {!toggleInline && <ViewModeToggle st={st} />}
+          {filterPills}
         </div>
-        {FILTER_PILLS.map(f => (
-          <button key={f.id} onClick={() => st.setFilter(f.id)} style={{
-            padding: '5px 10px', borderRadius: 999, cursor: 'pointer',
-            background: st.filter === f.id ? 'var(--onyx-accent-dim)' : 'transparent',
-            border: `1px solid ${st.filter === f.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-            color: st.filter === f.id ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
-            fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>{f.l}</button>
-        ))}
-      </div>
+      )}
 
     </div>
   );
