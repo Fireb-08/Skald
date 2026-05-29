@@ -196,6 +196,7 @@ export interface OnyxState {
   // Library
   library: LibraryItem[];
   libraryLoading: boolean;
+  updateLibraryItem: (item: LibraryItem) => void;
   mediaProgress: MediaProgress[];
   setMediaProgress: (progress: MediaProgress[]) => void;
   listeningStats: ListeningStats | null;
@@ -375,6 +376,9 @@ export function useOnyxState(): OnyxState {
 
   // ── Library ─────────────────────────────────────────────────────────────────
   const [library, setLibraryRaw] = useState<LibraryItem[]>([]);
+  const updateLibraryItem = useCallback((item: LibraryItem) => {
+    setLibraryRaw(prev => prev.map(x => x.id === item.id ? item : x));
+  }, []);
   const [libraryLoading, setLibraryLoadingRaw] = useState(
     () => Boolean(localStorage.getItem('skald.serverUrl') && localStorage.getItem('skald.authToken')),
   );
@@ -645,7 +649,7 @@ export function useOnyxState(): OnyxState {
     userId, setUserId,
     authToken, setAuthToken,
     user, setUser,
-    library, libraryLoading, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks,
+    library, libraryLoading, updateLibraryItem, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks,
     screen, setScreen,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     playing, setPlaying,

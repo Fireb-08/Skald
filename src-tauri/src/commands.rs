@@ -276,6 +276,38 @@ pub async fn get_cover(
 }
 
 #[tauri::command]
+pub async fn search_books(
+    server_url: String,
+    title: String,
+    author: String,
+    provider: String,
+) -> Result<serde_json::Value, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .search_books(&title, &author, &provider)
+        .await
+}
+
+#[tauri::command]
+pub async fn match_item(
+    server_url: String,
+    item_id: String,
+    provider: String,
+    title: String,
+    author: String,
+    asin: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .match_item(&item_id, &provider, &title, &author, asin.as_deref())
+        .await
+}
+
+#[tauri::command]
 pub async fn close_session(
     server_url: String,
     session_id: String,

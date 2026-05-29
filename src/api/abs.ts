@@ -241,3 +241,23 @@ export function closeSession(
   return invoke('close_session', { serverUrl, sessionId, currentTime, timeListened });
 }
 
+export function searchBooks(
+  serverUrl: string,
+  title: string,
+  author: string,
+  provider: string,
+): Promise<unknown> {
+  return invoke('search_books', { serverUrl, title, author, provider });
+}
+
+export function matchItem(
+  serverUrl: string,
+  itemId: string,
+  provider: string,
+  title: string,
+  author: string,
+  asin?: string,
+): Promise<unknown> {
+  return invoke('match_item', { serverUrl, itemId, provider, title, author, asin: asin ?? null });
+}
+

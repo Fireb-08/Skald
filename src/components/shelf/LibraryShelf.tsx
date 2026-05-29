@@ -10,6 +10,7 @@ import Icon from '../Icon';
 import SortIndicator from './SortIndicator';
 import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
+import MatchModal from '../MatchModal';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -179,6 +180,7 @@ interface CtxMenu { x: number; y: number; item: LibraryItem }
 export default function LibraryShelf({ st }: LibraryShelfProps) {
   const coverW = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
   const [contextMenu, setContextMenu] = useState<CtxMenu | null>(null);
+  const [matchItem, setMatchItem] = useState<LibraryItem | null>(null);
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
@@ -285,8 +287,19 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={buildItemContextMenu(contextMenu.item, st)}
+          items={buildItemContextMenu(contextMenu.item, st, setMatchItem)}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {matchItem && (
+        <MatchModal
+          item={matchItem}
+          serverUrl={st.serverUrl}
+          onClose={() => setMatchItem(null)}
+          onComplete={updated => {
+            st.updateLibraryItem(updated);
+            setMatchItem(null);
+          }}
         />
       )}
     </Glass>
