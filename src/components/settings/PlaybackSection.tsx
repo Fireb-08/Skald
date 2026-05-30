@@ -1,34 +1,13 @@
 import { SPEEDS } from '../../state/onyx';
-import { SectionHead, Row, Toggle, Pill, useLocal, MONO } from './shared';
+import { SectionHead, Row, Toggle, Pill, useLocal } from './shared';
 
 export interface PlaybackSectionProps {}
-
-function WipBadge() {
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      padding: '2px 8px',
-      borderRadius: 999,
-      background: 'var(--onyx-accent-dim)',
-      color: 'var(--onyx-accent)',
-      fontSize: 10,
-      fontFamily: MONO,
-      letterSpacing: '0.05em',
-      whiteSpace: 'nowrap' as const,
-      marginLeft: 8,
-    }}>
-      Work in progress
-    </span>
-  );
-}
 
 export default function PlaybackSection() {
   const [speed, setSpeed]               = useLocal('onyx.playback.speed',       '1.0');
   const [skipDur, setSkipDur]           = useLocal('onyx.playback.skip',        '30s');
   const [rewindOnResume, setRewindOnResume] = useLocal('onyx.playback.rewind',  '5s');
   const [autoPlayNext, setAutoPlayNext] = useLocal('onyx.playback.autoPlayNext', true);
-  const [smartPause, setSmartPause]     = useLocal('onyx.playback.smartPause',   true);
   const [sleepDefault, setSleepDefault] = useLocal('onyx.playback.sleepDefault', 'End of chapter');
 
   const SKIP   = ['10s', '15s', '30s', '60s'];
@@ -61,13 +40,6 @@ export default function PlaybackSection() {
 
       <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends.">
         <Toggle on={autoPlayNext} onChange={setAutoPlayNext} />
-      </Row>
-
-      <Row label="Smart pause" hint="Pause when the audio device disconnects (e.g. headphones unplugged).">
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Toggle on={smartPause} onChange={setSmartPause} />
-          <WipBadge />
-        </div>
       </Row>
 
       <Row label="Sleep timer default" hint="Pre-fill when you open the sleep timer.">
