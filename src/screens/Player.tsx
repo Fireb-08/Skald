@@ -7,7 +7,7 @@ import {
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
-  SPEEDS, chapterAt, chapterStart, fmtTime,
+  SPEEDS, chapterAt, chapterStart, fmtTime, fmtRemaining,
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
@@ -16,6 +16,8 @@ import Icon from '../components/Icon';
 import Waveform from '../components/Waveform';
 import VolumeControl from '../components/chrome/VolumeControl';
 import DeviceSelector from '../components/chrome/DeviceSelector';
+import { getCachedReview, setCachedReview } from '../api/reviewCache';
+import type { OLRatings, OLShelves } from '../api/reviewCache';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -70,6 +72,85 @@ export default function Player({ st }: PlayerProps) {
       console.error('[bookmark] create failed:', err);
     }
   };
+
+  // undefined = not fetched yet, null = fetched but not found, string = OL work key
+  const [olWorkKey, setOlWorkKey] = useState<string | null | undefined>(undefined);
+  const [olRatings, setOlRatings] = useState<OLRatings | null>(null);
+  const [olShelves, setOlShelves] = useState<OLShelves | null>(null);
+
+  useEffect(() => {
+    setOlWorkKey(undefined);
+    setOlRatings(null);
+    setOlShelves(null);
+    if (!b) return;
+
+    // Serve from cache immediately if fresh — no network request.
+    const cached = getCachedReview(b.id);
+    if (cached) {
+      if (st.enableOpenLibrary) {
+        setOlWorkKey(cached.olWorkKey);
+        setOlRatings(cached.olRatings);
+        setOlShelves(cached.olShelves);
+      }
+      return;
+    }
+
+    // Cache miss — fetch Open Library.
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const meta = b.media?.metadata;
+        const isbn = meta?.isbn13 || meta?.isbn10 || meta?.isbn;
+
+        let olKey: string | null = null;
+        let olRat: OLRatings | null = null;
+        let olSh: OLShelves | null = null;
+
+        if (st.enableOpenLibrary) {
+          let rawWorkId: string | null = null;
+          if (isbn) {
+            const res = await fetch(
+              `https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`,
+            );
+            const data = await res.json();
+            rawWorkId = data[`ISBN:${isbn}`]?.works?.[0]?.key ?? null;
+          }
+          if (!rawWorkId) {
+            const res = await fetch(
+              `https://openlibrary.org/search.json?title=${encodeURIComponent(bookTitle(b))}&author=${encodeURIComponent(bookAuthor(b))}&limit=1`,
+            );
+            const data = await res.json();
+            rawWorkId = data.docs?.[0]?.key ?? null;
+          }
+          if (rawWorkId) {
+            olKey = rawWorkId.replace(/^\/works\//, '');
+            const [ratRes, shRes] = await Promise.all([
+              fetch(`https://openlibrary.org/works/${olKey}/ratings.json`),
+              fetch(`https://openlibrary.org/works/${olKey}/bookshelves.json`),
+            ]);
+            const [ratData, shData] = await Promise.all([ratRes.json(), shRes.json()]);
+            olRat = { average: ratData.summary?.average ?? null, count: ratData.summary?.count ?? null };
+            olSh  = { wantToRead: shData.counts?.want_to_read ?? null, reading: shData.counts?.currently_reading ?? null, alreadyRead: shData.counts?.already_read ?? null };
+          }
+        }
+
+        if (cancelled) return;
+
+        if (st.enableOpenLibrary) {
+          setOlWorkKey(olKey);
+          setOlRatings(olRat);
+          setOlShelves(olSh);
+        }
+
+        setCachedReview(b.id, { olWorkKey: olKey, olRatings: olRat, olShelves: olSh });
+      } catch (e) {
+        console.error('[review] fetch failed:', e);
+        if (!cancelled) setOlWorkKey(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [st.currentBookId, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sleepMode, setSleepMode] = useState<SleepMode>(null);
   const [sleepRemain, setSleepRemain] = useState(0);
@@ -208,9 +289,9 @@ export default function Player({ st }: PlayerProps) {
           </div>
         </div>
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
 
-          <Glass translucent={st.translucent} style={{ padding: 26, flexShrink: 0 }}>
+          <Glass translucent={st.translucent} style={{ padding: 26 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 22 }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>Now playing · Ch. {curCh.n}</div>
@@ -302,10 +383,102 @@ export default function Player({ st }: PlayerProps) {
             </div>
           </Glass>
 
-          <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'flex', gap: 18, minHeight: 0 }}>
 
-            {/* ── Chapters ─────────────────────────────────────────── */}
-            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* ── Details panel ─────────────────────────────────────── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 14 }}>Details</div>
+              <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, marginRight: -8, paddingRight: 8 }}>
+                {(() => {
+                  const meta = b.media?.metadata;
+                  const prog = st.mediaProgress.find(p => p.libraryItemId === st.currentBookId);
+                  const dash = '—';
+                  const detailRow = (label: string, value: React.ReactNode) => (
+                    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 0', borderBottom: '1px solid var(--onyx-line)', gap: 12 }}>
+                      <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', flexShrink: 0, paddingTop: 1 }}>{label}</div>
+                      <div style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', textAlign: 'right', minWidth: 0 }}>{value ?? dash}</div>
+                    </div>
+                  );
+                  const tags = b.media?.tags ?? [];
+                  const genres = meta?.genres?.filter(Boolean) ?? [];
+                  return (
+                    <>
+                      {/* Book details */}
+                      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 4, paddingBottom: 4 }}>Book</div>
+                      {detailRow('Publisher',  meta?.publisher    || dash)}
+                      {detailRow('Genre',      genres.join(', ')  || dash)}
+                      {detailRow('Year',       meta?.publishedYear || dash)}
+                      {detailRow('Language',   meta?.language      || dash)}
+                      {detailRow('Duration',   bookDur(b))}
+                      {tags.length > 0 && detailRow('Tags',
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
+                          {tags.map(t => (
+                            <span key={t} style={{ padding: '1px 7px', borderRadius: 999, background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-dim)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>{t}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Listening stats */}
+                      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Listening</div>
+                      {prog ? (
+                        <>
+                          {detailRow('Progress',
+                            <span style={{ color: prog.isFinished ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
+                              {Math.round(prog.progress * 100)}%{prog.isFinished && ' ✓'}
+                            </span>
+                          )}
+                          {detailRow('Listened',   fmtTime(prog.currentTime))}
+                          {detailRow('Remaining',  fmtRemaining(Math.max(0, prog.duration - prog.currentTime)))}
+                          {detailRow('Last played', new Date(prog.lastUpdate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}
+                        </>
+                      ) : (
+                        <div style={{ padding: '12px 0', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>Not started</div>
+                      )}
+
+                      {/* Open Library */}
+                      {olWorkKey !== undefined && (
+                        <>
+                          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Open Library</div>
+                          {olWorkKey === null ? (
+                            <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>No data found</div>
+                          ) : (
+                            <>
+                              <div style={{ padding: '8px 0', borderBottom: '1px solid var(--onyx-line)', fontSize: 12.5, color: 'var(--onyx-text-dim)' }}>
+                                {olRatings?.average != null
+                                  ? `${olRatings.average.toFixed(1)} / 5`
+                                  : '—'}
+                                {olRatings?.count != null
+                                  ? <span style={{ color: 'var(--onyx-text-mute)', fontFamily: MONO, fontSize: 10 }}>{' '}· {olRatings.count.toLocaleString()} ratings</span>
+                                  : null}
+                              </div>
+                              {olShelves && (
+                                <div style={{ padding: '8px 0', borderBottom: '1px solid var(--onyx-line)', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em', lineHeight: 1.8 }}>
+                                  <div>Want to read: <span style={{ color: 'var(--onyx-text-dim)' }}>{olShelves.wantToRead?.toLocaleString() ?? '—'}</span></div>
+                                  <div>Reading: <span style={{ color: 'var(--onyx-text-dim)' }}>{olShelves.reading?.toLocaleString() ?? '—'}</span></div>
+                                  <div>Read: <span style={{ color: 'var(--onyx-text-dim)' }}>{olShelves.alreadyRead?.toLocaleString() ?? '—'}</span></div>
+                                </div>
+                              )}
+                              <a
+                                href={`https://openlibrary.org/works/${olWorkKey}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ display: 'inline-block', marginTop: 10, fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', textTransform: 'uppercase', textDecoration: 'none' }}
+                              >
+                                View on Open Library ↗
+                              </a>
+                            </>
+                          )}
+                        </>
+                      )}
+
+                    </>
+                  );
+                })()}
+              </div>
+            </Glass>
+
+            {/* ── Chapters panel ────────────────────────────────────── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{chapters.length} · {bookDur(b)} total</div>
@@ -332,8 +505,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
             </Glass>
 
-            {/* ── Bookmarks ────────────────────────────────────────── */}
-            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Glass translucent={st.translucent} style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Bookmarks</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{playerBookmarks.length}</div>
