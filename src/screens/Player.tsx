@@ -59,7 +59,8 @@ export default function Player({ st }: PlayerProps) {
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
 
   const autoPlayNext = localStorage.getItem('onyx.playback.autoPlayNext') !== 'false';
-  const sleepDefault = localStorage.getItem('onyx.playback.sleepDefault') ?? 'Off';
+  const raw = localStorage.getItem('onyx.playback.sleepDefault') ?? '"Off"';
+  const sleepDefault = JSON.parse(raw) as string;
 
   const playerBookmarks = st.bookmarks.filter(bm => bm.libraryItemId === st.currentBookId);
 
