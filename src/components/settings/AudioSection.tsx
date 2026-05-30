@@ -71,13 +71,6 @@ export default function AudioSection() {
         </div>
       </Row>
 
-      <Row label="Exclusive mode" hint="Take exclusive control of the device for bit-perfect playback. Other apps can't play audio while Skald is using it.">
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Toggle on={true} onChange={() => {}} />
-          <WipBadge />
-        </div>
-      </Row>
-
       <Row label="Sample rate" hint="Match the source. Auto follows each book's native rate.">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ display: 'flex', gap: 6 }}>
