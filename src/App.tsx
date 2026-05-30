@@ -1,6 +1,7 @@
 import { useOnyxState } from './state/onyx';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
+import Login from './screens/Login';
 import Home from './screens/Home';
 import Library from './screens/Library';
 import Player from './screens/Player';
@@ -10,6 +11,10 @@ export default function App() {
   const st = useOnyxState();
   const isDark = st.theme !== 'light';
   const z = st.scale / 100;
+
+  if (!st.authToken) {
+    return <Login st={st} />;
+  }
 
   return (
     <div style={{
