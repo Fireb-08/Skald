@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
   SPEEDS, chapterAt, chapterStart, fmtTime, fmtRemaining,
-  bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur, bookChapters,
+  bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur, bookChapters, bookCurrentTime,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
 import Cover from '../components/Cover';
@@ -364,23 +364,77 @@ export default function Player({ st }: PlayerProps) {
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
 
-          <Glass translucent={st.translucent} style={{ padding: 26 }}>
+          <Glass translucent={st.translucent} style={{ padding: 26, flexShrink: 0 }}>
+            {isFocusedDifferent && (
+              <div style={{
+                marginBottom: 16, padding: '5px 10px',
+                borderLeft: '2px solid var(--onyx-glass-edge)',
+                borderRadius: '0 4px 4px 0',
+                background: 'rgba(255,255,255,0.03)',
+                fontFamily: MONO, fontSize: 9,
+                color: 'var(--onyx-text-mute)',
+                letterSpacing: '0.14em',
+                textTransform: 'uppercase' as const,
+              }}>
+                Preview · Not currently playing
+              </div>
+            )}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 22 }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>Now playing · {bookTitle(st.currentBook ?? b)}</div>
                 <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, marginTop: 4, letterSpacing: '-0.005em' }}>{curCh.t}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)' }}>
-                <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(chLocal)}</span>
-                <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
-                <span>{fmtTime(curCh.dur)}</span>
+                {isFocusedDifferent ? (
+                  <>
+                    <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(bookCurrentTime(b, st.mediaProgress))}</span>
+                    <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
+                    <span>{fmtTime(b.media.duration)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(chLocal)}</span>
+                    <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
+                    <span>{fmtTime(curCh.dur)}</span>
+                  </>
+                )}
               </div>
             </div>
 
-            <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
+            <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0, opacity: isFocusedDifferent ? 0.35 : 1, pointerEvents: isFocusedDifferent ? 'none' : 'auto' }}>
               <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
             </div>
 
+            {isFocusedDifferent ? (
+              <button
+                onClick={async () => {
+                  const fid = st.focusedBookId!;
+                  await closeActiveSession().catch(() => {});
+                  st.setSessionReady(false);
+                  st.setSessionId('');
+                  st.setPlaying(false);
+                  try {
+                    const { sessionId } = await openPlaybackSession(st.serverUrl, fid);
+                    st.setSessionId(sessionId);
+                    st.setSessionReady(true);
+                    st.setCurrentBookId(fid);
+                    await playAudio().catch(console.error);
+                  } catch (err) {
+                    console.error('[Player] play focused book failed:', err);
+                  }
+                }}
+                style={{
+                  marginTop: 22, width: '100%', padding: '13px 0',
+                  background: 'var(--onyx-accent)', border: 'none', borderRadius: 8,
+                  color: 'var(--onyx-bg)', cursor: 'pointer',
+                  fontFamily: MONO, fontSize: 12, fontWeight: 600,
+                  letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}
+              >
+                <Icon name="play" size={13} /> Play this book
+              </button>
+            ) : (
             <div ref={transportRef} style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
 
               <div style={{ display: 'flex', gap: 6, flexShrink: 1, minWidth: 0 }}>
@@ -478,6 +532,7 @@ export default function Player({ st }: PlayerProps) {
                 </div>
               </div>
             </div>
+            )}
           </Glass>
 
           <div style={{ flex: 1, display: 'flex', gap: 18, minHeight: 0, overflow: 'hidden' }}>
