@@ -39,7 +39,10 @@ function readSkipSecs(): number {
 
 export function useGlobalShortcuts(st: OnyxState): void {
   const stRef = useRef(st);
-  stRef.current = st;
+
+  useEffect(() => {
+    stRef.current = st;
+  });
 
   useEffect(() => {
     const bindings = loadBindings();
