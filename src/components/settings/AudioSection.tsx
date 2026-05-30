@@ -2,29 +2,9 @@ import { useState, useEffect } from 'react';
 import { getAudioDevices, setAudioDevice as setAudioDeviceCmd } from '../../api/abs';
 import type { AudioDevice } from '../../api/abs';
 import Icon from '../Icon';
-import { SectionHead, Row, Toggle, MONO } from './shared';
+import { SectionHead, Row, MONO } from './shared';
 
 export interface AudioSectionProps {}
-
-function WipBadge() {
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      padding: '2px 8px',
-      borderRadius: 999,
-      background: 'var(--onyx-accent-dim)',
-      color: 'var(--onyx-accent)',
-      fontSize: 10,
-      fontFamily: MONO,
-      letterSpacing: '0.05em',
-      whiteSpace: 'nowrap' as const,
-      marginLeft: 8,
-    }}>
-      Work in progress
-    </span>
-  );
-}
 
 export default function AudioSection() {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
@@ -68,20 +48,6 @@ export default function AudioSection() {
               {d.id === selectedId && <Icon name="dot" size={10} color="var(--onyx-accent)" />}
             </button>
           ))}
-        </div>
-      </Row>
-
-      <Row label="Voice boost" hint="Mild compression to keep dialogue audible at low volume.">
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Toggle on={false} onChange={() => {}} />
-          <WipBadge />
-        </div>
-      </Row>
-
-      <Row label="Mono downmix" hint="Combine stereo channels for single-earbud listening.">
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Toggle on={false} onChange={() => {}} />
-          <WipBadge />
         </div>
       </Row>
     </div>
