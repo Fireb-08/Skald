@@ -71,11 +71,8 @@ export default function PlaybackSection() {
       </Row>
 
       <Row label="Sleep timer default" hint="Pre-fill when you open the sleep timer.">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {SLEEP.map(v => <Pill key={v} active={v === sleepDefault} onClick={() => setSleepDefault(v)}>{v}</Pill>)}
-          </div>
-          <WipBadge />
+        <div style={{ display: 'flex', gap: 6 }}>
+          {SLEEP.map(v => <Pill key={v} active={v === sleepDefault} onClick={() => setSleepDefault(v)}>{v}</Pill>)}
         </div>
       </Row>
     </div>
