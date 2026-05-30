@@ -262,6 +262,10 @@ export function registerShortcuts(bindings: ShortcutBinding[]): Promise<void> {
   return invoke('register_shortcuts', { bindings });
 }
 
+export function closeActiveSession(): Promise<void> {
+  return invoke('close_active_session');
+}
+
 export function getCacheDir(): Promise<string> {
   return invoke('get_cache_dir');
 }

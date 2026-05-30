@@ -309,6 +309,19 @@ pub async fn search_books(
         .await
 }
 
+#[tauri::command]
+pub async fn close_active_session(
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<(), String> {
+    let mut mgr = state.lock().await;
+    if mgr.session_id.is_none() {
+        return Ok(()); // no session open, nothing to do
+    }
+    let result = mgr.close().await;
+    mgr.session_id = None; // prevent the sync task from retrying a closed session
+    result
+}
+
 pub type ShortcutActionMap =
     std::sync::Arc<std::sync::RwLock<std::collections::HashMap<u32, String>>>;
 
