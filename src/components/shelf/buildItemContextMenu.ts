@@ -10,6 +10,7 @@ export function buildItemContextMenu(
   st: OnyxState,
   setMatchItem?: (item: LibraryItem) => void,
   setCollectionItem?: (item: LibraryItem) => void,
+  setFilesItem?: (item: LibraryItem) => void,
 ): ContextMenuItem[] {
   const isAdmin = st.user?.type === 'root' || st.user?.type === 'admin';
 
@@ -63,6 +64,11 @@ export function buildItemContextMenu(
       label: 'Add to Collection',
       onClick: () => setCollectionItem?.(item),
       disabled: !setCollectionItem,
+    },
+    {
+      label: 'Files',
+      onClick: () => setFilesItem?.(item),
+      disabled: !setFilesItem,
     },
     {
       label: 'Remove from Continue Listening',

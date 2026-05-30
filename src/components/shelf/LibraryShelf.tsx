@@ -12,6 +12,7 @@ import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
 import MatchModal from '../MatchModal';
 import CollectionPicker from '../CollectionPicker';
+import FilesModal from './FilesModal';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -183,6 +184,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   const [contextMenu, setContextMenu] = useState<CtxMenu | null>(null);
   const [matchItem, setMatchItem] = useState<LibraryItem | null>(null);
   const [collectionItem, setCollectionItem] = useState<LibraryItem | null>(null);
+  const [filesItem, setFilesItem] = useState<LibraryItem | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
@@ -297,7 +299,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem)}
+          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem, setFilesItem)}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -319,6 +321,13 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
           item={collectionItem}
           serverUrl={st.serverUrl}
           onClose={() => setCollectionItem(null)}
+        />
+      )}
+      {filesItem && (
+        <FilesModal
+          bookId={filesItem.id}
+          serverUrl={st.serverUrl}
+          onClose={() => setFilesItem(null)}
         />
       )}
     </Glass>

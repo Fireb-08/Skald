@@ -74,6 +74,24 @@ pub struct Library {
     pub media_type: String,
 }
 
+/// Metadata block inside a LibraryFile entry.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMetadata {
+    pub filename: String,
+    #[serde(default)]
+    pub size: i64,
+}
+
+/// A single physical file attached to a library item.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFile {
+    pub ino: String,
+    pub metadata: FileMetadata,
+    pub file_type: String,
+}
+
 /// Top-level library item (book file entry).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +100,8 @@ pub struct LibraryItem {
     pub ino: String,
     pub library_id: String,
     pub media: BookMedia,
+    #[serde(default)]
+    pub library_files: Option<Vec<LibraryFile>>,
 }
 
 /// Book media payload — metadata + playback data.

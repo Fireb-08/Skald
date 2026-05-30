@@ -67,11 +67,23 @@ export interface BookMedia {
   duration: number;
 }
 
+export interface FileMetadata {
+  filename: string;
+  size: number;
+}
+
+export interface LibraryFile {
+  ino: string;
+  metadata: FileMetadata;
+  fileType: string;
+}
+
 export interface LibraryItem {
   id: string;
   ino: string;
   libraryId: string;
   media: BookMedia;
+  libraryFiles?: LibraryFile[];
 }
 
 export interface MediaProgress {
