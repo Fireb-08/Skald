@@ -74,6 +74,8 @@ pub fn run() {
             commands::get_cache_dir,
             commands::reveal_cache_dir,
             commands::close_active_session,
+            commands::get_collections,
+            commands::add_book_to_collection,
             commands::register_shortcuts,
         ])
         .build(tauri::generate_context!())

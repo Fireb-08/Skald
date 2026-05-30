@@ -11,6 +11,7 @@ import SortIndicator from './SortIndicator';
 import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
 import MatchModal from '../MatchModal';
+import CollectionPicker from '../CollectionPicker';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -181,6 +182,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   const coverW = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
   const [contextMenu, setContextMenu] = useState<CtxMenu | null>(null);
   const [matchItem, setMatchItem] = useState<LibraryItem | null>(null);
+  const [collectionItem, setCollectionItem] = useState<LibraryItem | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
@@ -295,7 +297,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={buildItemContextMenu(contextMenu.item, st, setMatchItem)}
+          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem)}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -310,6 +312,13 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             setMatchItem(null);
           }}
           onRefresh={() => { st.refreshLibrary().catch(console.error); }}
+        />
+      )}
+      {collectionItem && (
+        <CollectionPicker
+          item={collectionItem}
+          serverUrl={st.serverUrl}
+          onClose={() => setCollectionItem(null)}
         />
       )}
     </Glass>

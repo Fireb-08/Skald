@@ -40,6 +40,20 @@ pub struct User {
     pub user_type: Option<String>,
 }
 
+/// A single collection inside a library.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    pub id: String,
+    pub name: String,
+}
+
+/// Wrapper for GET /api/libraries/{id}/collections response.
+#[derive(Debug, Deserialize)]
+pub struct CollectionsResponse {
+    pub results: Vec<Collection>,
+}
+
 /// A single Audiobookshelf library.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

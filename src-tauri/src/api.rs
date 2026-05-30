@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{Bookmark, Library, LibraryItem, ListeningStats, MeResponse, PlaySession, User};
+use crate::models::{Bookmark, Collection, CollectionsResponse, Library, LibraryItem, ListeningStats, MeResponse, PlaySession, User};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -361,6 +361,46 @@ impl AbsClient {
 
         if !resp.status().is_success() {
             return Err(format!("close_session failed: HTTP {}", resp.status()));
+        }
+
+        Ok(())
+    }
+
+    /// GET /api/libraries/{library_id}/collections
+    pub async fn get_collections(&self, library_id: &str) -> Result<Vec<Collection>, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/libraries/{library_id}/collections", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_collections failed: HTTP {}", resp.status()));
+        }
+
+        let wrapper: CollectionsResponse = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(wrapper.results)
+    }
+
+    /// POST /api/collections/{collection_id}/book  body: {"id": book_id}
+    pub async fn add_book_to_collection(
+        &self,
+        collection_id: &str,
+        book_id: &str,
+    ) -> Result<(), String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/collections/{collection_id}/book", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({ "id": book_id }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("add_book_to_collection failed: HTTP {}", resp.status()));
         }
 
         Ok(())

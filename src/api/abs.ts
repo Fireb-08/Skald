@@ -262,6 +262,19 @@ export function registerShortcuts(bindings: ShortcutBinding[]): Promise<void> {
   return invoke('register_shortcuts', { bindings });
 }
 
+export interface Collection {
+  id: string;
+  name: string;
+}
+
+export function getCollections(serverUrl: string, libraryId: string): Promise<Collection[]> {
+  return invoke('get_collections', { serverUrl, libraryId });
+}
+
+export function addBookToCollection(serverUrl: string, collectionId: string, bookId: string): Promise<void> {
+  return invoke('add_book_to_collection', { serverUrl, collectionId, bookId });
+}
+
 export function closeActiveSession(): Promise<void> {
   return invoke('close_active_session');
 }

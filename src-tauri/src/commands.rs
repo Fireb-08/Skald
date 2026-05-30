@@ -310,6 +310,33 @@ pub async fn search_books(
 }
 
 #[tauri::command]
+pub async fn get_collections(
+    server_url: String,
+    library_id: String,
+) -> Result<Vec<models::Collection>, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .get_collections(&library_id)
+        .await
+}
+
+#[tauri::command]
+pub async fn add_book_to_collection(
+    server_url: String,
+    collection_id: String,
+    book_id: String,
+) -> Result<(), String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .add_book_to_collection(&collection_id, &book_id)
+        .await
+}
+
+#[tauri::command]
 pub async fn close_active_session(
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
