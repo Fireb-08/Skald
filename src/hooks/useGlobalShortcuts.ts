@@ -92,7 +92,13 @@ export function useGlobalShortcuts(st: OnyxState): void {
     });
 
     on('shortcut-mute', () => {
-      setAudioVolume(0).catch(console.error);
+      if (stRef.current.muted) {
+        setAudioVolume(Math.round(stRef.current.volume * 100)).catch(console.error);
+        stRef.current.setMuted(false);
+      } else {
+        setAudioVolume(0).catch(console.error);
+        stRef.current.setMuted(true);
+      }
     });
 
     return () => unlisteners.forEach(fn => fn());
