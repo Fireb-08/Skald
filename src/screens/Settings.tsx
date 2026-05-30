@@ -105,7 +105,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
 
         {/* Content panel */}
         <Glass translucent={st.translucent} style={{ flex: 1, padding: '28px 36px', overflow: 'auto', minWidth: 0 }}>
-          {section === 'account'    && <AccountSection onSignOut={handleSignOut} />}
+          {section === 'account'    && <AccountSection st={st} onSignOut={handleSignOut} />}
           {section === 'server'     && <ServerSection />}
           {section === 'playback'   && <PlaybackSection st={st} />}
           {section === 'audio'      && <AudioSection st={st} />}
