@@ -112,7 +112,8 @@
       "Bash(curl -s http://localhost:1420/src/screens/Settings.tsx?t=__TRACKED_VAR__)",
       "Bash(curl -s http://localhost:1420/src/components/chrome/OnyxWash.tsx?t=__TRACKED_VAR__)",
       "Bash(curl -s http://localhost:1420/src/components/settings/AccountSection.tsx?t=__TRACKED_VAR__)",
-      "Bash(curl -s http://localhost:1420/src/components/settings/ServerSection.tsx?t=__TRACKED_VAR__)"
+      "Bash(curl -s http://localhost:1420/src/components/settings/ServerSection.tsx?t=__TRACKED_VAR__)",
+      "Bash(curl -s http://localhost:1420/src/screens/Player.tsx?t=__TRACKED_VAR__)"
     ]
   }
 }

@@ -55,6 +55,9 @@ export default function Player({ st }: PlayerProps) {
   const b = st.currentBook;
   if (!b) return null;
 
+  const raw = localStorage.getItem('onyx.playback.skip') ?? '30s';
+  const skipDur = parseInt(raw.replace('s', ''), 10);
+
   const chapters = st.currentBookChapters;
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
 
@@ -324,7 +327,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button onClick={() => seekAudio(Math.max(0, st.position - 30)).catch(console.error)} title="Back 30s" style={transportBtn()}>
+                <button onClick={() => seekAudio(Math.max(0, st.position - skipDur)).catch(console.error)} title={`Back ${skipDur}s`} style={transportBtn()}>
                   <Icon name="skip-back" size={20} />
                 </button>
                 <button
@@ -336,7 +339,7 @@ export default function Player({ st }: PlayerProps) {
                     <Icon name={st.playing ? 'pause' : 'play'} size={26} />
                   </span>
                 </button>
-                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + 30)).catch(console.error)} title="Forward 30s" style={transportBtn()}>
+                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipDur)).catch(console.error)} title={`Forward ${skipDur}s`} style={transportBtn()}>
                   <Icon name="skip-forward" size={20} />
                 </button>
               </div>
