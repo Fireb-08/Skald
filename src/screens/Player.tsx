@@ -182,7 +182,12 @@ export default function Player({ st }: PlayerProps) {
     if (typeof sleepMode !== 'number' || !st.playing) return;
     const t = setInterval(() => {
       setSleepRemain(r => {
-        if (r <= 1) { st.setPlaying(false); setSleepMode(null); return 0; }
+        if (r <= 1) {
+          pauseAudio().catch(console.error);
+          st.setPlaying(false);
+          setSleepMode(null);
+          return 0;
+        }
         return r - 1;
       });
     }, 1000);
@@ -191,6 +196,7 @@ export default function Player({ st }: PlayerProps) {
 
   useEffect(() => {
     if (sleepMode === 'chapter' && chIdx !== chapterAtStart.current) {
+      pauseAudio().catch(console.error);
       st.setPlaying(false);
       setSleepMode(null);
     }
@@ -198,6 +204,7 @@ export default function Player({ st }: PlayerProps) {
 
   useEffect(() => {
     if (chIdx > prevChIdxRef.current && st.playing && !autoPlayNext) {
+      pauseAudio().catch(console.error);
       st.setPlaying(false);
     }
     prevChIdxRef.current = chIdx;
