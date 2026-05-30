@@ -58,6 +58,8 @@ export default function Player({ st }: PlayerProps) {
   const chapters = st.currentBookChapters;
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
 
+  const autoPlayNext = localStorage.getItem('onyx.playback.autoPlayNext') !== 'false';
+
   const playerBookmarks = st.bookmarks.filter(bm => bm.libraryItemId === st.currentBookId);
 
   const addBookmark = async () => {
@@ -157,6 +159,7 @@ export default function Player({ st }: PlayerProps) {
   const [sleepOpen, setSleepOpen] = useState(false);
   const sleepRef = useRef<HTMLDivElement>(null);
   const chapterAtStart = useRef(chIdx);
+  const prevChIdxRef = useRef(chIdx);
 
   const waveformRef = useRef<HTMLDivElement>(null);
   const [waveWidth, setWaveWidth] = useState(600);
@@ -192,6 +195,13 @@ export default function Player({ st }: PlayerProps) {
       setSleepMode(null);
     }
   }, [chIdx]); // sleepMode/setPlaying excluded intentionally
+
+  useEffect(() => {
+    if (chIdx > prevChIdxRef.current && st.playing && !autoPlayNext) {
+      st.setPlaying(false);
+    }
+    prevChIdxRef.current = chIdx;
+  }, [chIdx]); // st.playing/autoPlayNext read at effect fire time; chIdx is the trigger
 
   useEffect(() => {
     if (!sleepOpen) return;
