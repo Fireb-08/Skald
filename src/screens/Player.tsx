@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   openPlaybackSession, playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
-  createBookmark, getMe,
+  createBookmark, getMe, fetchItem,
 } from '../api/abs';
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
@@ -58,10 +58,28 @@ export default function Player({ st }: PlayerProps) {
 
   const isFocusedDifferent = st.focusedBookId !== null && st.focusedBookId !== st.currentBookId;
 
-  // Chapters for the chapter list come from the focused book's own media data.
+  // Fetched chapters for the focused book when it differs from the playing book.
+  // Library-list items don't include chapter data, so we fetch the full item.
+  const [fetchedFocusedChapters, setFetchedFocusedChapters] = useState(bookChapters(b));
+
+  useEffect(() => {
+    const fid = st.focusedBookId;
+    if (!fid) return;
+    if (fid === st.currentBookId && st.currentBookChapters.length > 0) {
+      setFetchedFocusedChapters(st.currentBookChapters);
+      return;
+    }
+    let cancelled = false;
+    fetchItem(st.serverUrl, fid)
+      .then(item => { if (!cancelled) setFetchedFocusedChapters(bookChapters(item)); })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [st.focusedBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Chapters for the chapter list come from the focused book (fetched on demand).
   // For the waveform scrubber we still use currentBookChapters so position maps correctly.
   const displayChapters = isFocusedDifferent
-    ? bookChapters(b)
+    ? fetchedFocusedChapters
     : st.currentBookChapters;
   const chapters = st.currentBookChapters; // waveform/position only
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
