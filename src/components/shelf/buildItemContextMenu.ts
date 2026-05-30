@@ -1,4 +1,4 @@
-import type { LibraryItem, OnyxState } from '../../state/onyx';
+import type { LibraryItem, OnyxState, MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
 import { updateProgress, deleteProgress, getMe } from '../../api/abs';
 
@@ -23,6 +23,24 @@ export function buildItemContextMenu(
       label: 'Mark as Finished',
       onClick: async () => {
         try {
+          // Immediate optimistic update — UI responds before server round-trip.
+          const existing = st.mediaProgress.find(p => p.libraryItemId === item.id);
+          const optimistic: MediaProgress = {
+            id: existing?.id ?? item.id,
+            libraryItemId: item.id,
+            episodeId: existing?.episodeId ?? null,
+            duration: item.media.duration,
+            progress: 1,
+            currentTime: item.media.duration,
+            isFinished: true,
+            lastUpdate: Date.now(),
+          };
+          st.setMediaProgress(
+            existing
+              ? st.mediaProgress.map(p => p.libraryItemId === item.id ? optimistic : p)
+              : [...st.mediaProgress, optimistic],
+          );
+          // Sync to server, then refresh to get authoritative state.
           await updateProgress(st.serverUrl, item.id, item.media.duration, item.media.duration, true);
           await refreshProgress();
         } catch (e) {
