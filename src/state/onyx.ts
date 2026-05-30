@@ -613,7 +613,7 @@ export function useOnyxState(): OnyxState {
     };
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
-  }, [theme]);
+  }, [theme, accentColor]);
 
   const setTheme = useCallback((t: string) => {
     themeRef.current = t;
