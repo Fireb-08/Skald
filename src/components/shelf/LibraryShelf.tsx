@@ -108,7 +108,7 @@ function ShelfList({ books, st, openBook, onContextMenu }: { books: LibraryItem[
         </thead>
         <tbody>
           {sorted.map((b, i) => {
-            const active = b.id === st.currentBookId;
+            const active = b.id === (st.focusedBookId ?? st.currentBookId);
             const prog = bookProgress(b, st.mediaProgress);
             return (
               <tr
@@ -189,6 +189,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
+    setSelectedId(item.id);
     st.setFocusedBookId(item.id);
     setContextMenu({ x: e.pageX, y: e.pageY, item });
   };
