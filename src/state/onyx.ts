@@ -279,6 +279,8 @@ export interface OnyxState {
   setScale: (scale: number) => void;
   enableOpenLibrary: boolean;
   setEnableOpenLibrary: (on: boolean) => void;
+  toast: { message: string; type: 'success' | 'error' | 'info' } | null;
+  setToast: (t: { message: string; type: 'success' | 'error' | 'info' } | null) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -592,6 +594,8 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('onyx.uiScale', String(v)); setScaleRaw(v);
   }, []);
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
   const [enableOpenLibrary, setEnableOpenLibraryRaw] = useState(() => {
     const v = localStorage.getItem('skald.enableOpenLibrary');
     return v === null ? true : v === 'true';
@@ -706,5 +710,6 @@ export function useOnyxState(): OnyxState {
     pickItUpCollapsed, setPickItUpCollapsed,
     scale, setScale,
     enableOpenLibrary, setEnableOpenLibrary,
+    toast, setToast,
   };
 }

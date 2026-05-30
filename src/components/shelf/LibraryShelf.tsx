@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookGenre,
@@ -185,15 +185,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   const [matchItem, setMatchItem] = useState<LibraryItem | null>(null);
   const [collectionItem, setCollectionItem] = useState<LibraryItem | null>(null);
   const [filesItem, setFilesItem] = useState<LibraryItem | null>(null);
-  const [scanToast, setScanToast] = useState('');
-  const scanToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const onScanStart = () => {
-    if (scanToastTimer.current) clearTimeout(scanToastTimer.current);
-    setScanToast('Re-scanning…');
-    scanToastTimer.current = setTimeout(() => setScanToast(''), 3000);
-  };
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
@@ -307,7 +299,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem, setFilesItem, onScanStart)}
+          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem, setFilesItem)}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -337,23 +329,6 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
           serverUrl={st.serverUrl}
           onClose={() => setFilesItem(null)}
         />
-      )}
-      {scanToast && (
-        <div style={{
-          position: 'fixed', bottom: 28, right: 28, zIndex: 3000,
-          background: 'var(--onyx-panel2)',
-          border: '1px solid var(--onyx-accent-edge)',
-          borderRadius: 8,
-          padding: '10px 18px',
-          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          fontSize: 11,
-          letterSpacing: '0.06em',
-          color: 'var(--onyx-accent)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-          pointerEvents: 'none',
-        }}>
-          {scanToast}
-        </div>
       )}
     </Glass>
   );

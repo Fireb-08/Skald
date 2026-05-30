@@ -11,7 +11,6 @@ export function buildItemContextMenu(
   setMatchItem?: (item: LibraryItem) => void,
   setCollectionItem?: (item: LibraryItem) => void,
   setFilesItem?: (item: LibraryItem) => void,
-  onScanStart?: () => void,
 ): ContextMenuItem[] {
   const isAdmin = st.user?.type === 'root' || st.user?.type === 'admin';
 
@@ -81,8 +80,10 @@ export function buildItemContextMenu(
       {
         label: 'Re-Scan',
         onClick: () => {
-          onScanStart?.();
-          rescanItem(st.serverUrl, item.id).catch(console.error);
+          const title = item.media?.metadata?.title ?? item.id;
+          rescanItem(st.serverUrl, item.id)
+            .then(() => st.setToast({ message: `Rescan started for "${title}"`, type: 'success' }))
+            .catch(e => st.setToast({ message: `Rescan failed: ${String(e)}`, type: 'error' }));
         },
       },
       { label: 'Match', onClick: () => setMatchItem?.(item), disabled: !setMatchItem },

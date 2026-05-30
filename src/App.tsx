@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useOnyxState } from './state/onyx';
 import { hasToken } from './api/abs';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import Toast from './components/ui/Toast';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
 import Login from './screens/Login';
@@ -79,6 +80,13 @@ export default function App() {
           </>
         )}
       </div>
+      {st.toast && (
+        <Toast
+          message={st.toast.message}
+          type={st.toast.type}
+          onDismiss={() => st.setToast(null)}
+        />
+      )}
     </div>
   );
 }
