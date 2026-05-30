@@ -310,6 +310,24 @@ pub async fn search_books(
 }
 
 #[tauri::command]
+pub fn get_cache_dir() -> Result<String, String> {
+    directories::ProjectDirs::from("com", "skald", "Skald")
+        .map(|dirs| dirs.cache_dir().to_string_lossy().into_owned())
+        .ok_or_else(|| "Could not determine cache directory".to_string())
+}
+
+#[tauri::command]
+pub fn reveal_cache_dir() -> Result<(), String> {
+    let path = get_cache_dir()?;
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn close_session(
     server_url: String,
     session_id: String,

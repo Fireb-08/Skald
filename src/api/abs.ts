@@ -253,6 +253,14 @@ export function updateMedia(
   return invoke('update_media', { serverUrl, itemId, metadata });
 }
 
+export function getCacheDir(): Promise<string> {
+  return invoke('get_cache_dir');
+}
+
+export function revealCacheDir(): Promise<void> {
+  return invoke('reveal_cache_dir');
+}
+
 export function searchBooks(
   serverUrl: string,
   title: string,

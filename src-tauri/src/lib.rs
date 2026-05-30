@@ -47,6 +47,8 @@ pub fn run() {
             commands::delete_progress,
             commands::update_media,
             commands::search_books,
+            commands::get_cache_dir,
+            commands::reveal_cache_dir,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
