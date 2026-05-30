@@ -45,9 +45,6 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
           })}
         </div>
       </Row>
-      <Row label="Reduce motion" hint="Disable the ambient backdrop animation and easing transitions.">
-        <Toggle on={false} onChange={() => {}} />
-      </Row>
       <Row label="Translucent surfaces" hint="The glass effect on cards. Turn off for performance on older hardware.">
         <Toggle on={st.translucent} onChange={st.setTranslucent} />
       </Row>
