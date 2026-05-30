@@ -189,6 +189,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
+    st.setFocusedBookId(item.id);
     setContextMenu({ x: e.pageX, y: e.pageY, item });
   };
 
