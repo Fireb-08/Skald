@@ -108,7 +108,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
           {section === 'account'    && <AccountSection st={st} onSignOut={handleSignOut} />}
           {section === 'server'     && <ServerSection st={st} />}
           {section === 'playback'   && <PlaybackSection />}
-          {section === 'audio'      && <AudioSection st={st} />}
+          {section === 'audio'      && <AudioSection />}
           {section === 'library'    && <LibrarySection st={st} />}
           {section === 'downloads'  && <DownloadsSection />}
           {section === 'appearance' && <AppearanceSection st={st} />}
