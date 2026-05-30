@@ -1,6 +1,6 @@
 import type { LibraryItem, OnyxState, MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
-import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem } from '../../api/abs';
+import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, openPlaybackSession, playAudio } from '../../api/abs';
 
 // Guard against double-invocation (React portal event bubbling / StrictMode).
 const pendingItems = new Set<string>();
@@ -24,6 +24,27 @@ export function buildItemContextMenu(
   };
 
   const items: ContextMenuItem[] = [
+    {
+      label: 'Play Book',
+      onClick: async () => {
+        const title = item.media?.metadata?.title ?? item.id;
+        try {
+          await closeActiveSession().catch(() => {});
+          st.setSessionReady(false);
+          st.setSessionId('');
+          st.setPlaying(false);
+          const { sessionId } = await openPlaybackSession(st.serverUrl, item.id);
+          st.setSessionId(sessionId);
+          st.setSessionReady(true);
+          st.setCurrentBookId(item.id);
+          st.setFocusedBookId(item.id);
+          await playAudio();
+          st.setToast({ message: `Now playing "${title}"`, type: 'success' });
+        } catch (e) {
+          st.setToast({ message: `Failed to start playback: ${String(e)}`, type: 'error' });
+        }
+      },
+    },
     {
       label: 'Mark as Finished',
       onClick: async () => {
