@@ -334,9 +334,9 @@ export default function Player({ st }: PlayerProps) {
               <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
             </div>
 
-            <div style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'hidden' }}>
 
-              <div style={{ display: 'flex', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 6, flexShrink: 1, minWidth: 0 }}>
                 {SPEEDS.map(s => (
                   <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(console.error); }} style={{
                     padding: '7px 12px', borderRadius: 6, fontFamily: MONO, fontSize: 11,
@@ -349,7 +349,7 @@ export default function Player({ st }: PlayerProps) {
                 ))}
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0 }}>
                 <button onClick={() => seekAudio(Math.max(0, st.position - 30)).catch(console.error)} title="Back 30s" style={transportBtn()}>
                   <Icon name="skip-back" size={20} />
                 </button>
@@ -367,7 +367,7 @@ export default function Player({ st }: PlayerProps) {
                 </button>
               </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 1, minWidth: 0 }}>
                 <button onClick={addBookmark} style={transportBtnSmall()} title="Bookmark this moment">
                   <Icon name="bookmark" size={15} />
                 </button>
@@ -381,13 +381,15 @@ export default function Player({ st }: PlayerProps) {
                       border: `1px solid ${sleepMode != null ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
                       color: sleepMode != null ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
                       width: sleepMode != null ? 'auto' : 40,
+                      maxWidth: 120,
                       padding: sleepMode != null ? '0 10px' : 0,
                       gap: 6,
+                      overflow: 'hidden',
                     }}
                   >
                     <Icon name="sleep" size={15} />
                     {sleepMode != null && (
-                      <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em' }}>{sleepLabel}</span>
+                      <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{sleepLabel}</span>
                     )}
                   </button>
                   {sleepOpen && (
