@@ -1,7 +1,27 @@
 import { SPEEDS } from '../../state/onyx';
-import { SectionHead, Row, Toggle, Pill, useLocal } from './shared';
+import { SectionHead, Row, Toggle, Pill, useLocal, MONO } from './shared';
 
 export interface PlaybackSectionProps {}
+
+function WipBadge() {
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '2px 8px',
+      borderRadius: 999,
+      background: 'var(--onyx-accent-dim)',
+      color: 'var(--onyx-accent)',
+      fontSize: 10,
+      fontFamily: MONO,
+      letterSpacing: '0.05em',
+      whiteSpace: 'nowrap' as const,
+      marginLeft: 8,
+    }}>
+      Work in progress
+    </span>
+  );
+}
 
 export default function PlaybackSection() {
   const [speed, setSpeed]               = useLocal('onyx.playback.speed',       '1.0');
@@ -27,14 +47,20 @@ export default function PlaybackSection() {
       </Row>
 
       <Row label="Skip duration" hint="Used by the −/+ skip buttons and ←/→ keys.">
-        <div style={{ display: 'flex', gap: 6 }}>
-          {SKIP.map(v => <Pill key={v} active={v === skipDur} onClick={() => setSkipDur(v)}>{v}</Pill>)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {SKIP.map(v => <Pill key={v} active={v === skipDur} onClick={() => setSkipDur(v)}>{v}</Pill>)}
+          </div>
+          <WipBadge />
         </div>
       </Row>
 
       <Row label="Auto-rewind on resume" hint="Step backwards a few seconds when you resume after a pause.">
-        <div style={{ display: 'flex', gap: 6 }}>
-          {REWIND.map(v => <Pill key={v} active={v === rewindOnResume} onClick={() => setRewindOnResume(v)}>{v}</Pill>)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {REWIND.map(v => <Pill key={v} active={v === rewindOnResume} onClick={() => setRewindOnResume(v)}>{v}</Pill>)}
+          </div>
+          <WipBadge />
         </div>
       </Row>
 
