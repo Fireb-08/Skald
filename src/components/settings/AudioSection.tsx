@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { getAudioDevices, setAudioDevice as setAudioDeviceCmd } from '../../api/abs';
 import type { AudioDevice } from '../../api/abs';
 import Icon from '../Icon';
-import { SectionHead, Row, Toggle, Pill, MONO } from './shared';
+import { SectionHead, Row, Toggle, MONO } from './shared';
 
 export interface AudioSectionProps {}
 
@@ -68,17 +68,6 @@ export default function AudioSection() {
               {d.id === selectedId && <Icon name="dot" size={10} color="var(--onyx-accent)" />}
             </button>
           ))}
-        </div>
-      </Row>
-
-      <Row label="Sample rate" hint="Match the source. Auto follows each book's native rate.">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['Auto', '44.1', '48', '96 kHz'].map((v, i) => (
-              <Pill key={v} active={i === 0} onClick={() => {}}>{v}</Pill>
-            ))}
-          </div>
-          <WipBadge />
         </div>
       </Row>
 
