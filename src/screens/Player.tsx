@@ -327,7 +327,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <button onClick={() => seekAudio(Math.max(0, st.position - skipDur)).catch(console.error)} title={`Back ${skipDur}s`} style={transportBtn()}>
+                <button onClick={() => st.setPosition(Math.max(0, st.position - skipDur))} title={`Back ${skipDur}s`} style={transportBtn()}>
                   <Icon name="skip-back" size={20} />
                 </button>
                 <button
@@ -339,7 +339,7 @@ export default function Player({ st }: PlayerProps) {
                     <Icon name={st.playing ? 'pause' : 'play'} size={26} />
                   </span>
                 </button>
-                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipDur)).catch(console.error)} title={`Forward ${skipDur}s`} style={transportBtn()}>
+                <button onClick={() => st.setPosition(Math.min(st.bookSecs, st.position + skipDur))} title={`Forward ${skipDur}s`} style={transportBtn()}>
                   <Icon name="skip-forward" size={20} />
                 </button>
               </div>
