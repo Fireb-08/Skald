@@ -253,6 +253,15 @@ export function updateMedia(
   return invoke('update_media', { serverUrl, itemId, metadata });
 }
 
+export interface ShortcutBinding {
+  action: string;
+  shortcut: string;
+}
+
+export function registerShortcuts(bindings: ShortcutBinding[]): Promise<void> {
+  return invoke('register_shortcuts', { bindings });
+}
+
 export function getCacheDir(): Promise<string> {
   return invoke('get_cache_dir');
 }

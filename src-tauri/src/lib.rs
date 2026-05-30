@@ -18,9 +18,30 @@ pub fn run() {
     ));
     let session_mgr_for_exit = Arc::clone(&session_mgr);
 
+    // Shared map from shortcut ID to action name, written by register_shortcuts
+    // command and read by the global-shortcut event handler.
+    let shortcut_map: commands::ShortcutActionMap =
+        Arc::new(std::sync::RwLock::new(std::collections::HashMap::new()));
+    let shortcut_map_for_handler = Arc::clone(&shortcut_map);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(move |app, shortcut, _event| {
+                    use tauri::Emitter;
+                    if let Some(action) = shortcut_map_for_handler
+                        .read()
+                        .unwrap()
+                        .get(&shortcut.id())
+                    {
+                        let _ = app.emit(&format!("shortcut-{action}"), ());
+                    }
+                })
+                .build(),
+        )
         .manage(session_mgr)
+        .manage(shortcut_map)
         .invoke_handler(tauri::generate_handler![
             commands::login,
             commands::logout,
@@ -49,6 +70,7 @@ pub fn run() {
             commands::search_books,
             commands::get_cache_dir,
             commands::reveal_cache_dir,
+            commands::register_shortcuts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

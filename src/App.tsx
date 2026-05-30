@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useOnyxState } from './state/onyx';
 import { hasToken } from './api/abs';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
 import Login from './screens/Login';
@@ -16,6 +17,8 @@ export default function App() {
 
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useGlobalShortcuts(st);
 
   useEffect(() => {
     hasToken()

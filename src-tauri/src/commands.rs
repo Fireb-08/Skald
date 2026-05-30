@@ -309,6 +309,42 @@ pub async fn search_books(
         .await
 }
 
+pub type ShortcutActionMap =
+    std::sync::Arc<std::sync::RwLock<std::collections::HashMap<u32, String>>>;
+
+#[derive(serde::Deserialize)]
+pub struct ShortcutBinding {
+    pub action: String,
+    pub shortcut: String,
+}
+
+#[tauri::command]
+pub fn register_shortcuts(
+    bindings: Vec<ShortcutBinding>,
+    app: tauri::AppHandle,
+    action_map: tauri::State<'_, ShortcutActionMap>,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| e.to_string())?;
+
+    let mut map = action_map.write().unwrap();
+    map.clear();
+
+    for binding in bindings {
+        let shortcut: Shortcut = binding.shortcut.parse()
+            .map_err(|e| format!("Invalid shortcut '{}': {e}", binding.shortcut))?;
+        map.insert(shortcut.id(), binding.action.clone());
+        app.global_shortcut()
+            .register(shortcut)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_cache_dir() -> Result<String, String> {
     directories::ProjectDirs::from("com", "skald", "Skald")
