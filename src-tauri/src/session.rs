@@ -38,6 +38,7 @@ impl SessionManager {
         &mut self,
         item_id: &str,
         app: tauri::AppHandle<R>,
+        start_time: Option<f64>,
     ) -> Result<f64, String> {
         // Stop any tasks from a previous session.
         self.active.store(false, Ordering::Relaxed);
@@ -51,9 +52,12 @@ impl SessionManager {
             }
         }
 
-        let session = self.client.open_session(item_id).await?;
+        let session = self.client.open_session(item_id, start_time).await?;
         self.session_id = Some(session.id.clone());
-        *self.current_time.lock().unwrap() = session.current_time;
+        // Prefer the caller-supplied start_time so LibVLC loads at the exact
+        // chapter position even if the server's currentTime differs slightly.
+        let load_time = start_time.unwrap_or(session.current_time);
+        *self.current_time.lock().unwrap() = load_time;
         *self.time_listened.lock().unwrap() = 0.0;
 
         // Load first audio track into the player.
@@ -69,7 +73,7 @@ impl SessionManager {
             );
             let player_guard = self.player.lock().unwrap();
             if let Some(p) = player_guard.as_ref() {
-                p.load(&url, session.current_time)?;
+                p.load(&url, load_time)?;
             }
         }
 

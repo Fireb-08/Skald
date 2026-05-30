@@ -594,14 +594,11 @@ export default function Player({ st }: PlayerProps) {
                         st.setSessionId('');
                         st.setPlaying(false);
                         try {
-                          const { sessionId } = await openPlaybackSession(st.serverUrl, st.focusedBookId);
+                          const { sessionId } = await openPlaybackSession(st.serverUrl, st.focusedBookId, pos);
                           st.setSessionId(sessionId);
                           st.setSessionReady(true);
                           st.setCurrentBookId(st.focusedBookId);
                           await playAudio().catch(console.error);
-                          // Wait for LibVLC to buffer enough to accept a seek command.
-                          await new Promise(resolve => setTimeout(resolve, 800));
-                          await seekAudio(pos).catch(console.error);
                           st.setPosition(pos);
                         } catch (err) {
                           console.error('[Player] chapter-click playback failed:', err);

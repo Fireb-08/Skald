@@ -251,18 +251,24 @@ impl AbsClient {
 
     /// POST /api/items/{id}/play — opens a playback session; request body asks
     /// for direct play so LibVLC receives plain file URLs (no HLS transcode).
-    pub async fn open_session(&self, item_id: &str) -> Result<PlaySession, String> {
+    /// Optional `start_time` is passed as `startTime` so the server begins the
+    /// session at a specific position, eliminating a separate seek after open.
+    pub async fn open_session(&self, item_id: &str, start_time: Option<f64>) -> Result<PlaySession, String> {
+        let mut body = serde_json::json!({
+            "deviceInfo": { "clientName": "Skald", "clientVersion": "0.1.0" },
+            "mediaPlayer": "vlc",
+            "supportedMimeTypes": ["audio/mpeg", "audio/ogg", "audio/aac", "audio/flac", "audio/wav"],
+            "forceDirectPlay": true,
+            "forceTranscode": false,
+        });
+        if let Some(t) = start_time {
+            body["startTime"] = serde_json::json!(t);
+        }
         let resp = self
             .http
             .post(format!("{}/api/items/{item_id}/play", self.root()))
             .header("Authorization", self.auth_header()?)
-            .json(&serde_json::json!({
-                "deviceInfo": { "clientName": "Skald", "clientVersion": "0.1.0" },
-                "mediaPlayer": "vlc",
-                "supportedMimeTypes": ["audio/mpeg", "audio/ogg", "audio/aac", "audio/flac", "audio/wav"],
-                "forceDirectPlay": true,
-                "forceTranscode": false,
-            }))
+            .json(&body)
             .send()
             .await
             .map_err(|e| e.to_string())?;

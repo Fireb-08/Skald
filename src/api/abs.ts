@@ -161,8 +161,8 @@ export function hasToken(): Promise<boolean> {
   return invoke('has_token');
 }
 
-export function openPlaybackSession(serverUrl: string, itemId: string): Promise<OpenSessionResult> {
-  return invoke('open_playback_session', { serverUrl, itemId });
+export function openPlaybackSession(serverUrl: string, itemId: string, startTime?: number): Promise<OpenSessionResult> {
+  return invoke('open_playback_session', { serverUrl, itemId, startTime: startTime ?? null });
 }
 
 export function playAudio(): Promise<void> {

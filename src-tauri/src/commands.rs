@@ -41,6 +41,7 @@ pub struct OpenSessionResult {
 pub async fn open_playback_session(
     server_url: String,
     item_id: String,
+    start_time: Option<f64>,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<OpenSessionResult, String> {
@@ -51,7 +52,7 @@ pub async fn open_playback_session(
     let result = {
         let mut mgr = state.lock().await;
         mgr.client = AbsClient::new(server_url).with_token(token);
-        let current_time = mgr.start_session(&item_id, app).await?;
+        let current_time = mgr.start_session(&item_id, app, start_time).await?;
         let session_id = mgr.session_id.clone()
             .ok_or_else(|| "Session ID not set after start".to_string())?;
         OpenSessionResult { session_id, current_time }
