@@ -1,6 +1,7 @@
 export { default as AccountSection } from './AccountSection';
 export type { AccountSectionProps } from './AccountSection';
 export { default as ServerSection } from './ServerSection';
+export type { ServerSectionProps } from './ServerSection';
 export { default as PlaybackSection } from './PlaybackSection';
 export type { PlaybackSectionProps } from './PlaybackSection';
 export { default as AudioSection } from './AudioSection';
