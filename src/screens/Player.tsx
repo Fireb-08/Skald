@@ -199,10 +199,13 @@ export default function Player({ st }: PlayerProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerHeight, setContainerHeight] = useState(900);
-  const coverSize = containerHeight >= 900 ? 420
-    : containerHeight >= 750 ? Math.round(420 * 0.80)  // 336
-    : containerHeight >= 620 ? Math.round(420 * 0.65)  // 273
-    : Math.round(420 * 0.50);                          // 210
+
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const [leftColumnWidth, setLeftColumnWidth] = useState(480);
+
+  const isMiniPlayerVisible = isFocusedDifferent && !!st.currentBookId;
+  const maxCoverRatio = isMiniPlayerVisible ? 0.35 : 0.40;
+  const coverSize = Math.max(120, Math.min(Math.round(containerHeight * maxCoverRatio), leftColumnWidth));
 
   const waveformRef = useRef<HTMLDivElement>(null);
   const [waveWidth, setWaveWidth] = useState(600);
@@ -216,6 +219,15 @@ export default function Player({ st }: PlayerProps) {
       setContainerHeight(entries[0].contentRect.height);
     });
     ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!leftColRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      setLeftColumnWidth(entries[0].contentRect.width);
+    });
+    ro.observe(leftColRef.current);
     return () => ro.disconnect();
   }, []);
 
@@ -345,7 +357,7 @@ export default function Player({ st }: PlayerProps) {
 
       <div style={{ flex: 1, display: 'flex', gap: 32, alignItems: 'stretch', minHeight: 0 }}>
 
-        <div style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexShrink: 0, minHeight: 0, paddingBottom: isFocusedDifferent ? 72 : 0 }}>
+        <div ref={leftColRef} style={{ width: 480, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flexShrink: 0, minHeight: 0, paddingBottom: isFocusedDifferent ? 72 : 0 }}>
           <div style={{ position: 'absolute', inset: '5% 5% 0 5%', borderRadius: 24, background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.28), transparent 70%)', filter: 'blur(60px)', zIndex: 0 }} />
           <div style={{ position: 'relative', zIndex: 1 }}>
             <Cover item={b} size={coverSize} serverUrl={st.serverUrl} style={{ transition: 'width 0.3s ease, height 0.3s ease' }} />
