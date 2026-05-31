@@ -392,20 +392,27 @@ export default function Player({ st }: PlayerProps) {
     }
   };
 
-  const handlePlayFocused = () => {
+  const handlePlayFocused = async () => {
+    // If a book is actively playing (not just paused), pause it before
+    // switching books so audio does not continue over the transition.
+    if (st.playing) {
+      await pauseAudio().catch(console.error);
+      // Reflect the paused state in the UI immediately.
+      st.setPlaying(false);
+    }
+
     // Switch the playing book to the focused book in local state only.
     // No server interaction — the transport play button handles that.
     st.setCurrentBookId(st.focusedBookId!);
 
-    // Clear session state so the transport bar knows no session is open
-    // for the newly selected book and renders in the correct pre-play state.
+    // Clear the session ID so no stale reference to the old book's session lingers.
     st.setSessionId('');
     // Mark session as not ready so handlePlayPause opens a fresh session on play.
     st.setSessionReady(false);
-    // Reflect paused state immediately — no audio is playing yet.
+    // Ensure the playing flag is false for the new book (covers the paused case too).
     st.setPlaying(false);
     // Reset position to 0 so the waveform and chapter list start from the beginning
-    // of the new book; the pre-seed effect will update this once mediaProgress loads.
+    // of the new book; the chapter lock condition uses this to gate interaction.
     st.setPosition(0);
 
     // Animate the button out and expand the transport bar.
