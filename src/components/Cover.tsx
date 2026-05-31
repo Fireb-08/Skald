@@ -7,13 +7,14 @@ export interface CoverProps {
   item: LibraryItem;
   size?: number;
   scale?: number;
+  fill?: boolean;
   className?: string;
   style?: CSSProperties;
   onClick?: () => void;
   serverUrl?: string;
 }
 
-export default function Cover({ item, size = 180, scale = 1, className, style, onClick, serverUrl }: CoverProps) {
+export default function Cover({ item, size = 180, scale = 1, fill = false, className, style, onClick, serverUrl }: CoverProps) {
   const [coverSrc, setCoverSrc] = useState<string | null>(null);
 
   useEffect(() => {
@@ -35,8 +36,8 @@ export default function Cover({ item, size = 180, scale = 1, className, style, o
   const author = bookAuthor(item);
   const series = bookSeries(item);
   const base: CSSProperties = {
-    width: size,
-    height: size,
+    width: fill ? '100%' : size,
+    height: fill ? '100%' : size,
     position: 'relative',
     overflow: 'hidden',
     borderRadius: 4 * scale,

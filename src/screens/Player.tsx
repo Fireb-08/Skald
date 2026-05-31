@@ -361,8 +361,8 @@ export default function Player({ st }: PlayerProps) {
 
         <div ref={leftColRef} style={{ minWidth: 0, maxWidth: 360, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', minHeight: 0, paddingBottom: isFocusedDifferent ? 72 : 0 }}>
           <div style={{ position: 'absolute', inset: '5% 5% 0 5%', borderRadius: 24, background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.28), transparent 70%)', filter: 'blur(60px)', zIndex: 0 }} />
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <Cover item={b} size={coverSize} serverUrl={st.serverUrl} style={{ transition: 'width 0.3s ease, height 0.3s ease' }} />
+          <div style={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: coverSize, aspectRatio: '1 / 1', overflow: 'hidden' }}>
+            <Cover item={b} size={coverSize} fill serverUrl={st.serverUrl} style={{ transition: 'width 0.3s ease, height 0.3s ease' }} />
           </div>
           <div style={{ marginTop: 32, textAlign: 'center', position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
             <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 8 }}>{bSeries}</div>
