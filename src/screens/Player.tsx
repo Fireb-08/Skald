@@ -387,6 +387,10 @@ export default function Player({ st }: PlayerProps) {
         st.setSessionReady(true);
         st.setCurrentBookId(fid);
         await playAudio().catch(console.error);
+        // Optimistically mark as playing immediately — the playback-tick event
+        // from Rust confirms this within ~1s, but setting it here prevents the
+        // UI from showing a paused state during that delay window.
+        st.setPlaying(true);
       } catch (err) {
         console.error('[Player] play focused book failed:', err);
       }
@@ -713,8 +717,17 @@ export default function Player({ st }: PlayerProps) {
                     <button key={c.n} onClick={async () => {
                       const pos = chapterStart(displayChapters, i);
                       if (!st.focusedBookId || st.focusedBookId === st.currentBookId) {
+                        // Seek to the selected chapter's start position
                         await seekAudio(pos).catch(console.error);
                         st.setPosition(pos);
+
+                        // If the book was paused, start playback from the selected chapter.
+                        // playAudio() tells LibVLC to begin streaming; setPlaying(true) updates
+                        // the UI optimistically before the playback-tick event confirms it.
+                        if (!st.playing) {
+                          await playAudio().catch(console.error);
+                          st.setPlaying(true);
+                        }
                       } else {
                         await closeActiveSession().catch(() => {});
                         st.setSessionReady(false);
@@ -726,6 +739,8 @@ export default function Player({ st }: PlayerProps) {
                           st.setSessionReady(true);
                           st.setCurrentBookId(st.focusedBookId);
                           await playAudio().catch(console.error);
+                          // Optimistically mark as playing — playback-tick will confirm within 1s
+                          st.setPlaying(true);
                           st.setPosition(pos);
                         } catch (err) {
                           console.error('[Player] chapter-click playback failed:', err);
