@@ -3,7 +3,7 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import { closeActiveSession, openPlaybackSession, playAudio } from './abs';
+import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio } from './abs';
 
 export async function playBook(
   st: OnyxState,
@@ -42,4 +42,21 @@ export async function playBook(
   //    playback-tick event from Rust confirms within ~1 second.
   await playAudio().catch(console.error);
   st.setPlaying(true);
+}
+
+// Shared playback toggle for an already-open session. Pairs the LibVLC
+// command with the React state update so the UI never lags behind the
+// actual audio state. Use this anywhere that pauses/resumes the CURRENT
+// book without switching books (MiniPlayer, FocusPanel resume, shortcuts).
+// Do NOT use this for cold-starting a different book — that is playBook's job.
+export async function togglePlayback(st: OnyxState): Promise<void> {
+  if (st.playing) {
+    // Currently playing → pause LibVLC and reflect it immediately
+    await pauseAudio().catch(console.error);
+    st.setPlaying(false);
+  } else {
+    // Currently paused → resume LibVLC and reflect it immediately
+    await playAudio().catch(console.error);
+    st.setPlaying(true);
+  }
 }

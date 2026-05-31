@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { OnyxState, Chapter } from '../state/onyx';
-import { playAudio, pauseAudio, seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
-// Canonical play function for starting a book with consistent resume behaviour
-import { playBook } from '../api/playbook';
+import { seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
+// playBook: canonical entry point for starting a book from a stopped state.
+// togglePlayback: pairs the LibVLC command with st.setPlaying for correct
+// immediate state sync when resuming or pausing an already-open session.
+import { playBook, togglePlayback } from '../api/playbook';
 import {
   SPEEDS,
   chapterAt, chapterStart, fmtTime, fmtRemaining,
@@ -295,12 +297,11 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         // No session open or a different book is loaded — start this book
         // via the canonical function so it resumes from saved position.
         await playBook(st, focus.id);
-      } else if (st.playing) {
-        // Already playing — toggle to pause.
-        await pauseAudio();
       } else {
-        // Session ready and paused — resume from current position.
-        await playAudio();
+        // Session is already open for this book — toggle play/pause.
+        // togglePlayback pairs the LibVLC call with st.setPlaying so the
+        // UI icon updates immediately without waiting for playback-tick.
+        await togglePlayback(st);
       }
     } catch (err) {
       console.error('[handleContinue] failed:', err);

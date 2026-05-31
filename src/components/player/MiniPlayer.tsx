@@ -1,6 +1,8 @@
 import type { OnyxState } from '../../state/onyx';
 import { bookTitle } from '../../state/onyx';
-import { playAudio, pauseAudio } from '../../api/abs';
+// togglePlayback pairs the LibVLC command with st.setPlaying so the icon
+// updates immediately instead of waiting for the next playback-tick event.
+import { togglePlayback } from '../../api/playbook';
 import Cover from '../Cover';
 import Icon from '../Icon';
 
@@ -56,7 +58,9 @@ export default function MiniPlayer({ st }: MiniPlayerProps) {
 
         {/* Play / Pause */}
         <button
-          onClick={() => (playing ? pauseAudio() : playAudio()).catch(console.error)}
+          {/* togglePlayback updates st.playing immediately so the icon reflects
+              the new state without waiting for the next playback-tick event */}
+          onClick={() => togglePlayback(st)}
           style={{
             width: 32, height: 32, borderRadius: 16, flexShrink: 0,
             background: 'var(--onyx-accent)', border: 'none',
