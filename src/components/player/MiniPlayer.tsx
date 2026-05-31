@@ -58,9 +58,7 @@ export default function MiniPlayer({ st }: MiniPlayerProps) {
 
         {/* Play / Pause */}
         <button
-          {/* togglePlayback updates st.playing immediately so the icon reflects
-              the new state without waiting for the next playback-tick event */}
-          onClick={() => togglePlayback(st)}
+          onClick={() => togglePlayback(st)} // togglePlayback syncs st.playing immediately
           style={{
             width: 32, height: 32, borderRadius: 16, flexShrink: 0,
             background: 'var(--onyx-accent)', border: 'none',
