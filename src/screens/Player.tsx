@@ -396,7 +396,12 @@ export default function Player({ st }: PlayerProps) {
         st.setSessionReady(false);
         st.setSessionId('');
         st.setPlaying(false);
-        const { sessionId } = await openPlaybackSession(st.serverUrl, fid);
+        // Look up the focused book's saved progress so playback resumes
+        // from where the user left off rather than starting from the beginning.
+        const savedProgress = st.mediaProgress.find(p => p.libraryItemId === fid);
+        const startTime = savedProgress ? savedProgress.currentTime : 0;
+        // Open session at the saved position — server sets LibVLC's start offset
+        const { sessionId } = await openPlaybackSession(st.serverUrl, fid, startTime);
         st.setSessionId(sessionId);
         st.setSessionReady(true);
         st.setCurrentBookId(fid);
