@@ -62,6 +62,12 @@ export default function Player({ st }: PlayerProps) {
 
   const isFocusedDifferent = st.focusedBookId !== null && st.focusedBookId !== st.currentBookId;
 
+  // Chapters are locked when the focused book differs from the playing book,
+  // OR when playback has not yet started (position is 0 and not playing).
+  // This prevents the chapter list from highlighting chapter 1 before the
+  // user has pressed play.
+  const chaptersLocked = isFocusedDifferent || (!st.playing && st.position === 0);
+
   // Fetched chapters for the focused book when it differs from the playing book.
   // Library-list items don't include chapter data, so we fetch the full item.
   const [fetchedFocusedChapters, setFetchedFocusedChapters] = useState(bookChapters(b));
@@ -736,22 +742,25 @@ export default function Player({ st }: PlayerProps) {
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{displayChapters.length} · {bookDur(b)} total</div>
               </div>
-              {/* Hint shown when browsing a book that is not currently playing —
-                  chapter navigation is disabled in this state until playback starts */}
+              {/* Contextual hint above the list — message varies by lock reason */}
               {isFocusedDifferent && (
-                <div style={{
-                  fontFamily: MONO, fontSize: 10,
-                  color: 'var(--onyx-text-mute)', letterSpacing: '0.06em',
-                  marginBottom: 8,
-                }}>
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginBottom: 8 }}>
                   Press Play to enable chapter navigation
+                </div>
+              )}
+              {/* Not yet started: same book but position is 0 and not playing */}
+              {!isFocusedDifferent && !st.playing && st.position === 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginBottom: 8 }}>
+                  Press play to begin
                 </div>
               )}
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {displayChapters.map((c, i) => {
-                  // Use focusedChIdx when browsing a non-playing book so the chapter list
-                  // reflects that book's saved progress, not the live playback position.
-                  const rowChIdx = isFocusedDifferent ? focusedChIdx : chIdx;
+                  // Use focusedChIdx for focused non-playing book, -1 (no highlight)
+                  // when not yet started, or live chIdx during active playback.
+                  const rowChIdx = isFocusedDifferent ? focusedChIdx
+                    : chaptersLocked ? -1
+                    : chIdx;
                   const state = i < rowChIdx ? 'done' : i === rowChIdx ? 'playing' : 'next';
                   return (
                     <button key={c.n} onClick={async () => {
@@ -778,11 +787,11 @@ export default function Player({ st }: PlayerProps) {
                       background: state === 'playing' ? 'var(--onyx-accent-dim)' : 'transparent',
                       border: `1px solid ${state === 'playing' ? 'var(--onyx-accent-edge)' : 'transparent'}`,
                       marginBottom: 2, width: '100%', fontFamily: 'inherit', textAlign: 'left',
-                      // Dim and block interaction when browsing a non-playing book —
-                      // chapter navigation only makes sense once that book is playing.
-                      cursor: isFocusedDifferent ? 'default' : 'pointer',
-                      opacity: isFocusedDifferent ? 0.45 : 1,
-                      pointerEvents: isFocusedDifferent ? 'none' : 'auto',
+                      // Dim and block interaction when chapters are locked (different book
+                      // or playback not yet started) — navigation only works when playing.
+                      cursor: chaptersLocked ? 'default' : 'pointer',
+                      opacity: chaptersLocked ? 0.45 : 1,
+                      pointerEvents: chaptersLocked ? 'none' : 'auto',
                     }}>
                       <div style={{ fontFamily: MONO, fontSize: 11, color: state === 'playing' ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', width: 22 }}>{String(c.n).padStart(2, '0')}</div>
                       <div style={{ flex: 1, fontSize: 13, fontWeight: state === 'playing' ? 600 : 400, color: state === 'done' ? 'var(--onyx-text-mute)' : 'var(--onyx-text)' }}>{c.t}</div>
