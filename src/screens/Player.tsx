@@ -348,6 +348,24 @@ export default function Player({ st }: PlayerProps) {
     return () => clearTimeout(t);
   }, [showTransport]);
 
+  // Pre-seed the playback position from the book's saved media progress so
+  // the transport bar shows the correct position immediately on load —
+  // before any session is opened or any playback-tick event fires.
+  // This is the same data source used by the Pick it up section.
+  useEffect(() => {
+    if (!st.currentBookId) return;
+
+    // Find the saved progress entry for the current book
+    const saved = st.mediaProgress.find(p => p.libraryItemId === st.currentBookId);
+    if (!saved || saved.currentTime === undefined) return;
+
+    // Only pre-seed if the current position is 0 (i.e. not already set by
+    // an active playback-tick) to avoid overwriting live playback position.
+    if (st.position === 0) {
+      st.setPosition(saved.currentTime);
+    }
+  }, [st.currentBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const sleepLabel: string | null = sleepMode == null
     ? null
     : sleepMode === 'chapter'
