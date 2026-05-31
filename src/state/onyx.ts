@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, openPlaybackSession } from '../api/abs';
 
 export type { User };
 import {
@@ -620,6 +620,10 @@ export function useOnyxState(): OnyxState {
   const accentRef = useRef(accentColor);
   const themeRef  = useRef(theme);
 
+  // Tracks which book has already been preloaded into LibVLC so the effect
+  // does not re-open the session when unrelated state changes cause a re-render.
+  const preloadedRef = useRef<string | null>(null);
+
   useEffect(() => {
     applyTheme(resolveToBase(themeRef.current), accentRef.current);
     if (themeRef.current !== 'system') return;
@@ -660,6 +664,33 @@ export function useOnyxState(): OnyxState {
       setFocusedBookId(currentBookId || library[0].id);
     }
   }, [library, currentBookId]); // focusedBookId intentionally excluded
+
+  // Preload the playback session at app start so the Player view shows
+  // full metadata (waveform, duration, chapters) and the first play press
+  // starts instantly. We open the session but do NOT call playAudio() —
+  // the book is "armed" and paused, so the app makes no sound on launch.
+  useEffect(() => {
+    // Guard: nothing to do without a book or library
+    if (!currentBookId || library.length === 0) return;
+    // Guard: skip if we already preloaded this book (prevents re-firing on unrelated re-renders)
+    if (preloadedRef.current === currentBookId) return;
+    // Guard: need a server URL to open a session
+    if (!serverUrl) return;
+
+    preloadedRef.current = currentBookId;
+
+    openPlaybackSession(serverUrl, currentBookId)
+      .then(({ sessionId }) => {
+        // Session is loaded into LibVLC at the saved position, paused.
+        // Register the session ID and mark ready so the first play press
+        // calls playAudio() directly with no session-open delay.
+        setSessionId(sessionId);
+        setSessionReady(true);
+        // Ensure the UI reflects a paused state, not playing.
+        setPlaying(false);
+      })
+      .catch(console.error); // non-fatal — user can still press play manually
+  }, [library, currentBookId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
   const focusedBook  = library.find(b => b.id === (focusedBookId ?? currentBookId)) ?? currentBook;
