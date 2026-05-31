@@ -3,7 +3,7 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio } from './abs';
+import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume } from './abs';
 
 export async function playBook(
   st: OnyxState,
@@ -42,6 +42,24 @@ export async function playBook(
   //    playback-tick event from Rust confirms within ~1 second.
   await playAudio().catch(console.error);
   st.setPlaying(true);
+}
+
+// Shared mute control. Pairs the LibVLC volume command with the React
+// muted-state flag so the toolbar mute button and the keyboard shortcut
+// behave identically and LibVLC is actually silenced (not just the UI).
+export async function muteAudio(st: OnyxState): Promise<void> {
+  // Silence LibVLC output by setting volume to 0
+  await setAudioVolume(0).catch(console.error);
+  // Reflect muted state in the UI
+  st.setMuted(true);
+}
+
+export async function unmuteAudio(st: OnyxState): Promise<void> {
+  // Restore LibVLC output to the user's last volume level.
+  // st.volume is stored as a 0–1 fraction; setAudioVolume expects 0–100.
+  await setAudioVolume(Math.round(st.volume * 100)).catch(console.error);
+  // Clear muted state in the UI
+  st.setMuted(false);
 }
 
 // Shared playback toggle for an already-open session. Pairs the LibVLC

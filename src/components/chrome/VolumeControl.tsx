@@ -1,5 +1,8 @@
 import type { OnyxState } from '../../state/onyx';
 import Icon from '../Icon';
+// muteAudio/unmuteAudio pair the LibVLC command with st.setMuted so
+// clicking mute actually silences LibVLC, not just the UI slider.
+import { muteAudio, unmuteAudio } from '../../api/playbook';
 
 export interface VolumeControlProps {
   st: OnyxState;
@@ -22,7 +25,7 @@ export default function VolumeControl({ st }: VolumeControlProps) {
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
     }}>
       <button
-        onClick={() => st.setMuted(!st.muted)}
+        onClick={() => st.muted ? unmuteAudio(st) : muteAudio(st)}
         style={{ background: 'none', border: 'none', color: 'var(--onyx-text-dim)', cursor: 'pointer', padding: 2, display: 'flex' }}
         title="Mute"
       >

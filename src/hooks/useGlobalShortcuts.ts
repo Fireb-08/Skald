@@ -7,6 +7,9 @@ import {
   seekAudio,
   setVolume as setAudioVolume,
 } from '../api/abs';
+// muteAudio/unmuteAudio share identical logic with the VolumeControl button
+// so both input paths behave the same and LibVLC is always in sync with the UI.
+import { muteAudio, unmuteAudio } from '../api/playbook';
 import type { OnyxState } from '../state/onyx';
 import type { ShortcutBinding } from '../api/abs';
 
@@ -92,12 +95,12 @@ export function useGlobalShortcuts(st: OnyxState): void {
     });
 
     on('shortcut-mute', () => {
+      // Use stRef.current to avoid stale closures — the helpers receive the
+      // live OnyxState snapshot and handle both LibVLC and UI state in sync.
       if (stRef.current.muted) {
-        setAudioVolume(Math.round(stRef.current.volume * 100)).catch(console.error);
-        stRef.current.setMuted(false);
+        unmuteAudio(stRef.current);
       } else {
-        setAudioVolume(0).catch(console.error);
-        stRef.current.setMuted(true);
+        muteAudio(stRef.current);
       }
     });
 
