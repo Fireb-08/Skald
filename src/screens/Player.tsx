@@ -710,6 +710,17 @@ export default function Player({ st }: PlayerProps) {
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{displayChapters.length} · {bookDur(b)} total</div>
               </div>
+              {/* Hint shown when browsing a book that is not currently playing —
+                  chapter navigation is disabled in this state until playback starts */}
+              {isFocusedDifferent && (
+                <div style={{
+                  fontFamily: MONO, fontSize: 10,
+                  color: 'var(--onyx-text-mute)', letterSpacing: '0.06em',
+                  marginBottom: 8,
+                }}>
+                  Press Play to enable chapter navigation
+                </div>
+              )}
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {displayChapters.map((c, i) => {
                   const state = i < chIdx ? 'done' : i === chIdx ? 'playing' : 'next';
@@ -750,7 +761,12 @@ export default function Player({ st }: PlayerProps) {
                       display: 'flex', alignItems: 'center', padding: '8px 12px', borderRadius: 8, gap: 12,
                       background: state === 'playing' ? 'var(--onyx-accent-dim)' : 'transparent',
                       border: `1px solid ${state === 'playing' ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-                      marginBottom: 2, width: '100%', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                      marginBottom: 2, width: '100%', fontFamily: 'inherit', textAlign: 'left',
+                      // Dim and block interaction when browsing a non-playing book —
+                      // chapter navigation only makes sense once that book is playing.
+                      cursor: isFocusedDifferent ? 'default' : 'pointer',
+                      opacity: isFocusedDifferent ? 0.45 : 1,
+                      pointerEvents: isFocusedDifferent ? 'none' : 'auto',
                     }}>
                       <div style={{ fontFamily: MONO, fontSize: 11, color: state === 'playing' ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', width: 22 }}>{String(c.n).padStart(2, '0')}</div>
                       <div style={{ flex: 1, fontSize: 13, fontWeight: state === 'playing' ? 600 : 400, color: state === 'done' ? 'var(--onyx-text-mute)' : 'var(--onyx-text)' }}>{c.t}</div>
