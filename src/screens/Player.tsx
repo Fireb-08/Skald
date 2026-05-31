@@ -393,13 +393,22 @@ export default function Player({ st }: PlayerProps) {
   };
 
   const handlePlayFocused = () => {
-    // Step 1: Make the focused book the currently playing book in local state only.
-    // No server interaction — this is purely a UI state change that tells the
-    // transport bar which book to control.
+    // Switch the playing book to the focused book in local state only.
+    // No server interaction — the transport play button handles that.
     st.setCurrentBookId(st.focusedBookId!);
 
-    // Step 2: Animate the button out and expand the transport bar.
-    // The user can then use the standard play button to start playback.
+    // Clear session state so the transport bar knows no session is open
+    // for the newly selected book and renders in the correct pre-play state.
+    st.setSessionId('');
+    // Mark session as not ready so handlePlayPause opens a fresh session on play.
+    st.setSessionReady(false);
+    // Reflect paused state immediately — no audio is playing yet.
+    st.setPlaying(false);
+    // Reset position to 0 so the waveform and chapter list start from the beginning
+    // of the new book; the pre-seed effect will update this once mediaProgress loads.
+    st.setPosition(0);
+
+    // Animate the button out and expand the transport bar.
     setBtnOut(true);
     // Expand the card after 50ms to allow the button exit animation to begin first.
     setTimeout(() => setShowTransport(true), 50);
