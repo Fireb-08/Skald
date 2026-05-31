@@ -401,10 +401,15 @@ export default function Player({ st }: PlayerProps) {
         const savedProgress = st.mediaProgress.find(p => p.libraryItemId === fid);
         const startTime = savedProgress ? savedProgress.currentTime : 0;
         // Open session at the saved position — server sets LibVLC's start offset
-        const { sessionId } = await openPlaybackSession(st.serverUrl, fid, startTime);
+        const sessionResult = await openPlaybackSession(st.serverUrl, fid, startTime);
+        const { sessionId } = sessionResult;
         st.setSessionId(sessionId);
         st.setSessionReady(true);
         st.setCurrentBookId(fid);
+        // Sync the UI position to the session's confirmed currentTime so the
+        // waveform, time readout, and chapter highlight reflect the correct position
+        // immediately without waiting for the first playback-tick event.
+        st.setPosition(sessionResult.currentTime);
         await playAudio().catch(console.error);
         // Optimistically mark as playing immediately — the playback-tick event
         // from Rust confirms this within ~1s, but setting it here prevents the
