@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
   SPEEDS, chapterAt, chapterStart, fmtTime, fmtRemaining,
-  bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur, bookChapters, bookCurrentTime,
+  bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur, bookChapters,
 } from '../state/onyx';
 import Glass from '../components/chrome/Glass';
 import Cover from '../components/Cover';
@@ -193,6 +193,12 @@ export default function Player({ st }: PlayerProps) {
   const [sleepMode, setSleepMode] = useState<SleepMode>(parseSleepDefault(sleepDefault));
   const [sleepRemain, setSleepRemain] = useState(0);
   const [sleepOpen, setSleepOpen] = useState(false);
+
+  // Preview card animation state
+  const [showTransport, setShowTransport] = useState(false);
+  const [btnOut, setBtnOut] = useState(false);
+  const [btnMounted, setBtnMounted] = useState(true);
+  const [contentVisible, setContentVisible] = useState(false);
   const sleepRef = useRef<HTMLDivElement>(null);
   const chapterAtStart = useRef(chIdx);
   const prevChIdxRef = useRef(chIdx);
@@ -302,6 +308,21 @@ export default function Player({ st }: PlayerProps) {
     setAudioVolume(Math.round(st.volume * 100)).catch(() => {});
   }, [st.volume]);
 
+  // Reset preview animation when the user focuses a new book.
+  useEffect(() => {
+    setShowTransport(false);
+    setBtnOut(false);
+    setBtnMounted(true);
+    setContentVisible(false);
+  }, [st.focusedBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fade transport contents in 300ms after the card starts expanding.
+  useEffect(() => {
+    if (!showTransport) { setContentVisible(false); return; }
+    const t = setTimeout(() => setContentVisible(true), 300);
+    return () => clearTimeout(t);
+  }, [showTransport]);
+
   const sleepLabel: string | null = sleepMode == null
     ? null
     : sleepMode === 'chapter'
@@ -340,6 +361,28 @@ export default function Player({ st }: PlayerProps) {
     } catch (err) {
       console.error('[Player] play/pause failed:', err);
     }
+  };
+
+  const handlePlayFocused = () => {
+    const fid = st.focusedBookId!;
+    setBtnOut(true);
+    setTimeout(() => setShowTransport(true), 50);
+    setTimeout(() => setBtnMounted(false), 300);
+    void (async () => {
+      try {
+        await closeActiveSession().catch(() => {});
+        st.setSessionReady(false);
+        st.setSessionId('');
+        st.setPlaying(false);
+        const { sessionId } = await openPlaybackSession(st.serverUrl, fid);
+        st.setSessionId(sessionId);
+        st.setSessionReady(true);
+        st.setCurrentBookId(fid);
+        await playAudio().catch(console.error);
+      } catch (err) {
+        console.error('[Player] play focused book failed:', err);
+      }
+    })();
   };
 
   return (
@@ -394,78 +437,62 @@ export default function Player({ st }: PlayerProps) {
 
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
 
-          <Glass translucent={st.translucent} style={{ padding: 26, flexShrink: 0 }}>
-            {isFocusedDifferent && (
+          <Glass translucent={st.translucent} style={{
+            padding: (isFocusedDifferent && !showTransport) ? '14px 26px' : 26,
+            maxHeight: (isFocusedDifferent && !showTransport) ? 68 : 700,
+            overflow: 'hidden',
+            transition: 'max-height 350ms ease-out, padding 300ms ease-out',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: (isFocusedDifferent && !showTransport) ? 'center' : 'flex-start',
+          }}>
+            {/* Preview: Play this book button */}
+            {isFocusedDifferent && btnMounted && (
               <div style={{
-                marginBottom: 16, padding: '5px 10px',
-                borderLeft: '2px solid var(--onyx-glass-edge)',
-                borderRadius: '0 4px 4px 0',
-                background: 'rgba(255,255,255,0.03)',
-                fontFamily: MONO, fontSize: 9,
-                color: 'var(--onyx-text-mute)',
-                letterSpacing: '0.14em',
-                textTransform: 'uppercase' as const,
+                display: 'flex', justifyContent: 'center', alignItems: 'center',
+                transform: btnOut ? 'translateY(40px)' : 'translateY(0)',
+                opacity: btnOut ? 0 : 1,
+                transition: 'transform 300ms ease-in, opacity 300ms ease-in',
               }}>
-                Preview · Not currently playing
+                <button
+                  onClick={handlePlayFocused}
+                  style={{
+                    width: 280, padding: '11px 0',
+                    background: 'var(--onyx-accent)', border: 'none', borderRadius: 8,
+                    color: 'var(--onyx-bg)', cursor: 'pointer',
+                    fontFamily: MONO, fontSize: 12, fontWeight: 600,
+                    letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  <Icon name="play" size={13} /> Play this book
+                </button>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 22 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>Now playing · {bookTitle(st.currentBook ?? b)}</div>
-                <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, marginTop: 4, letterSpacing: '-0.005em' }}>{curCh.t}</div>
+            {/* Full transport: live or post-expansion */}
+            {(!isFocusedDifferent || showTransport) && (
+              <div style={{
+                opacity: (isFocusedDifferent && showTransport) ? (contentVisible ? 1 : 0) : 1,
+                transition: 'opacity 250ms ease-in',
+              }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 22 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>Now playing · {bookTitle(st.currentBook ?? b)}</div>
+                  <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, marginTop: 4, letterSpacing: '-0.005em' }}>{curCh.t}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)' }}>
+                  <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(chLocal)}</span>
+                  <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
+                  <span>{fmtTime(curCh.dur)}</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)' }}>
-                {isFocusedDifferent ? (
-                  <>
-                    <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(bookCurrentTime(b, st.mediaProgress))}</span>
-                    <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
-                    <span>{fmtTime(b.media.duration)}</span>
-                  </>
-                ) : (
-                  <>
-                    <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(chLocal)}</span>
-                    <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
-                    <span>{fmtTime(curCh.dur)}</span>
-                  </>
-                )}
+
+              <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
+                <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
               </div>
-            </div>
 
-            <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0, opacity: isFocusedDifferent ? 0.35 : 1, pointerEvents: isFocusedDifferent ? 'none' : 'auto' }}>
-              <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
-            </div>
-
-            {isFocusedDifferent ? (
-              <button
-                onClick={async () => {
-                  const fid = st.focusedBookId!;
-                  await closeActiveSession().catch(() => {});
-                  st.setSessionReady(false);
-                  st.setSessionId('');
-                  st.setPlaying(false);
-                  try {
-                    const { sessionId } = await openPlaybackSession(st.serverUrl, fid);
-                    st.setSessionId(sessionId);
-                    st.setSessionReady(true);
-                    st.setCurrentBookId(fid);
-                    await playAudio().catch(console.error);
-                  } catch (err) {
-                    console.error('[Player] play focused book failed:', err);
-                  }
-                }}
-                style={{
-                  marginTop: 22, width: '100%', padding: '13px 0',
-                  background: 'var(--onyx-accent)', border: 'none', borderRadius: 8,
-                  color: 'var(--onyx-bg)', cursor: 'pointer',
-                  fontFamily: MONO, fontSize: 12, fontWeight: 600,
-                  letterSpacing: '0.08em', textTransform: 'uppercase' as const,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                }}
-              >
-                <Icon name="play" size={13} /> Play this book
-              </button>
-            ) : (
-            <div ref={transportRef} style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
+              <div ref={transportRef} style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
 
               <div style={{ display: 'flex', gap: 6, flexShrink: 1, minWidth: 0 }}>
                 {transportWidth >= 620 ? (
@@ -561,6 +588,7 @@ export default function Player({ st }: PlayerProps) {
                   )}
                 </div>
               </div>
+            </div>
             </div>
             )}
           </Glass>
