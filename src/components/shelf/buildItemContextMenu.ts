@@ -1,6 +1,8 @@
 import type { LibraryItem, OnyxState, MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
-import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, openPlaybackSession, playAudio } from '../../api/abs';
+import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem } from '../../api/abs';
+// Canonical play function — routes through shared resume and UI-sync logic
+import { playBook } from '../../api/playbook';
 
 // Guard against double-invocation (React portal event bubbling / StrictMode).
 const pendingItems = new Set<string>();
@@ -29,16 +31,9 @@ export function buildItemContextMenu(
       onClick: async () => {
         const title = item.media?.metadata?.title ?? item.id;
         try {
-          await closeActiveSession().catch(() => {});
-          st.setSessionReady(false);
-          st.setSessionId('');
-          st.setPlaying(false);
-          const { sessionId } = await openPlaybackSession(st.serverUrl, item.id);
-          st.setSessionId(sessionId);
-          st.setSessionReady(true);
-          st.setCurrentBookId(item.id);
-          st.setFocusedBookId(item.id);
-          await playAudio();
+          // Delegate session teardown, resume-position lookup, session open,
+          // UI sync, and playAudio to the canonical playBook function.
+          await playBook(st, item.id);
           st.setToast({ message: `Now playing "${title}"`, type: 'success' });
         } catch (e) {
           st.setToast({ message: `Failed to start playback: ${String(e)}`, type: 'error' });

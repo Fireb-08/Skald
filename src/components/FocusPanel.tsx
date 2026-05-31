@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { OnyxState, Chapter } from '../state/onyx';
-import { openPlaybackSession, playAudio, pauseAudio, seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
+import { playAudio, pauseAudio, seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
+// Canonical play function for starting a book with consistent resume behaviour
+import { playBook } from '../api/playbook';
 import {
   SPEEDS,
   chapterAt, chapterStart, fmtTime, fmtRemaining,
@@ -290,14 +292,14 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   const handleContinue = async () => {
     try {
       if (!st.sessionReady || focus.id !== st.currentBookId) {
-        const { sessionId, currentTime } = await openPlaybackSession(st.serverUrl, focus.id);
-        st.setCurrentBookId(focus.id);
-        st.setSessionId(sessionId);
-        st.setSessionReady(true);
-        await playAudio();
+        // No session open or a different book is loaded — start this book
+        // via the canonical function so it resumes from saved position.
+        await playBook(st, focus.id);
       } else if (st.playing) {
+        // Already playing — toggle to pause.
         await pauseAudio();
       } else {
+        // Session ready and paused — resume from current position.
         await playAudio();
       }
     } catch (err) {

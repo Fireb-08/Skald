@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  openPlaybackSession, playAudio, pauseAudio, closeActiveSession,
+  playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
 } from '../api/abs';
@@ -19,6 +19,9 @@ import DeviceSelector from '../components/chrome/DeviceSelector';
 import { getCachedReview, setCachedReview } from '../api/reviewCache';
 import type { OLRatings, OLShelves } from '../api/reviewCache';
 import MiniPlayer from '../components/player/MiniPlayer';
+// Canonical play function — all "start this book" paths route through here
+// for consistent resume-from-saved-position and UI-sync behaviour.
+import { playBook } from '../api/playbook';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -363,21 +366,18 @@ export default function Player({ st }: PlayerProps) {
   const handlePlayPause = async () => {
     try {
       if (isFocusedDifferent && !st.playing) {
-        // User wants to start the focused (different) book.
-        const focusedId = st.focusedBookId!;
-        const { sessionId } = await openPlaybackSession(st.serverUrl, focusedId);
-        st.setSessionId(sessionId);
-        st.setSessionReady(true);
-        st.setCurrentBookId(focusedId);
-        await playAudio();
+        // User pressed play while viewing a different book — start that book
+        // via the canonical function so it resumes from saved position.
+        await playBook(st, st.focusedBookId!);
       } else if (!st.sessionReady) {
-        const { sessionId } = await openPlaybackSession(st.serverUrl, st.currentBookId);
-        st.setSessionId(sessionId);
-        st.setSessionReady(true);
-        await playAudio();
+        // Fallback: preload didn't arm a session (e.g. cold launch edge case).
+        // Start the current/focused book with proper resume logic.
+        await playBook(st, st.focusedBookId ?? st.currentBookId);
       } else if (st.playing) {
+        // Session already open and playing — just pause.
         await pauseAudio();
       } else {
+        // Session already open but paused — resume from current position.
         await playAudio();
       }
     } catch (err) {
@@ -392,29 +392,9 @@ export default function Player({ st }: PlayerProps) {
     setTimeout(() => setBtnMounted(false), 300);
     void (async () => {
       try {
-        await closeActiveSession().catch(() => {});
-        st.setSessionReady(false);
-        st.setSessionId('');
-        st.setPlaying(false);
-        // Look up the focused book's saved progress so playback resumes
-        // from where the user left off rather than starting from the beginning.
-        const savedProgress = st.mediaProgress.find(p => p.libraryItemId === fid);
-        const startTime = savedProgress ? savedProgress.currentTime : 0;
-        // Open session at the saved position — server sets LibVLC's start offset
-        const sessionResult = await openPlaybackSession(st.serverUrl, fid, startTime);
-        const { sessionId } = sessionResult;
-        st.setSessionId(sessionId);
-        st.setSessionReady(true);
-        st.setCurrentBookId(fid);
-        // Sync the UI position to the session's confirmed currentTime so the
-        // waveform, time readout, and chapter highlight reflect the correct position
-        // immediately without waiting for the first playback-tick event.
-        st.setPosition(sessionResult.currentTime);
-        await playAudio().catch(console.error);
-        // Optimistically mark as playing immediately — the playback-tick event
-        // from Rust confirms this within ~1s, but setting it here prevents the
-        // UI from showing a paused state during that delay window.
-        st.setPlaying(true);
+        // Delegate all session teardown, resume-position lookup, session open,
+        // UI sync, and playAudio to the canonical playBook function.
+        await playBook(st, fid);
       } catch (err) {
         console.error('[Player] play focused book failed:', err);
       }
@@ -767,22 +747,9 @@ export default function Player({ st }: PlayerProps) {
                           st.setPlaying(true);
                         }
                       } else {
-                        await closeActiveSession().catch(() => {});
-                        st.setSessionReady(false);
-                        st.setSessionId('');
-                        st.setPlaying(false);
-                        try {
-                          const { sessionId } = await openPlaybackSession(st.serverUrl, st.focusedBookId, pos);
-                          st.setSessionId(sessionId);
-                          st.setSessionReady(true);
-                          st.setCurrentBookId(st.focusedBookId);
-                          await playAudio().catch(console.error);
-                          // Optimistically mark as playing — playback-tick will confirm within 1s
-                          st.setPlaying(true);
-                          st.setPosition(pos);
-                        } catch (err) {
-                          console.error('[Player] chapter-click playback failed:', err);
-                        }
+                        // Different book — start playback at the selected chapter
+                        // position via the canonical function (pos is the override).
+                        await playBook(st, st.focusedBookId!, pos);
                       }
                     }} style={{
                       display: 'flex', alignItems: 'center', padding: '8px 12px', borderRadius: 8, gap: 12,
