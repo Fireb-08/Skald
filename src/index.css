@@ -164,3 +164,32 @@ input:focus-visible {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ─── Saga login animations ─────────────────────────────────────────────── */
+
+/* Entrance slide-in for the right form panel of the Saga login screen */
+@keyframes saga-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.saga-in {
+  animation: saga-in 480ms cubic-bezier(.2,.7,.2,1) both;
+}
+
+/* Brighten the underline to accent gold when a Saga field receives focus */
+.saga-input:focus {
+  border-bottom-color: var(--onyx-accent) !important;
+}
+
+/* Saga CTA button hover/active states */
+.saga-cta:not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 14px 36px rgba(212,166,74,0.32), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+}
+.saga-cta:not(:disabled):hover .saga-arrow {
+  transform: translateX(4px);
+}
+.saga-cta:not(:disabled):active {
+  transform: translateY(0);
+}
