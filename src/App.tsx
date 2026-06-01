@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+// Root application component. Renders the Saga login screen when the user
+// has no saved auth token; otherwise renders the main library/player shell.
 import { useOnyxState } from './state/onyx';
-import { hasToken } from './api/abs';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import Toast from './components/ui/Toast';
 import ConfirmDialog from './components/ui/ConfirmDialog';
@@ -13,39 +13,29 @@ import Player from './screens/Player';
 import Settings from './screens/Settings';
 
 export default function App() {
+  // Single shared state object — all screens read from and write to this
   const st = useOnyxState();
   const isDark = st.theme !== 'light';
+  // UI scale factor applied via CSS transform on the root div
   const z = st.scale / 100;
 
-  const [authChecked, setAuthChecked] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
+  // Register global keyboard shortcuts (Ctrl+Alt+Space etc.) once on mount
   useGlobalShortcuts(st);
 
-  useEffect(() => {
-    hasToken()
-      .then(has => {
-        setIsAuthenticated(has);
-        setAuthChecked(true);
-      })
-      .catch(() => {
-        setIsAuthenticated(false);
-        setAuthChecked(true);
-      });
-  }, []);
-
-  // Hold a plain dark fill until the keyring check resolves — prevents any flash.
-  if (!authChecked) {
-    return <div style={{ width: '100vw', height: '100vh', background: 'var(--onyx-bg)' }} />;
+  // ── Auth gate ───────────────────────────────────────────────────────────
+  // st.authToken is initialised synchronously from localStorage, so this
+  // check is instant and produces no flash. When Login succeeds it calls
+  // st.setAuthToken which re-renders App and this condition becomes false.
+  if (!st.authToken) {
+    return <Login st={st} />;
   }
 
-  if (!isAuthenticated) {
-    return <Login st={st} onLoginSuccess={() => setIsAuthenticated(true)} />;
-  }
-
+  // ── Main shell ──────────────────────────────────────────────────────────
   return (
     <div style={{
       position: 'relative',
+      // Inverse-scale the root so that after the CSS scale() transform the
+      // viewport is fully occupied (prevents layout overflow at non-100% scales)
       width: `${100 / z}vw`,
       height: `${100 / z}vh`,
       display: 'flex',
@@ -54,8 +44,11 @@ export default function App() {
       transform: `scale(${z})`,
       transformOrigin: 'top left',
     }}>
+      {/* Ambient wash gradient and titlebar chrome */}
       <OnyxWash isDark={isDark} />
       <Titlebar isDark={isDark} />
+
+      {/* Screen content area — sits below the 44px titlebar */}
       <div style={{
         position: 'absolute',
         top: 44,
@@ -68,6 +61,7 @@ export default function App() {
         maxWidth: '100%',
         overflow: 'hidden',
       }}>
+        {/* Show a loading indicator while the library fetch is in flight */}
         {st.libraryLoading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontSize: 14, fontFamily: "'JetBrains Mono', ui-monospace, monospace", letterSpacing: '0.08em' }}>
             Loading library…
@@ -77,10 +71,13 @@ export default function App() {
             {st.screen === 'home'     && <Home     st={st} />}
             {st.screen === 'library'  && <Library  st={st} />}
             {st.screen === 'player'   && <Player   st={st} />}
-            {st.screen === 'settings' && <Settings st={st} onLogout={() => setIsAuthenticated(false)} />}
+            {/* Settings receives onLogout which clears the token and shows Login again */}
+            {st.screen === 'settings' && <Settings st={st} onLogout={() => st.setAuthToken('')} />}
           </>
         )}
       </div>
+
+      {/* Global toast notification — rendered above all screens */}
       {st.toast && (
         <Toast
           message={st.toast.message}
@@ -88,6 +85,8 @@ export default function App() {
           onDismiss={() => st.setToast(null)}
         />
       )}
+
+      {/* Global confirmation dialog — rendered above all screens */}
       {st.confirmDialog && (
         <ConfirmDialog
           title={st.confirmDialog.title}
