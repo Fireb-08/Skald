@@ -120,6 +120,55 @@ pub async fn connect(
                 .boxed()
             }
         })
+        // "item_added" fires when a new library item is created on the server.
+        // Forward the full item payload so the frontend can append it to the
+        // shelf without fetching the entire library again.
+        .on("item_added", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("library-item-added", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
+        // "item_updated" fires when metadata, cover, or chapters change for
+        // an existing item. The payload contains the full updated item object.
+        .on("item_updated", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("library-item-updated", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
+        // "item_removed" fires when a book is deleted from the library.
+        // The payload contains at minimum the item id and libraryId.
+        .on("item_removed", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("library-item-removed", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
         // "error" catches transport-level failures.
         .on("error", move |_err: Payload, _: Client| {
             async move {}

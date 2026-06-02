@@ -415,6 +415,8 @@ export function useOnyxState(): OnyxState {
       const libs = await fetchLibraries(serverUrl);
       const audiobookLib = libs.find(l => l.mediaType === 'book') ?? libs[0];
       if (!audiobookLib) return;
+      // Keep currentLibraryId in sync whenever the library is refreshed.
+      setCurrentLibraryId(audiobookLib.id);
       const items = await fetchLibraryItems(serverUrl, audiobookLib.id);
       setLibraryRaw(patchLibraryItems(items));
     } catch (e) {
@@ -427,6 +429,9 @@ export function useOnyxState(): OnyxState {
   const [mediaProgress, setMediaProgress] = useState<MediaProgress[]>([]);
   const [listeningStats, setListeningStats] = useState<ListeningStats | null>(null);
   const [bookmarks, setBookmarks] = useState<AbsBookmark[]>([]);
+  // Tracks the active library's ID so live sync handlers can filter events
+  // that belong to a different library (e.g., a podcast library vs. books).
+  const [currentLibraryId, setCurrentLibraryId] = useState('');
 
   useEffect(() => {
     if (!serverUrl || (!authToken && !(username && password))) {
@@ -451,6 +456,8 @@ export function useOnyxState(): OnyxState {
         if (cancelled) return;
         const audiobookLib = libs.find(l => l.mediaType === 'book') ?? libs[0];
         if (!audiobookLib) { setLibraryLoadingRaw(false); return; }
+        // Record the library ID so live sync event handlers can filter by it.
+        setCurrentLibraryId(audiobookLib.id);
         const items = await fetchLibraryItems(serverUrl, audiobookLib.id);
         if (cancelled) return;
         setLibraryRaw(patchLibraryItems(items));
@@ -690,14 +697,16 @@ export function useOnyxState(): OnyxState {
   }, []);
 
   // ── Live progress sync ──────────────────────────────────────────────────────
-  // Refs that let the event handler read the current playback state without
-  // stale-closure issues. The sync effect runs after every render (no dep
-  // array) so the handler always reads the latest values.
-  const currentBookIdRef = useRef(currentBookId);
-  const playingRef       = useRef(playing);
+  // Refs that let the event handlers read the current playback and library
+  // state without stale-closure issues. The sync effect runs after every
+  // render (no dep array) so handlers always see the latest values.
+  const currentBookIdRef    = useRef(currentBookId);
+  const playingRef          = useRef(playing);
+  const currentLibraryIdRef = useRef(currentLibraryId);
   useEffect(() => {
-    currentBookIdRef.current = currentBookId;
-    playingRef.current       = playing;
+    currentBookIdRef.current    = currentBookId;
+    playingRef.current          = playing;
+    currentLibraryIdRef.current = currentLibraryId;
   });
 
   // Subscribe to progress-updated events forwarded from the Rust socket layer.
@@ -762,6 +771,65 @@ export function useOnyxState(): OnyxState {
     return () => { unlisten?.(); };
   // serverUrl and authToken are the meaningful lifecycle triggers — the
   // localStorage flag is read once at setup time per the Phase A pattern.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverUrl, authToken]);
+
+  // ── Live library sync ──────────────────────────────────────────────────────
+  // Subscribe to library item events forwarded from the Rust socket layer.
+  // Active only when live sync is enabled. Uses the same setup/teardown
+  // lifecycle as the progress listener above.
+  useEffect(() => {
+    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
+    if (!syncLive || !serverUrl || !authToken) return;
+
+    // Three separate unlisten handles — each listener is torn down individually.
+    let unlistenAdded:   (() => void) | undefined;
+    let unlistenUpdated: (() => void) | undefined;
+    let unlistenRemoved: (() => void) | undefined;
+
+    // item_added — a new book arrived; append it to the shelf after normalising
+    // author/narrator fields with patchLibraryItems so it matches the rest.
+    listen<string>('library-item-added', event => {
+      try {
+        const raw  = JSON.parse(event.payload) as LibraryItem;
+        // Only process items that belong to the currently loaded library.
+        if (raw.libraryId !== currentLibraryIdRef.current) return;
+        const item = patchLibraryItems([raw])[0];
+        setLibraryRaw(prev => [...prev, item]);
+      } catch (e) { console.error('library-item-added parse failed', e); }
+    }).then(fn => { unlistenAdded = fn; });
+
+    // item_updated — metadata, cover, or chapters changed; merge the new
+    // data over the existing record so the shelf reflects it immediately.
+    listen<string>('library-item-updated', event => {
+      try {
+        const raw  = JSON.parse(event.payload) as LibraryItem;
+        if (raw.libraryId !== currentLibraryIdRef.current) return;
+        const item = patchLibraryItems([raw])[0];
+        setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
+      } catch (e) { console.error('library-item-updated parse failed', e); }
+    }).then(fn => { unlistenUpdated = fn; });
+
+    // item_removed — book deleted; remove it from the shelf and clear any
+    // focused/current references so the player doesn't try to play a ghost.
+    listen<string>('library-item-removed', event => {
+      try {
+        const payload = JSON.parse(event.payload) as { id: string; libraryId: string };
+        if (payload.libraryId !== currentLibraryIdRef.current) return;
+        setLibraryRaw(prev => prev.filter(b => b.id !== payload.id));
+        // Clear currentBookId if the removed item was the one queued to play.
+        setCurrentBookId(prev => prev === payload.id ? '' : prev);
+        // Clear focusedBookId if the removed item was focused in the shelf.
+        setFocusedBookId(prev => prev === payload.id ? null : prev);
+      } catch (e) { console.error('library-item-removed parse failed', e); }
+    }).then(fn => { unlistenRemoved = fn; });
+
+    // Tear down all three listeners together on unmount or auth context change.
+    return () => {
+      unlistenAdded?.();
+      unlistenUpdated?.();
+      unlistenRemoved?.();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverUrl, authToken]);
 
