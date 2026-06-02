@@ -689,6 +689,82 @@ export function useOnyxState(): OnyxState {
     return () => { unlisten?.(); };
   }, []);
 
+  // ── Live progress sync ──────────────────────────────────────────────────────
+  // Refs that let the event handler read the current playback state without
+  // stale-closure issues. The sync effect runs after every render (no dep
+  // array) so the handler always reads the latest values.
+  const currentBookIdRef = useRef(currentBookId);
+  const playingRef       = useRef(playing);
+  useEffect(() => {
+    currentBookIdRef.current = currentBookId;
+    playingRef.current       = playing;
+  });
+
+  // Subscribe to progress-updated events forwarded from the Rust socket layer.
+  // Re-arms when serverUrl/authToken change so reconnects after logout/login
+  // pick up the correct context. Gated on onyx.sync.live so the listener is
+  // dormant when live sync is disabled.
+  useEffect(() => {
+    // Only subscribe when the socket is expected to be connected.
+    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
+    if (!syncLive || !serverUrl || !authToken) return;
+
+    let unlisten: (() => void) | undefined;
+
+    listen<string>('progress-updated', event => {
+      try {
+        // ABS may send the progress record directly or wrapped in { data: {...} }.
+        const raw = JSON.parse(event.payload) as Record<string, unknown>;
+        const update = ((raw.data ?? raw) as Partial<MediaProgress> & {
+          libraryItemId: string;
+          currentTime: number;
+        });
+
+        // ── Self-echo guard ───────────────────────────────────────────────────
+        // Skald syncs its own playback position to the server every 30 seconds.
+        // Those writes echo back here as progress-updated events. If we applied
+        // the echo to the live transport position, it would yank the playhead
+        // backwards on every sync cycle. The guard detects this case by checking
+        // whether the update is for the book we are actively playing right now.
+        const isActivelyPlayingThisBook =
+          update.libraryItemId === currentBookIdRef.current && playingRef.current;
+
+        // ── Stored progress reconciliation (always runs) ──────────────────────
+        // Pick it up, library cover overlays, and the progress bar for
+        // non-playing books all read from mediaProgress. Keep it accurate
+        // even for the actively-playing book so the UI is correct on pause.
+        setMediaProgress((prev: MediaProgress[]) => {
+          const idx = prev.findIndex(p => p.libraryItemId === update.libraryItemId);
+          if (idx >= 0) {
+            // Update existing record without mutating the original array.
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...update };
+            return copy;
+          }
+          // New record — append so newly-started books show in Pick it up.
+          return [...prev, update as MediaProgress];
+        });
+
+        // ── Live transport position (only when safe to update) ────────────────
+        // If this update is for the focused book but we are NOT actively playing
+        // it, advance the position so the player UI reflects the remote device's
+        // current position. If we ARE playing, leave the transport alone.
+        if (!isActivelyPlayingThisBook && update.libraryItemId === currentBookIdRef.current) {
+          setPosition(update.currentTime);
+        }
+      } catch (e) {
+        console.error('[live progress] parse failed', e);
+      }
+    }).then(fn => { unlisten = fn; });
+
+    // Tear down the listener on unmount or when auth context changes so stale
+    // subscriptions do not accumulate across login/logout cycles.
+    return () => { unlisten?.(); };
+  // serverUrl and authToken are the meaningful lifecycle triggers — the
+  // localStorage flag is read once at setup time per the Phase A pattern.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverUrl, authToken]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;

@@ -100,6 +100,26 @@ pub async fn connect(
                 .boxed()
             }
         })
+        // "user_item_progress_updated" fires when any of the authenticated user's
+        // media progress records change — from any device (phone, web, another
+        // Skald instance). Forward the raw payload to the frontend which
+        // reconciles it into the local mediaProgress array.
+        .on("user_item_progress_updated", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    // Extract the first JSON value and re-emit it as a Tauri event.
+                    // The frontend handles de-wrapping and self-echo detection.
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("progress-updated", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
         // "error" catches transport-level failures.
         .on("error", move |_err: Payload, _: Client| {
             async move {}
