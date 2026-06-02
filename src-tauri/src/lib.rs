@@ -88,6 +88,7 @@ pub fn run() {
             commands::create_collection,
             commands::add_book_to_collection,
             commands::register_shortcuts,
+            commands::clear_stored_token,
             // Phase B: Socket.IO transport commands
             commands::connect_socket,
             commands::disconnect_socket,

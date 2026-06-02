@@ -9,9 +9,41 @@ pub async fn login(
     username: String,
     password: String,
 ) -> Result<models::User, String> {
-    let client = AbsClient::new(server_url);
-    let user = client.login(&username, &password).await?;
-    auth::save_token(&user.token)?;
+    let abs_client = AbsClient::new(server_url.clone());
+    let mut user = abs_client.login(&username, &password).await?;
+    let legacy_token = user.token.clone();
+
+    // After /login, call GET /api/authorize with the legacy token to obtain a
+    // proper JWT access token (with exp field) that the socket validator accepts.
+    // The legacy token from /login works for HTTP Bearer auth but is rejected by
+    // the ABS socket middleware which expects a signed JWT.
+    let http = reqwest::Client::new();
+    let server_root = server_url.trim_end_matches('/');
+    let auth_resp = http
+        .get(format!("{server_root}/api/authorize"))
+        .header("Authorization", format!("Bearer {legacy_token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Authorize failed: {e}"))?;
+
+    // Parse as generic JSON — avoid hard struct failures if the response shape
+    // differs between ABS versions. Null signals a parse problem.
+    let auth_json: serde_json::Value = auth_resp
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or(serde_json::Value::Null);
+
+    // Prefer the top-level accessToken (JWT with exp). Fall back to
+    // user.token inside the authorize response, then the legacy token.
+    let token = auth_json["accessToken"]
+        .as_str()
+        .filter(|t| !t.is_empty())
+        .or_else(|| auth_json["user"]["token"].as_str().filter(|t| !t.is_empty()))
+        .unwrap_or(&legacy_token)
+        .to_string();
+
+    auth::save_token(&token)?;
+    user.token = token;
     Ok(user)
 }
 
@@ -477,6 +509,13 @@ pub async fn connect_socket(
     socket: tauri::State<'_, socket::SocketState>,
 ) -> Result<(), String> {
     socket::connect(server_url, token, app, socket.inner().clone()).await
+}
+
+/// Clears the stored keyring token so the next launch forces a fresh login.
+/// Intended for one-time use from devtools when the stored token is stale.
+#[tauri::command]
+pub fn clear_stored_token() -> Result<(), String> {
+    auth::clear_token()
 }
 
 /// Tears down the active Socket.IO connection cleanly.

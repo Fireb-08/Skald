@@ -9,7 +9,6 @@
 
 use rust_socketio::asynchronous::{Client, ClientBuilder};
 use rust_socketio::{Payload, TransportType};
-use serde_json;
 use futures_util::FutureExt;
 use tauri::{AppHandle, Emitter};
 use std::sync::Arc;
@@ -83,8 +82,11 @@ pub async fn connect(
     // Wait 500ms for the Socket.IO handshake to fully settle before emitting auth.
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
+    eprintln!("[socket] sending auth token preview: {}…", &token[..token.len().min(12)]);
+    // ABS expects the auth event payload to be the bare token STRING,
+    // not an object. emit("auth", token) sends it as a JSON string primitive.
     client
-        .emit("auth", serde_json::json!({ "token": token }))
+        .emit("auth", token.clone())
         .await
         .map_err(|e| format!("Socket.IO auth emit failed: {e}"))?;
 

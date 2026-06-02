@@ -350,6 +350,12 @@ export function searchBooks(
 // These four functions call the Rust admin commands. They are only invoked
 // from AccountSection when the logged-in user is admin or root.
 
+/** Clears the stored keyring token, forcing a fresh login on next launch.
+ *  Call from devtools: invoke('clear_stored_token') */
+export function clearStoredToken(): Promise<void> {
+  return invoke('clear_stored_token');
+}
+
 // ── Phase B: Socket.IO transport wrappers ─────────────────────────────────
 
 /** Opens an authenticated Socket.IO connection to the ABS server.

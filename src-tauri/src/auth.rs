@@ -13,9 +13,18 @@ pub fn save_token(token: &str) -> Result<(), String> {
 
 pub fn load_token() -> Result<Option<String>, String> {
     match entry()?.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(KeyringError::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
+        Ok(token) => {
+            eprintln!("[auth] loaded token from keyring — length: {}", token.len());
+            Ok(Some(token))
+        }
+        Err(KeyringError::NoEntry) => {
+            eprintln!("[auth] no token in keyring (NoEntry)");
+            Ok(None)
+        }
+        Err(e) => {
+            eprintln!("[auth] keyring get_password failed: {:?}", e);
+            Err(e.to_string())
+        }
     }
 }
 
