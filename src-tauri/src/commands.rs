@@ -511,6 +511,65 @@ pub async fn connect_socket(
     socket::connect(server_url, token, app, socket.inner().clone()).await
 }
 
+/// Return type for login_with_api_key — carries both the user profile and the
+/// user session JWT extracted from the /api/me response. The frontend uses the
+/// JWT for both HTTP Bearer auth and socket authentication; the raw API key is
+/// not stored after login.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiKeyLoginResult {
+    /// User profile fields (id, username, type, etc.)
+    pub user: models::User,
+    /// User session JWT from the token field of the /api/me response.
+    /// This is the credential used for socket auth, not the API key itself.
+    pub token: String,
+}
+
+/// Validates an API key by calling GET /api/me with the key as Bearer token.
+/// Returns both the user profile and the session JWT extracted from the response.
+/// The API key is only used once to obtain the JWT; callers store the JWT.
+#[tauri::command]
+pub async fn login_with_api_key(
+    server_url: String,
+    api_key: String,
+) -> Result<ApiKeyLoginResult, String> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/api/me", server_url.trim_end_matches('/')))
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {e}"))?;
+
+    // Capture status before consuming the body — status() borrows the response
+    // but text()/json() consume it, so we must copy the value first.
+    let status = response.status();
+
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Invalid API key — server returned {status}: {body}"));
+    }
+
+    // Parse as generic JSON so we can extract token and user fields separately.
+    let body_text = response.text().await.unwrap_or_default();
+    let body_json: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("Failed to parse response: {e}"))?;
+
+    // Extract the user session JWT from the token field — socket auth needs
+    // this JWT, not the raw API key the user entered.
+    let token = body_json["token"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    // Deserialize User fields — extra fields (mediaProgress, bookmarks, etc.)
+    // are silently ignored by serde.
+    let user: models::User = serde_json::from_value(body_json)
+        .map_err(|e| format!("Failed to parse user: {e}"))?;
+
+    Ok(ApiKeyLoginResult { user, token })
+}
+
 /// Clears the stored keyring token so the next launch forces a fresh login.
 /// Intended for one-time use from devtools when the stored token is stale.
 #[tauri::command]
