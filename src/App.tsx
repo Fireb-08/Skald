@@ -14,8 +14,9 @@ import Library from './screens/Library';
 import Player from './screens/Player';
 import Settings from './screens/Settings';
 
-// Guard against React StrictMode double-mount firing two connections.
-let socketConnected = false;
+// Guard against React StrictMode double-mounting which would open two
+// simultaneous socket connections, causing one to fail with EngineIO error.
+let socketInitialised = false;
 
 export default function App() {
   // Single shared state object — all screens read from and write to this
@@ -44,9 +45,8 @@ export default function App() {
       disconnectSocket().catch(() => {});
       return;
     }
-    // Guard against StrictMode double-invocation firing two connections.
-    if (socketConnected) return;
-    socketConnected = true;
+    if (socketInitialised) return;
+    socketInitialised = true;
     // Auth is present: restore connection if the preference is enabled.
     if (localStorage.getItem('onyx.sync.live') === 'true') {
       connectSocket(st.serverUrl, st.authToken).catch(e => {
@@ -55,8 +55,8 @@ export default function App() {
       });
     }
     return () => {
-      // Re-arm the guard on real unmount so a future mount can connect again.
-      socketConnected = false;
+      // Re-arm on genuine unmount so a future mount can reconnect.
+      socketInitialised = false;
     };
   // st.authToken is the only meaningful trigger — serverUrl and localStorage
   // are stable after login and do not need to be in the dep array.

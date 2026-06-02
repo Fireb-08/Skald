@@ -3,7 +3,7 @@
 // Right: quiet underline-only form fields with entrance animation.
 import { useState, useRef, useEffect } from 'react';
 import type { OnyxState } from '../state/onyx';
-import { login, saveToken } from '../api/abs';
+import { login, saveToken, loginWithApiKey } from '../api/abs';
 import Titlebar from '../components/chrome/Titlebar';
 
 // Typography constants matching the Saga design tokens
@@ -25,6 +25,9 @@ export default function Login({ st }: LoginProps) {
   const [schemeOpen, setSchemeOpen] = useState(false);                  // dropdown open state
   const [pending, setPending] = useState(false);                        // request in flight
   const [error, setError]   = useState('');                             // validation/server error
+  // Auth method toggle — 'password' (username + password) or 'apikey' (single key field)
+  const [method, setMethod] = useState<'password' | 'apikey'>('password');
+  const [apiKey, setApiKey] = useState('');                             // API key input value
 
   // Ref for the scheme dropdown wrapper — used to detect outside-click dismissal
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -44,15 +47,46 @@ export default function Login({ st }: LoginProps) {
   // ── Submit handler ──────────────────────────────────────────────────────────
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate in order per the README — show the first failing error only
+    // Server URL is required for both auth methods
     if (!host.trim()) return setError('A server address is required.');
+    const serverUrl = `${scheme}://${host.trim()}`;
+
+    // ── API key method ──────────────────────────────────────────────────────
+    if (method === 'apikey') {
+      if (!apiKey.trim()) return setError('An API key is required.');
+      setError('');
+      setPending(true);
+      try {
+        // Validate the API key — returns user profile + session JWT from /api/me.
+        const result = await loginWithApiKey(serverUrl, apiKey.trim());
+        // Store the session JWT, not the raw API key. The JWT is what the
+        // socket auth middleware validates; the API key was only used once
+        // to obtain it.
+        await saveToken(result.token);
+        st.setAuthToken(result.token);
+        st.setServerUrl(serverUrl);
+        st.setUserId(result.user.id);
+        st.setUsername(result.user.username);
+        st.setUser(result.user);
+        st.setScreen('library');
+      } catch (err) {
+        setError(
+          typeof err === 'string'
+            ? err
+            : (err as Error)?.message ?? 'Could not connect. Check your address and API key.',
+        );
+        setPending(false);
+      }
+      return;
+    }
+
+    // ── Password method ─────────────────────────────────────────────────────
     if (!user.trim()) return setError('Your name is required.');
     if (!pass)        return setError('A passphrase is required.');
     setError('');
     setPending(true);
     try {
-      const serverUrl = `${scheme}://${host.trim()}`;
-      // Call the existing Tauri login command; throws on authentication failure
+      // Call the Tauri login command; throws on authentication failure
       const result = await login(serverUrl, user.trim(), pass);
       // Persist the token to the OS keyring via the Rust save_token command
       await saveToken(result.token);
@@ -179,6 +213,39 @@ export default function Login({ st }: LoginProps) {
             </div>
           </div>
 
+          {/* Auth method toggle — pill with two options: Password / API Key */}
+          <div style={{ display: 'flex', marginBottom: 24 }}>
+            <div style={{
+              display: 'flex',
+              borderRadius: 999,
+              border: '1px solid rgba(212,166,74,0.25)',
+              overflow: 'hidden',
+            }}>
+              {(['password', 'apikey'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setMethod(m); setError(''); }}
+                  style={{
+                    // Active tab: subtle gold fill; inactive: transparent
+                    background: method === m ? 'rgba(212,166,74,0.15)' : 'transparent',
+                    border: 'none',
+                    color: method === m ? '#d4a64a' : 'rgba(235,231,223,0.38)',
+                    fontFamily: MONO,
+                    fontSize: 10,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase',
+                    padding: '5px 16px',
+                    cursor: 'pointer',
+                    transition: 'background 0.15s, color 0.15s',
+                  }}
+                >
+                  {m === 'password' ? 'Password' : 'API Key'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Fields — 24px gap between each */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
@@ -283,35 +350,70 @@ export default function Login({ st }: LoginProps) {
               </div>
             </label>
 
-            {/* ── Field 2: Username ── */}
-            <label style={{ display: 'block' }}>
-              <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
-                By what name are you known?
-              </div>
-              <input
-                className="saga-input"
-                style={underline}
-                value={user}
-                onChange={e => setUser(e.target.value)}
-                placeholder="username"
-                spellCheck={false}
-              />
-            </label>
+            {method === 'password' ? (
+              // ── Password fields: username + passphrase ──────────────────
+              <>
+                {/* Field 2: Username */}
+                <label style={{ display: 'block' }}>
+                  <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
+                    By what name are you known?
+                  </div>
+                  <input
+                    className="saga-input"
+                    style={underline}
+                    value={user}
+                    onChange={e => setUser(e.target.value)}
+                    placeholder="username"
+                    spellCheck={false}
+                  />
+                </label>
 
-            {/* ── Field 3: Password ── */}
-            <label style={{ display: 'block' }}>
-              <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
-                Your passphrase
-              </div>
-              <input
-                className="saga-input"
-                style={underline}
-                type="password"
-                value={pass}
-                onChange={e => setPass(e.target.value)}
-                placeholder="••••••••••"
-              />
-            </label>
+                {/* Field 3: Passphrase */}
+                <label style={{ display: 'block' }}>
+                  <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
+                    Your passphrase
+                  </div>
+                  <input
+                    className="saga-input"
+                    style={underline}
+                    type="password"
+                    value={pass}
+                    onChange={e => setPass(e.target.value)}
+                    placeholder="••••••••••"
+                  />
+                </label>
+              </>
+            ) : (
+              // ── API key field ───────────────────────────────────────────
+              <label style={{ display: 'block' }}>
+                <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
+                  Your API key
+                </div>
+                {/* Textarea for long JWT-format keys — resize disabled so it stays tidy */}
+                <textarea
+                  className="saga-input"
+                  rows={3}
+                  style={{
+                    ...underline,
+                    fontFamily: MONO,
+                    fontSize: 11,
+                    letterSpacing: '0.03em',
+                    resize: 'none',
+                    lineHeight: 1.6,
+                    paddingTop: 4,
+                  }}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="***REDACTED-JWT***…"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                {/* Helper text pointing the user to where keys are generated */}
+                <div style={{ fontFamily: SANS, fontSize: 11, color: 'rgba(235,231,223,0.35)', marginTop: 8 }}>
+                  Generate a key in Settings → Users → API Keys on your server.
+                </div>
+              </label>
+            )}
           </div>
 
           {/* Validation / connection error — italic serif, danger color */}

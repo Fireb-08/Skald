@@ -350,6 +350,19 @@ export function searchBooks(
 // These four functions call the Rust admin commands. They are only invoked
 // from AccountSection when the logged-in user is admin or root.
 
+/** Result of an API key login — user profile plus the session JWT from /api/me.
+ *  The JWT (token) is used for HTTP and socket auth; the raw API key is not stored. */
+export interface ApiKeyLoginResult {
+  user: User;
+  token: string;
+}
+
+/** Validates an API key via GET /api/me and returns the user profile + session JWT.
+ *  Callers should store result.token (the JWT), not the raw API key. */
+export function loginWithApiKey(serverUrl: string, apiKey: string): Promise<ApiKeyLoginResult> {
+  return invoke('login_with_api_key', { serverUrl, apiKey });
+}
+
 /** Clears the stored keyring token, forcing a fresh login on next launch.
  *  Call from devtools: invoke('clear_stored_token') */
 export function clearStoredToken(): Promise<void> {

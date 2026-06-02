@@ -39,63 +39,59 @@ pub async fn connect(
     // sockets from a previous session or server change don't accumulate.
     disconnect(state.clone()).await;
 
-    eprintln!("[socket] connecting to {}", server_url);
-
     let client = ClientBuilder::new(server_url.clone())
+        // Force WebSocket transport — skip HTTP long-polling.
         .transport_type(TransportType::Websocket)
+        // "init" is the ABS server's acknowledgement that the auth event was
+        // accepted and the socket is now linked to the user account.
+        .on("init", {
+            let app = app.clone();
+            move |_: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    let _ = app.emit("socket-authenticated", ());
+                }
+                .boxed()
+            }
+        })
         // "disconnect" fires on clean teardown or unexpected drops.
         .on("disconnect", {
             let app = app.clone();
             move |_: Payload, _: Client| {
                 let app = app.clone();
                 async move {
-                    eprintln!("[socket] disconnected");
                     let _ = app.emit("socket-disconnected", ());
                 }
                 .boxed()
             }
         })
         // "error" catches transport-level failures.
-        .on("error", move |err: Payload, _: Client| {
-            async move {
-                eprintln!("[socket] error: {:?}", err);
-            }
+        .on("error", move |_err: Payload, _: Client| {
+            async move {}
             .boxed()
         })
-        // ABS emits "init_user" after accepting the auth event — socket is now
-        // linked to the user account and ready to receive events.
-        .on("init_user", {
-            let app = app.clone();
-            move |_: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    eprintln!("[socket] init_user received — authenticated");
-                    let _ = app.emit("socket-authenticated", ());
-                }
-                .boxed()
-            }
-        })
+        // connect() resolves once the WebSocket upgrade is complete.
         .connect()
         .await
         .map_err(|e| format!("Socket.IO connect failed: {e}"))?;
 
-    // Wait 500ms for the Socket.IO handshake to fully settle before emitting auth.
+    // Wait 500ms for the Socket.IO handshake to fully settle on the server
+    // side before emitting the auth event.
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-    eprintln!("[socket] sending auth token preview: {}…", &token[..token.len().min(12)]);
-    // ABS expects the auth event payload to be the bare token STRING,
-    // not an object. emit("auth", token) sends it as a JSON string primitive.
+    // Emit auth as a bare string — ABS socket middleware expects the token
+    // as a JSON string primitive, not wrapped in an object.
     client
         .emit("auth", token.clone())
         .await
         .map_err(|e| format!("Socket.IO auth emit failed: {e}"))?;
 
+    // Notify the frontend that the transport layer is up and auth was sent.
+    // Full confirmation arrives when "init" fires (socket-authenticated event).
     let _ = app.emit("socket-connected", ());
 
     // Store the live client in managed state so disconnect_socket can reach it.
     *state.lock().await = Some(client);
-
-    eprintln!("[socket] connection stored in state");
     Ok(())
 }
 
@@ -109,8 +105,6 @@ pub async fn disconnect(state: SocketState) {
     let mut guard = state.lock().await;
     if let Some(client) = guard.take() {
         // take() leaves None in the slot, preventing a double-close.
-        eprintln!("[socket] disconnecting");
         let _ = client.disconnect().await;
-        eprintln!("[socket] disconnected cleanly");
     }
 }
