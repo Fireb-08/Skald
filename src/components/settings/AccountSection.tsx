@@ -2,6 +2,7 @@
 // Non-admin users see their username, account type, and a WIP change-password stub.
 // Admin and root users additionally see a paginated user list with CRUD controls.
 import { useState, useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { SectionHead, Row, Pill, SERIF, MONO } from './shared';
 import type { OnyxState } from '../../state/onyx';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -362,6 +363,51 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   useEffect(() => {
     if (!isAdmin || !st.serverUrl) return;
     loadUsers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Live presence event subscription ──────────────────────────────────────
+  // When live sync is enabled, subscribe to presence events forwarded from the
+  // Rust socket layer. Each event carries a JSON string containing the user
+  // object; we extract the id and update onlineUserIds accordingly.
+  // The initial online set is fetched once on mount so the list is correct
+  // even if some events were missed before this component mounted.
+  useEffect(() => {
+    // Only subscribe when the user has enabled live sync — avoids dangling
+    // listeners when the toggle is off and the socket is not connected.
+    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
+    if (!syncLive || !st.serverUrl) return;
+
+    // Seed the initial online set via HTTP so the dots are correct on mount,
+    // before any WebSocket events arrive.
+    getOnlineUsers(st.serverUrl).then(setOnlineUserIds).catch(console.error);
+
+    // Subscribe to the Tauri event emitted by socket.rs when ABS fires user_online.
+    const unlistenOnline = listen<string>('presence-user-online', event => {
+      try {
+        const user = JSON.parse(event.payload) as { id: string };
+        // Append the id only if it is not already present.
+        setOnlineUserIds(prev => prev.includes(user.id) ? prev : [...prev, user.id]);
+      } catch (e) {
+        console.error('presence online parse failed', e);
+      }
+    });
+
+    // Subscribe to the Tauri event emitted by socket.rs when ABS fires user_offline.
+    const unlistenOffline = listen<string>('presence-user-offline', event => {
+      try {
+        const user = JSON.parse(event.payload) as { id: string };
+        setOnlineUserIds(prev => prev.filter(id => id !== user.id));
+      } catch (e) {
+        console.error('presence offline parse failed', e);
+      }
+    });
+
+    // Tear down both listeners when the component unmounts or the effect re-runs.
+    return () => {
+      unlistenOnline.then(fn => fn());
+      unlistenOffline.then(fn => fn());
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

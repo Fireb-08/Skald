@@ -65,6 +65,41 @@ pub async fn connect(
                 .boxed()
             }
         })
+        // "user_online" fires when any user on the server connects a socket.
+        // Forward the payload (user object) to the frontend so the presence
+        // dots can be updated without a full HTTP round-trip.
+        .on("user_online", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    // Extract the first JSON value from the Socket.IO message
+                    // and re-emit it as a Tauri event for the frontend to consume.
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("presence-user-online", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
+        // "user_offline" fires when a user disconnects all their sockets.
+        // Same forwarding pattern as user_online.
+        .on("user_offline", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("presence-user-offline", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
         // "error" catches transport-level failures.
         .on("error", move |_err: Payload, _: Client| {
             async move {}
