@@ -29,6 +29,9 @@ pub fn run() {
     // Arc<Mutex<Option<Client>>> so connect/disconnect commands can
     // safely swap the client from any tokio task.
     let socket_state: socket::SocketState = Arc::new(Mutex::new(None));
+    // Cloned here so the ExitRequested handler can tear down the socket while
+    // the original Arc remains in managed state until the runtime shuts down.
+    let socket_state_for_exit = Arc::clone(&socket_state);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -108,6 +111,8 @@ pub fn run() {
             // the final ~30 seconds of progress on exit.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let mgr = Arc::clone(&session_mgr_for_exit);
+                // Clone the socket Arc so the shutdown thread owns it.
+                let socket = Arc::clone(&socket_state_for_exit);
                 let t = std::thread::spawn(move || {
                     // Build a fresh single-thread runtime for the shutdown request
                     // so we never block the Tauri event loop indefinitely.
@@ -116,6 +121,11 @@ pub fn run() {
                         .build()
                         .expect("shutdown runtime");
                     rt.block_on(async move {
+                        // Ensure the socket is cleanly disconnected when the app
+                        // closes — prevents orphaned server-side socket connections.
+                        // disconnect() is a no-op when no socket is open.
+                        socket::disconnect(socket).await;
+
                         // Extract data while holding the lock, then drop it
                         // before the async HTTP call (MutexGuard is not Send).
                         let (sid, ct, tl, client) = {

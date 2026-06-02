@@ -39,6 +39,11 @@ pub async fn connect(
     // sockets from a previous session or server change don't accumulate.
     disconnect(state.clone()).await;
 
+    // Clone the token before the builder so the reconnect handler can capture
+    // it independently of the original, which is still needed for the initial
+    // auth emit after .connect() returns.
+    let token_rc = token.clone();
+
     let client = ClientBuilder::new(server_url.clone())
         // Force WebSocket transport — skip HTTP long-polling.
         .transport_type(TransportType::Websocket)
@@ -165,6 +170,36 @@ pub async fn connect(
                             let _ = app.emit("library-item-removed", first.to_string());
                         }
                     }
+                }
+                .boxed()
+            }
+        })
+        // "reconnect" fires when the socket library re-establishes the transport
+        // after a drop (network loss, sleep/wake, server restart). The server
+        // assigns a new socket ID on each reconnect, so the auth event must be
+        // re-emitted — without it the socket is unauthenticated and receives no
+        // application events.
+        .on("reconnect", {
+            let app = app.clone();
+            // Capture a separate clone of the token for this handler.
+            // The original `token` is still needed for the initial auth emit below.
+            move |_: Payload, socket: Client| {
+                let token = token_rc.clone();
+                let app = app.clone();
+                async move {
+                    eprintln!("[socket] reconnected — re-emitting auth");
+                    // Wait for the Socket.IO handshake to settle on the server
+                    // side before sending auth; mirrors the initial connect delay.
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    if let Err(e) = socket.emit("auth", token).await {
+                        eprintln!("[socket] re-auth failed: {:?}", e);
+                    } else {
+                        eprintln!("[socket] re-auth emitted after reconnect");
+                    }
+                    // Notify the frontend to perform a full resync after reconnect —
+                    // events missed during the disconnection window cannot be replayed,
+                    // so we refresh all state from the server to ensure consistency.
+                    let _ = app.emit("socket-reconnected", ());
                 }
                 .boxed()
             }

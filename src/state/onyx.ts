@@ -833,6 +833,36 @@ export function useOnyxState(): OnyxState {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverUrl, authToken]);
 
+  // ── Reconnect resync ───────────────────────────────────────────────────────
+  // When the socket reconnects after a drop, events that fired during the
+  // disconnection window are lost — the ABS server does not replay them.
+  // Perform a full refresh of library and media progress so the UI reflects
+  // the current server state rather than a potentially stale snapshot.
+  useEffect(() => {
+    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
+    if (!syncLive || !serverUrl || !authToken) return;
+
+    let unlisten: (() => void) | undefined;
+
+    listen('socket-reconnected', async () => {
+      try {
+        console.log('[sync] socket reconnected — performing full resync');
+        // Refresh the library — re-fetches all items so additions, edits, and
+        // deletions that occurred during the outage are reflected immediately.
+        await refreshLibrary();
+        // Re-fetch /api/me to get the latest mediaProgress array so Pick it up
+        // and cover progress overlays are correct without waiting for events.
+        const me = await getMe(serverUrl);
+        setMediaProgress(me.mediaProgress);
+      } catch (e) {
+        console.error('[sync] resync after reconnect failed:', e);
+      }
+    }).then(fn => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverUrl, authToken]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;

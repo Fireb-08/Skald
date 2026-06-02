@@ -1,6 +1,7 @@
 // Root application component. Renders the Saga login screen when the user
 // has no saved auth token; otherwise renders the main library/player shell.
 import { useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { connectSocket, disconnectSocket } from './api/abs';
@@ -62,6 +63,36 @@ export default function App() {
   // are stable after login and do not need to be in the dep array.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st.authToken]);
+
+  // ── Live sync connection status toasts ─────────────────────────────────
+  // Inform the user when live sync drops so they are not confused by stale
+  // data, and confirm when it restores. Only shown when live sync is enabled
+  // so users in local mode are not interrupted by socket lifecycle events.
+  useEffect(() => {
+    let unlistenDisconnected: (() => void) | undefined;
+    let unlistenReconnected:  (() => void) | undefined;
+
+    // socket-disconnected fires on clean teardown or unexpected drops.
+    listen('socket-disconnected', () => {
+      if (localStorage.getItem('onyx.sync.live') === 'true') {
+        st.setToast({ message: 'Live sync disconnected — reconnecting…', type: 'info' });
+      }
+    }).then(fn => { unlistenDisconnected = fn; });
+
+    // socket-reconnected fires after the socket re-authenticates following a drop.
+    listen('socket-reconnected', () => {
+      if (localStorage.getItem('onyx.sync.live') === 'true') {
+        st.setToast({ message: 'Live sync restored', type: 'success' });
+      }
+    }).then(fn => { unlistenReconnected = fn; });
+
+    return () => {
+      unlistenDisconnected?.();
+      unlistenReconnected?.();
+    };
+  // Listeners are set up once — st.setToast is a stable setter from useState.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Auth gate ───────────────────────────────────────────────────────────
   // st.authToken is initialised synchronously from localStorage, so this
