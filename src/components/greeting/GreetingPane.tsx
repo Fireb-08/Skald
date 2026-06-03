@@ -508,6 +508,7 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
         position: 'relative',
         overflow: 'hidden',
         height: '100%', // fill the left column so content is spread across the full height
+        boxSizing: 'border-box', // include padding in the 100% height; without this, padding adds 56 px of overflow and clips the footer
       }}
     >
       {/* Gold hairline along the top edge — echoes the player chrome */}

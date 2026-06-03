@@ -28,10 +28,21 @@ export default function Library({ st }: LibraryProps) {
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
       {/* Left slot: GreetingPane until the user starts playback, then FocusPanel.
           currentBookId is '' on cold launch and only set by playBook(), so
-          clicking a shelf book (which sets focusedBookId only) leaves the pane intact. */}
+          clicking a shelf book (which sets focusedBookId only) leaves the pane intact.
+          The wrapper div gives GreetingPane an explicit containing block so that
+          height: '100%' on its Glass card resolves correctly against the column height. */}
       {st.currentBookId
         ? <FocusPanel st={st} />
-        : <GreetingPane st={st} name={st.user?.username ?? 'Reader'} />
+        : (
+          <div style={{
+            alignSelf: 'stretch',     // fill the cross-axis height of the Library flex container
+            display: 'flex',          // make this a flex column so the child can use height: '100%'
+            flexDirection: 'column',  // vertical so GreetingPane stretches to fill the wrapper
+            flexShrink: 0,            // prevent width compression (same constraint as FocusPanel)
+          }}>
+            <GreetingPane st={st} name={st.user?.username ?? 'Reader'} />
+          </div>
+        )
       }
 
       {/* RIGHT — shelf column */}
