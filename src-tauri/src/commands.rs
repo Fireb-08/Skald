@@ -1,7 +1,27 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tauri::Emitter; // .emit() on AppHandle is a trait method — must be in scope
+use tokio_util::sync::CancellationToken;
 
-use crate::{api::AbsClient, auth, cover_cache, models, session::SessionManager, socket};
+use crate::{api::AbsClient, auth, cover_cache, downloads, models, session::SessionManager, socket};
+
+// Close an async file handle and delete the file from disk.
+// On Windows, an open file handle prevents remove_file from succeeding, so the
+// handle must be fully released first. into_std() hands the async wrapper back
+// to blocking I/O; dropping the returned std::fs::File closes the OS handle.
+// Used by every error/cancel path in download_item.
+async fn delete_partial(file: tokio::fs::File, path: &std::path::Path) {
+    drop(file.into_std().await);
+    let _ = std::fs::remove_file(path);
+}
+
+// Resolves the downloads directory under the app's local-data folder.
+// Factored out so download_item, get_downloads, and remove_download all use the same path.
+fn downloads_dir() -> Result<std::path::PathBuf, String> {
+    directories::ProjectDirs::from("com", "skald", "Skald")
+        .map(|dirs| dirs.data_local_dir().join("downloads"))
+        .ok_or_else(|| "Could not determine downloads directory".to_string())
+}
 
 #[tauri::command]
 pub async fn login(
@@ -714,74 +734,276 @@ pub async fn delete_session(
 }
 
 /// Streams GET /api/items/{id}/download to a local file in the app's downloads directory.
-/// Chunks the response body rather than buffering it so multi-GB audiobooks don't exhaust
-/// memory. Returns the absolute path of the written file.
-///
-/// Phase A: pure file transfer, no progress events or download registry yet.
-/// Phase B will add Tauri progress events and a persistent registry.
+/// Chunks the response body so multi-GB audiobooks never exhaust memory.
+/// Emits download-progress events per chunk, download-complete on success,
+/// download-cancelled on user cancel, and download-failed on network/write errors.
+/// Partial files are always cleaned up on any non-successful exit path.
 #[tauri::command]
 pub async fn download_item(
     server_url: String,
     item_id: String,
     file_name: String,
+    title: String,            // included in progress events and stored in the registry
+    author: String,           // stored in the registry for the Downloads settings list
+    app_handle: tauri::AppHandle,
+    cancel_registry: tauri::State<'_, downloads::DownloadCancelRegistry>,
 ) -> Result<String, String> {
-    use futures_util::StreamExt; // .next() on the byte stream
-    use tokio::io::AsyncWriteExt; // .write_all() and .flush() on the async file
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
 
-    // Load the auth token using the same pattern as every other command.
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
 
-    // Resolve the downloads directory under the app's local-data folder.
-    // Phase B will expose this path in the Downloads settings section.
-    let downloads_dir = directories::ProjectDirs::from("com", "skald", "Skald")
-        .map(|dirs| dirs.data_local_dir().join("downloads")) // e.g. AppData\Local\skald\Skald\downloads
-        .ok_or_else(|| "Could not determine downloads directory".to_string())?;
-
-    // Create the downloads directory (and any parents) if it does not already exist.
-    std::fs::create_dir_all(&downloads_dir)
+    // Resolve and create the downloads directory (e.g. AppData\Local\skald\Skald\downloads).
+    let dl_dir = downloads_dir()?;
+    std::fs::create_dir_all(&dl_dir)
         .map_err(|e| format!("Failed to create downloads directory: {e}"))?;
 
     // Sanitise the caller-supplied file name to prevent path-traversal attacks.
-    // Path separators and colons are replaced with underscores.
     let safe_name = file_name.replace(['/', '\\', ':'], "_");
-    let file_path = downloads_dir.join(&safe_name); // full absolute path on disk
+    let file_path = dl_dir.join(&safe_name);
 
-    // Build and send the download request with the Bearer token.
-    // The token-in-header pattern is used here (unlike media streaming which uses
-    // token-in-URL per CLAUDE.md lesson 2) because reqwest handles headers fine.
+    // Create a cancellation token for this download and insert it into the shared
+    // registry so cancel_download() can signal this stream loop by item_id.
+    // The token is cloned into the registry; the original is checked in the loop.
+    let cancel_token = CancellationToken::new();
+    cancel_registry.lock().await.insert(item_id.clone(), cancel_token.clone());
+
+    // The token-in-header pattern is fine for file downloads (unlike media streaming
+    // where we use token-in-URL per CLAUDE.md critical lesson 2).
     let client = reqwest::Client::new();
-    let response = client
+
+    // If the HTTP request itself fails, remove the registry entry before returning.
+    let response = match client
         .get(format!("{}/api/items/{}/download", server_url.trim_end_matches('/'), item_id))
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
-        .map_err(|e| format!("Download request failed: {e}"))?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            cancel_registry.lock().await.remove(&item_id);
+            return Err(format!("Download request failed: {e}"));
+        }
+    };
 
+    // Non-2xx status — clean up registry and report.
     if !response.status().is_success() {
+        cancel_registry.lock().await.remove(&item_id);
         return Err(format!("Download failed: HTTP {}", response.status()));
     }
 
-    // Create (or truncate) the destination file, overwriting any partial previous download.
-    let mut file = tokio::fs::File::create(&file_path)
-        .await
-        .map_err(|e| format!("Failed to create file: {e}"))?;
+    // 0 signals an unknown length — frontend shows an indeterminate progress bar.
+    let total_bytes = response.content_length().unwrap_or(0);
 
-    // Stream the response body to disk in chunks.
-    // Audiobooks can be several GB — never buffer the full body in memory.
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Stream error: {e}"))?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| format!("Write error: {e}"))?;
+    // Signal the start immediately so the progress toast appears before the first chunk.
+    let _ = app_handle.emit("download-progress", serde_json::json!({
+        "itemId": item_id,
+        "title": title,
+        "bytesDownloaded": 0u64,
+        "totalBytes": total_bytes,
+    }));
+
+    // Create the output file. Clean up registry on failure (no partial file yet).
+    let mut file = match tokio::fs::File::create(&file_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            cancel_registry.lock().await.remove(&item_id);
+            return Err(format!("Failed to create file: {e}"));
+        }
+    };
+
+    // ── Stream loop ───────────────────────────────────────────────────────────
+    // An enum captures the reason the loop exited so file ownership can be
+    // transferred to delete_partial() in error/cancel branches without hitting
+    // the borrow checker's "potentially moved" restriction on loop variables.
+    enum LoopExit {
+        Done,
+        Cancelled,
+        NetworkError(String),
+        WriteError(String),
     }
 
-    // Flush any OS-level write buffers so the file is fully committed to disk.
-    file.flush().await.map_err(|e| format!("Flush error: {e}"))?;
+    let mut stream = response.bytes_stream();
+    let mut bytes_downloaded: u64 = 0;
 
-    // Return the absolute file path so the frontend can show it or log it.
+    let exit = loop {
+        let chunk_result = stream.next().await;
+
+        // Check cancellation at the top of each iteration before processing the chunk.
+        // CancellationToken::is_cancelled() is a lock-free atomic read — no await needed.
+        if cancel_token.is_cancelled() {
+            break LoopExit::Cancelled;
+        }
+
+        let chunk = match chunk_result {
+            None => break LoopExit::Done, // stream exhausted — all bytes received
+            Some(Ok(c)) => c,
+            Some(Err(e)) => break LoopExit::NetworkError(format!("Network error: {e}")),
+        };
+
+        bytes_downloaded += chunk.len() as u64;
+
+        if let Err(e) = file.write_all(&chunk).await {
+            break LoopExit::WriteError(format!("Write error: {e}"));
+        }
+
+        // Fire-and-forget progress event — a slow frontend cannot stall the download.
+        let _ = app_handle.emit("download-progress", serde_json::json!({
+            "itemId": item_id,
+            "title": title,
+            "bytesDownloaded": bytes_downloaded,
+            "totalBytes": total_bytes,
+        }));
+    };
+
+    // ── Error/cancel cleanup ──────────────────────────────────────────────────
+    // delete_partial() takes ownership of `file`, releases the OS handle via
+    // into_std().await, then calls remove_file — required order on Windows
+    // where an open handle blocks deletion.
+    match exit {
+        LoopExit::Cancelled => {
+            delete_partial(file, &file_path).await;
+            cancel_registry.lock().await.remove(&item_id);
+            let _ = app_handle.emit("download-cancelled", serde_json::json!({
+                "itemId": item_id,
+                "title": title,
+            }));
+            return Err("cancelled".to_string());
+        }
+        LoopExit::NetworkError(msg) | LoopExit::WriteError(msg) => {
+            delete_partial(file, &file_path).await;
+            cancel_registry.lock().await.remove(&item_id);
+            let _ = app_handle.emit("download-failed", serde_json::json!({
+                "itemId": item_id,
+                "title": title,
+                "error": msg.clone(),
+            }));
+            return Err(msg);
+        }
+        // Normal completion — fall through to the flush + registry upsert below.
+        LoopExit::Done => {}
+    }
+
+    // ── Normal completion ─────────────────────────────────────────────────────
+    // Flush pending write-buffer bytes, then move the async handle into a
+    // synchronous one so the OS file handle is released before metadata reads.
+    let flush_result = file.flush().await;
+    // into_std().await hands the file to the blocking thread pool; dropping the
+    // returned std::fs::File closes the OS handle immediately.
+    drop(file.into_std().await);
+
+    if let Err(e) = flush_result {
+        // Flush failed after all chunks were received — treat as a write failure.
+        let _ = std::fs::remove_file(&file_path);
+        cancel_registry.lock().await.remove(&item_id);
+        let msg = format!("Flush error: {e}");
+        let _ = app_handle.emit("download-failed", serde_json::json!({
+            "itemId": item_id,
+            "title": title,
+            "error": msg.clone(),
+        }));
+        return Err(msg);
+    }
+
+    // Use the on-disk size for the registry — more reliable than bytes_downloaded
+    // when Content-Encoding compression causes a discrepancy.
+    let file_size = std::fs::metadata(&file_path)
+        .map(|m| m.len())
+        .unwrap_or(bytes_downloaded);
+
+    let downloaded_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    downloads::upsert_record(&dl_dir, downloads::DownloadRecord {
+        item_id: item_id.clone(),
+        title: title.clone(),
+        author,
+        file_path: file_path.to_string_lossy().into_owned(),
+        file_size,
+        downloaded_at,
+    })?;
+
+    // Remove the cancellation token now that the download completed successfully.
+    cancel_registry.lock().await.remove(&item_id);
+
+    let _ = app_handle.emit("download-complete", serde_json::json!({
+        "itemId": item_id,
+        "title": title,
+    }));
+
     Ok(file_path.to_string_lossy().to_string())
+}
+
+/// Signals an in-progress download to abort on its next chunk boundary.
+/// The streaming loop in download_item polls the token at the start of each
+/// chunk iteration; on detection it deletes the partial file and emits
+/// download-cancelled. Safe to call when the item_id is not in the registry
+/// (download already complete or not started) — returns Ok in that case.
+#[tauri::command]
+pub async fn cancel_download(
+    item_id: String,
+    cancel_registry: tauri::State<'_, downloads::DownloadCancelRegistry>,
+) -> Result<(), String> {
+    // Lock briefly to read the token and call cancel().
+    // The streaming loop holds no lock during I/O, so contention here is negligible.
+    let map = cancel_registry.lock().await;
+    if let Some(token) = map.get(&item_id) {
+        // Sets an atomic flag; the streaming loop detects it on the next iteration
+        // and performs its own cleanup (file deletion, registry removal, event).
+        token.cancel();
+    }
+    // No error if item_id is absent — download may have already completed or
+    // the cancel arrived after the loop exited but before the token was removed.
+    Ok(())
+}
+
+/// Returns all records in the downloads registry.
+/// Called by Settings → Downloads on mount to populate the downloads list.
+#[tauri::command]
+pub fn get_downloads() -> Result<Vec<downloads::DownloadRecord>, String> {
+    let dir = downloads_dir()?;
+    // If the directory does not yet exist, no downloads have been taken; return empty.
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    Ok(downloads::load_registry(&dir))
+}
+
+/// Removes a downloaded book: deletes the audio file from disk and removes its
+/// registry entry. The registry entry is always removed even when the file is
+/// missing so the UI stays consistent. Returns an error if the file could not
+/// be deleted (e.g. already removed outside the app); callers should still
+/// remove the row from their local state because the registry is clean.
+#[tauri::command]
+pub fn remove_download(item_id: String) -> Result<(), String> {
+    let dir = downloads_dir()?;
+    let records = downloads::load_registry(&dir);
+
+    // Attempt file deletion and capture any error without short-circuiting —
+    // the registry entry must be removed even when the file is already gone.
+    let file_err = if let Some(record) = records.iter().find(|r| r.item_id == item_id) {
+        match std::fs::remove_file(&record.file_path) {
+            Ok(()) => None,
+            // File not found or permission error — report to caller after cleanup.
+            Err(e) => Some(format!("Could not delete file: {e}")),
+        }
+    } else {
+        // item_id not in the registry — nothing to delete from disk.
+        None
+    };
+
+    // Always remove the registry entry so the downloads list stays consistent.
+    downloads::remove_record(&dir, &item_id)?;
+
+    // Propagate the file error only after the registry is already clean.
+    if let Some(e) = file_err {
+        return Err(e);
+    }
+
+    Ok(())
 }
 
 /// GET /api/users/online → openSessions — returns all currently active playback sessions.

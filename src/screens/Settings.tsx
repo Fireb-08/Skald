@@ -114,7 +114,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
           {section === 'sync'       && <SyncSection st={st} />}
           {section === 'audio'      && <AudioSection />}
           {section === 'library'    && <LibrarySection st={st} />}
-          {section === 'downloads'  && <DownloadsSection />}
+          {section === 'downloads'  && <DownloadsSection st={st} />}
           {section === 'appearance' && <AppearanceSection st={st} />}
           {section === 'keyboard'      && <KeyboardSection />}
           {section === 'integrations' && <IntegrationsSection st={st} />}

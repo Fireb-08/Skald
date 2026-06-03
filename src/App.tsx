@@ -7,6 +7,7 @@ import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { closeActiveSession, connectSocket, disconnectSocket } from './api/abs';
 import Toast from './components/ui/Toast';
 import ConfirmDialog from './components/ui/ConfirmDialog';
+import DownloadProgressToast from './components/downloads/DownloadProgressToast';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
 import Login from './screens/Login';
@@ -166,6 +167,15 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* Per-download progress bars — appears during active transfers, clears on completion.
+          onCancel/onFailed are wired here alongside onComplete so all download outcome
+          toasts originate from the same place and use the same st.setToast mechanism. */}
+      <DownloadProgressToast
+        onComplete={(title) => st.setToast({ message: `Downloaded "${title}"`, type: 'success' })}
+        onCancel={(title) => st.setToast({ message: `Download cancelled — "${title}"`, type: 'info' })}
+        onFailed={(title, _error) => st.setToast({ message: `Download failed — "${title}"`, type: 'error' })}
+      />
 
       {/* Global toast notification — rendered above all screens */}
       {st.toast && (

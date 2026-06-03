@@ -546,11 +546,48 @@ export function deleteSession(serverUrl: string, sessionId: string): Promise<voi
 
 // ── Downloads ──────────────────────────────────────────────────────────────
 
+// Mirrors src-tauri/src/downloads.rs DownloadRecord (camelCase via serde rename_all).
+export interface DownloadRecord {
+  itemId: string;
+  title: string;
+  author: string;
+  filePath: string;    // absolute path to the audio file on disk
+  fileSize: number;    // bytes — used for storage totals
+  downloadedAt: number; // Unix ms — used to show relative time
+}
+
 /** Streams GET /api/items/{id}/download to a local file in the app's downloads directory.
- *  Returns the absolute path of the written file once streaming is complete.
- *  Phase A: no progress events yet — those come in Phase B. */
-export function downloadItem(serverUrl: string, itemId: string, fileName: string): Promise<string> {
-  return invoke('download_item', { serverUrl, itemId, fileName }); // Rust handles streaming + auth
+ *  Emits download-progress Tauri events per chunk and download-complete on finish.
+ *  Returns the absolute path of the written file once streaming is complete. */
+export function downloadItem(
+  serverUrl: string,
+  itemId: string,
+  fileName: string,
+  title: string,   // passed through to progress events and the registry
+  author: string,  // stored in the registry for the Downloads settings list
+): Promise<string> {
+  return invoke('download_item', { serverUrl, itemId, fileName, title, author });
+}
+
+/** Returns all records in the downloads registry.
+ *  Used by Settings → Downloads on mount to populate the list. */
+export function getDownloads(): Promise<DownloadRecord[]> {
+  return invoke('get_downloads');
+}
+
+/** Deletes the audio file from disk and removes its registry entry.
+ *  Returns an error if the file was already gone (registry still cleaned up).
+ *  Used by the delete button in Settings → Downloads. */
+export function removeDownload(itemId: string): Promise<void> {
+  return invoke('remove_download', { itemId });
+}
+
+/** Signals an in-progress download to abort on its next chunk boundary.
+ *  Safe to call when the itemId is not actively downloading — returns normally.
+ *  The Rust streaming loop emits a 'download-cancelled' event and deletes the
+ *  partial file; callers listen for that event rather than awaiting this call. */
+export function cancelDownload(itemId: string): Promise<void> {
+  return invoke('cancel_download', { itemId });
 }
 
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.

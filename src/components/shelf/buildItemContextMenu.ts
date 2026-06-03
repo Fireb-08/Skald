@@ -1,6 +1,6 @@
-import type { LibraryItem, OnyxState, MediaProgress } from '../../state/onyx';
+import { bookAuthor, type LibraryItem, type OnyxState, type MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
-import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, downloadItem } from '../../api/abs'; // downloadItem added for Phase A
+import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, downloadItem } from '../../api/abs';
 // Canonical play function — routes through shared resume and UI-sync logic
 import { playBook } from '../../api/playbook';
 
@@ -27,21 +27,21 @@ export function buildItemContextMenu(
 
   const items: ContextMenuItem[] = [
     {
-      // Phase A: simple download trigger visible to all users.
-      // Constructs a filename from the book title and fires the Rust streaming command.
-      // Progress reporting and a download registry are deferred to Phase B.
+      // Phase B: fires the Rust streaming command with title and author so the
+      // progress toast and downloads registry both have the metadata they need.
+      // The info and success toasts are now handled by DownloadProgressToast via
+      // the download-progress / download-complete Tauri events.
       label: 'Download',
       onClick: () => {
         const title = item.media?.metadata?.title ?? item.id;
+        const author = bookAuthor(item);
         // ABS serves multi-file audiobooks as a zip archive at this endpoint.
-        const fileName = `${title}.zip`; // Phase B may inspect Content-Disposition instead
-        // Show an info toast immediately so the user knows the download started.
-        st.setToast({ message: `Downloading "${title}"…`, type: 'info' });
-        downloadItem(st.serverUrl, item.id, fileName)
+        const fileName = `${title}.zip`;
+        downloadItem(st.serverUrl, item.id, fileName, title, author)
           .then(path => {
-            // Log the full local path so we can verify the file landed correctly.
+            // Log the resolved path for debug purposes; the success toast is
+            // triggered by DownloadProgressToast via the download-complete event.
             console.log('[download] completed:', path);
-            st.setToast({ message: `Downloaded "${title}"`, type: 'success' });
           })
           .catch(e => {
             console.error('[download] failed:', e);

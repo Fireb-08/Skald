@@ -3716,6 +3716,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-opener",
  "tokio",
+ "tokio-util",
  "vlc-rs",
 ]
 
@@ -4430,6 +4431,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

@@ -5,7 +5,8 @@ pub mod audio;
 pub mod commands;
 pub mod session;
 pub mod cover_cache;
-pub mod socket; // Phase B: Socket.IO transport for live sync
+pub mod socket;    // Phase B: Socket.IO transport for live sync
+pub mod downloads; // Phase B: persistent registry of downloaded books
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -33,6 +34,12 @@ pub fn run() {
     // the original Arc remains in managed state until the runtime shuts down.
     let socket_state_for_exit = Arc::clone(&socket_state);
 
+    // Cancel token registry for in-progress downloads.
+    // Maps item_id → CancellationToken; the cancel_download command looks up
+    // the token by item_id and calls token.cancel() to abort the stream loop.
+    let cancel_registry: downloads::DownloadCancelRegistry =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -55,6 +62,7 @@ pub fn run() {
         .manage(session_mgr)
         .manage(shortcut_map)
         .manage(socket_state) // Socket.IO client — accessed by connect/disconnect commands
+        .manage(cancel_registry) // per-download CancellationTokens — accessed by cancel_download
         .invoke_handler(tauri::generate_handler![
             commands::login,
             commands::logout,
@@ -96,8 +104,11 @@ pub fn run() {
             // Stats commands for GreetingPane
             commands::get_user_stats,
             commands::get_library_stats,
-            // Downloads — Phase A: stream book file to disk
+            // Downloads — Phase A/B/C: stream to disk, progress events, cancellation, registry
             commands::download_item,
+            commands::get_downloads,
+            commands::remove_download,
+            commands::cancel_download,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,

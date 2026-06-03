@@ -34,6 +34,9 @@ tauri-plugin-global-shortcut = "2.3.2"
 rust_socketio = { version = "0.6", features = ["async"] }
 # Required for .boxed() on async blocks in rust_socketio callbacks
 futures-util = "0.3"
+# CancellationToken — used in download_item to support user-initiated cancel.
+# CancellationToken lives in the "rt" feature, not "sync".
+tokio-util = { version = "0.7", features = ["rt"] }
 # Used temporarily in connect_socket to decode JWT payload for expiry diagnostics
 base64 = "0.21"
 
