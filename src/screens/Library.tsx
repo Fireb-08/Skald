@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import type { OnyxState } from '../state/onyx';
 import FocusPanel from '../components/FocusPanel';
+// GreetingPane replaces FocusPanel in the left slot when nothing is playing.
+import GreetingPane from '../components/greeting/GreetingPane';
 import PickItUp from '../components/PickItUp';
 import TopNav from '../components/chrome/TopNav';
 import ShelfHeader from '../components/shelf/ShelfHeader';
@@ -24,7 +26,13 @@ export default function Library({ st }: LibraryProps) {
 
   return (
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden' }}>
-      <FocusPanel st={st} />
+      {/* Left slot: GreetingPane until the user starts playback, then FocusPanel.
+          currentBookId is '' on cold launch and only set by playBook(), so
+          clicking a shelf book (which sets focusedBookId only) leaves the pane intact. */}
+      {st.currentBookId
+        ? <FocusPanel st={st} />
+        : <GreetingPane st={st} name={st.user?.username ?? 'Reader'} />
+      }
 
       {/* RIGHT — shelf column */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>

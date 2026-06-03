@@ -676,6 +676,32 @@ pub fn reveal_cache_dir() -> Result<(), String> {
     Ok(())
 }
 
+/// GET /api/me/listening-stats — returns listening stats for the authenticated user.
+/// Used by GreetingPane for the "Your stats" page: total time, days listened,
+/// books finished, 7-day sparkline data, and recent sessions.
+#[tauri::command]
+pub async fn get_user_stats(server_url: String) -> Result<models::UserStats, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url).with_token(token).get_user_stats().await
+}
+
+/// GET /api/libraries/{id}/stats — returns aggregate statistics for a library.
+/// Used by GreetingPane for the "Library stats" page: duration, authors, tracks,
+/// file size, and top genres.
+#[tauri::command]
+pub async fn get_library_stats(
+    server_url: String,
+    library_id: String,
+) -> Result<models::LibraryStats, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .get_library_stats(&library_id)
+        .await
+}
+
 #[tauri::command]
 pub async fn close_session(
     server_url: String,

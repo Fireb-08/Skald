@@ -141,6 +141,43 @@ export interface OpenSessionResult {
   currentTime: number;
 }
 
+// ── Greeting pane stats types (GreetingPane.tsx) ───────────────────────────
+
+// Mirrors models::UserStatsSession — one entry in the recent-sessions list.
+export interface UserStatsSession {
+  id: string;
+  displayTitle: string | null;
+  timeListening: number; // seconds
+  date: string | null;   // "YYYY-MM-DD"
+  libraryItemId: string;
+}
+
+// Mirrors models::UserStats — GET /api/me/listening-stats response.
+export interface UserStats {
+  totalTime: number;        // seconds
+  numDaysListened: number;
+  numBooksFinished: number;
+  numBooksListened: number;
+  recentSessions: UserStatsSession[];
+  days: Record<string, number>; // { "YYYY-MM-DD": seconds }
+}
+
+// Mirrors models::GenreStat — one row in the genres array.
+export interface GenreStat {
+  genre: string;
+  count: number;
+}
+
+// Mirrors models::LibraryStats — GET /api/libraries/{id}/stats response.
+export interface LibraryStats {
+  totalItems: number;
+  totalAuthors: number;
+  totalDuration: number;         // seconds
+  numAudioTracks: number;
+  totalAudioFilesSize: number;   // bytes
+  genres: GenreStat[];
+}
+
 // ── Command wrappers ───────────────────────────────────────────────────────
 // Command names match the Rust #[tauri::command] function names (snake_case).
 // Argument keys are camelCase; Tauri converts them to Rust snake_case params.
@@ -420,5 +457,20 @@ export function updateUser(
 /** DELETE /api/users/{id} — permanently removes a user account. */
 export function deleteUser(serverUrl: string, userId: string): Promise<void> {
   return invoke('delete_user', { serverUrl, userId });
+}
+
+// ── GreetingPane stats wrappers ────────────────────────────────────────────
+
+/** GET /api/me/listening-stats — returns the authenticated user's listening stats.
+ *  Provides totalTime, numDaysListened, numBooksFinished, recentSessions, and a
+ *  per-day map for the 7-day sparkline. */
+export function getUserStats(serverUrl: string): Promise<UserStats> {
+  return invoke('get_user_stats', { serverUrl });
+}
+
+/** GET /api/libraries/{id}/stats — returns aggregate statistics for a library.
+ *  Provides item count, author count, total duration, track count, size, and genres. */
+export function getLibraryStats(serverUrl: string, libraryId: string): Promise<LibraryStats> {
+  return invoke('get_library_stats', { serverUrl, libraryId });
 }
 

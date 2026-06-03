@@ -93,6 +93,9 @@ pub fn run() {
             commands::register_shortcuts,
             commands::login_with_api_key,
             commands::clear_stored_token,
+            // Stats commands for GreetingPane
+            commands::get_user_stats,
+            commands::get_library_stats,
             // Phase B: Socket.IO transport commands
             commands::connect_socket,
             commands::disconnect_socket,

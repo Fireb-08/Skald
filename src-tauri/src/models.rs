@@ -279,3 +279,81 @@ pub struct PlaySession {
     #[serde(default)]
     pub audio_tracks: Vec<AudioFile>,
 }
+
+/// A single session entry in the recentSessions array from GET /api/me/listening-stats.
+/// Only the fields the GreetingPane needs are captured; extras are silently ignored.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UserStatsSession {
+    pub id: String,
+    /// Book title as formatted by the ABS server.
+    #[serde(default)]
+    pub display_title: Option<String>,
+    /// Seconds listened in this session.
+    #[serde(default)]
+    pub time_listening: f64,
+    /// Session date as "YYYY-MM-DD".
+    #[serde(default)]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub library_item_id: String,
+}
+
+/// Response from GET /api/me/listening-stats — richer than the per-user endpoint
+/// and includes finished-book count, per-day totals, and recent sessions.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UserStats {
+    /// Total listening time across all history, in seconds.
+    #[serde(default)]
+    pub total_time: f64,
+    /// Number of distinct calendar days with any listening activity.
+    #[serde(default)]
+    pub num_days_listened: i64,
+    /// Number of items marked finished.
+    #[serde(default)]
+    pub num_books_finished: i64,
+    /// Number of distinct items ever listened to.
+    #[serde(default)]
+    pub num_books_listened: i64,
+    /// Up to 3 most recent listening sessions for the Recent sessions list.
+    #[serde(default)]
+    pub recent_sessions: Vec<UserStatsSession>,
+    /// Map of "YYYY-MM-DD" → seconds listened; drives the 7-day sparkline.
+    #[serde(default)]
+    pub days: HashMap<String, f64>,
+}
+
+/// A single genre entry from GET /api/libraries/{id}/stats.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GenreStat {
+    pub genre: String,
+    /// Number of items tagged with this genre.
+    #[serde(default)]
+    pub count: i64,
+}
+
+/// Response from GET /api/libraries/{id}/stats — used for the Library stats page.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStats {
+    /// Total number of items in the library.
+    #[serde(default)]
+    pub total_items: i64,
+    /// Number of distinct authors.
+    #[serde(default)]
+    pub total_authors: i64,
+    /// Sum of all audio-track durations, in seconds.
+    #[serde(default)]
+    pub total_duration: f64,
+    /// Total number of audio tracks across all items.
+    #[serde(default)]
+    pub num_audio_tracks: i64,
+    /// Sum of all audio-file sizes, in bytes.
+    #[serde(default)]
+    pub total_audio_files_size: i64,
+    /// Top genres by item count, ordered descending.
+    #[serde(default)]
+    pub genres: Vec<GenreStat>,
+}

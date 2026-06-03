@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, Library, LibraryItem, ListeningStats, MeResponse, PlaySession, User};
+use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, Library, LibraryItem, LibraryStats, ListeningStats, MeResponse, PlaySession, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -149,6 +149,43 @@ impl AbsClient {
 
         if !resp.status().is_success() {
             return Err(format!("get_listening_stats failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// GET /api/me/listening-stats — richer per-user endpoint used by GreetingPane.
+    /// Returns total time, days listened, books finished, recent sessions, and a
+    /// per-day map for the 7-day sparkline. Distinct from /api/users/{id}/listening-stats.
+    pub async fn get_user_stats(&self) -> Result<UserStats, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/me/listening-stats", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_user_stats failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// GET /api/libraries/{id}/stats — library-level aggregate statistics.
+    /// Returns item count, author count, total duration, track count, size, and top genres.
+    pub async fn get_library_stats(&self, library_id: &str) -> Result<LibraryStats, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/libraries/{library_id}/stats", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_library_stats failed: HTTP {}", resp.status()));
         }
 
         resp.json().await.map_err(|e| e.to_string())

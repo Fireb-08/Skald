@@ -287,6 +287,10 @@ export interface OnyxState {
   confirmDialog: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null;
   setConfirmDialog: (d: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null) => void;
   removeLibraryItem: (id: string) => void;
+  // ID of the currently loaded library — set when the library is first fetched
+  // and kept up-to-date by refreshLibrary(). Used by GreetingPane to call
+  // getLibraryStats() without needing to drill the ID through every call site.
+  currentLibraryId: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -504,9 +508,10 @@ export function useOnyxState(): OnyxState {
   // ── Playback ─────────────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('library');
   const [currentBookId, setCurrentBookId] = useState('');
-  const [focusedBookId, setFocusedBookId] = useState<string | null>(
-    () => localStorage.getItem('skald.currentBookId') || null,
-  );
+  // focusedBookId intentionally starts null — seeded from library on load by the
+  // effect below. No localStorage read: we want a clean state each session so
+  // the GreetingPane is the true default until the user starts playback.
+  const [focusedBookId, setFocusedBookId] = useState<string | null>(null);
   const [currentBookChapters, setCurrentBookChapters] = useState<Chapter[]>([]);
 
   useEffect(() => {
@@ -659,10 +664,12 @@ export function useOnyxState(): OnyxState {
     setAccentColorRaw(hex);
   }, []);
 
-  // When library first loads, seed currentBookId (and focusedBookId if unset).
+  // When library first loads, seed focusedBookId so the shelf highlights a book
+  // on startup. currentBookId is intentionally NOT seeded here — it remains ''
+  // until the user explicitly starts playback via playBook(), which causes the
+  // GreetingPane to give way to FocusPanel.
   useEffect(() => {
     if (library.length > 0 && !currentBookId) {
-      setCurrentBookId(library[0].id);
       setFocusedBookId(prev => prev ?? library[0].id);
     } else if (library.length > 0 && !focusedBookId) {
       setFocusedBookId(currentBookId || library[0].id);
@@ -887,7 +894,7 @@ export function useOnyxState(): OnyxState {
     userId, setUserId,
     authToken, setAuthToken,
     user, setUser,
-    library, libraryLoading, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks,
+    library, libraryLoading, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     screen, setScreen,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
