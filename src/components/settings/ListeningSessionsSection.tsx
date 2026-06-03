@@ -219,7 +219,9 @@ export interface ListeningSessionsSectionProps {
 
 export default function ListeningSessionsSection({ st }: ListeningSessionsSectionProps) {
   // Admin gate — drives the user-filter dropdown and the delete button.
-  const isAdmin = st.user?.type === 'admin' || st.user?.type === 'root';
+  // st?.user?.type uses optional chaining on st itself to survive HMR transient renders
+  // where st may be undefined before the parent has re-rendered with valid props.
+  const isAdmin = st?.user?.type === 'admin' || st?.user?.type === 'root';
 
   // ── Historical sessions state ───────────────────────────────────────────
   const [sessions, setSessions]           = useState<ListeningSession[]>([]);
@@ -252,11 +254,11 @@ export default function ListeningSessionsSection({ st }: ListeningSessionsSectio
     pg: number,
     perPage: number,
   ) => {
-    if (!st.serverUrl) return;
+    if (!st?.serverUrl) return; // optional chaining: safe when st is transiently undefined
     setLoading(true);
     setError('');
     try {
-      const res = await getListeningSessions(st.serverUrl, uid, pg, perPage);
+      const res = await getListeningSessions(st.serverUrl, uid, pg, perPage); // st defined: guard passed
       setSessions(res.sessions);
       setTotal(res.total);
       // numPages from the server may be 0 when there are no sessions — clamp to 1.
@@ -266,17 +268,17 @@ export default function ListeningSessionsSection({ st }: ListeningSessionsSectio
     } finally {
       setLoading(false);
     }
-  }, [st.serverUrl]);
+  }, [st?.serverUrl]); // dep array: optional chaining prevents crash when st is undefined
 
   // Fetch open sessions — page 0, large page to capture all recent activity —
   // then filter client-side to sessions updated within the last 5 minutes.
   // This is a proxy because ABS has no dedicated open-sessions endpoint.
   const loadOpenSessions = useCallback(async () => {
-    if (!st.serverUrl) return;
+    if (!st?.serverUrl) return; // optional chaining: safe when st is transiently undefined
     setOpenLoading(true);
     try {
       // Fetch a generous page so we don't miss recently active sessions.
-      const res = await getListeningSessions(st.serverUrl, undefined, 0, 50);
+      const res = await getListeningSessions(st.serverUrl, undefined, 0, 50); // st defined: guard passed
       const fiveMinutesAgo = Date.now() - 5 * 60 * 1000; // 5-minute recency window
       // A session is considered "open" if its updatedAt is within the last 5 minutes.
       const open = res.sessions.filter(s => s.updatedAt !== null && s.updatedAt > fiveMinutesAgo);
@@ -286,15 +288,15 @@ export default function ListeningSessionsSection({ st }: ListeningSessionsSectio
     } finally {
       setOpenLoading(false);
     }
-  }, [st.serverUrl]);
+  }, [st?.serverUrl]); // dep array: optional chaining prevents crash when st is undefined
 
   // ── Effects ──────────────────────────────────────────────────────────────
 
   // Load admin user list once on mount — needed for the filter dropdown.
   useEffect(() => {
-    if (!isAdmin || !st.serverUrl) return;
-    getAllUsers(st.serverUrl).then(setAllUsers).catch(console.error);
-  }, [isAdmin, st.serverUrl]);
+    if (!isAdmin || !st?.serverUrl) return; // optional chaining: safe when st is transiently undefined
+    getAllUsers(st.serverUrl).then(setAllUsers).catch(console.error); // st defined: guard passed
+  }, [isAdmin, st?.serverUrl]); // dep array: optional chaining on st
 
   // Reload historical sessions whenever filter, page, or page size changes.
   useEffect(() => {
