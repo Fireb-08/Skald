@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Skald — Greeting (mockup)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root { --onyx-accent: #d4a64a; --onyx-accent-r: 212; --onyx-accent-g: 166; --onyx-accent-b: 74; }
+  html, body { margin: 0; padding: 0; height: 100%; width: 100%; background: #050507; color: #ebe7df; }
+  body { font-family: 'Inter', -apple-system, system-ui, sans-serif; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  * { box-sizing: border-box; }
+  button { font-family: inherit; color: inherit; }
+  ::selection { background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  .onyx-tile:hover > div:first-child { transform: translateY(-3px); filter: drop-shadow(0 12px 24px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.18)); }
+  .onyx-winbtn:hover { background: rgba(255,255,255,0.1) !important; color: #ebe7df !important; }
+  .greet-resume:hover { border-color: var(--onyx-accent) !important; background: rgba(255,255,255,0.07) !important; transform: translateY(-1px); }
+  .greet-row:hover { background: rgba(255,255,255,0.03) !important; }
+
+  /* App window shell — a screenshot-style framed window for export */
+  .skald-window {
+    width: 1320px; height: 836px; position: relative;
+    border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: 0 40px 120px rgba(0,0,0,0.65), 0 0 0 1px rgba(212,166,74,0.05);
+  }
+  /* Scale the fixed window down on smaller viewports so it always fits */
+  @media (max-width: 1380px) { .skald-window { transform: scale(calc((100vw - 48px) / 1320)); } }
+  @media (max-height: 880px) { }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="assets/books.jsx"></script>
+<script type="text/babel" src="assets/icons.jsx"></script>
+<script type="text/babel" src="source/reference/state.jsx"></script>
+<script type="text/babel" src="source/reference/chrome.jsx"></script>
+<script type="text/babel" src="source/greeting.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+<template id="__bundler_thumbnail">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+    <defs><radialGradient id="g" cx="50%" cy="40%" r="60%"><stop offset="0%" stop-color="#3a2a14" /><stop offset="100%" stop-color="#0b0b0e" /></radialGradient></defs>
+    <rect width="200" height="200" fill="url(#g)" />
+    <g transform="translate(100 100)">
+      <rect x="-40" y="-30" width="80" height="60" rx="8" fill="#1a1a22" stroke="rgba(212,166,74,0.4)" stroke-width="1.5" />
+      <text x="0" y="-2" font-family="Georgia, serif" font-size="15" font-weight="600" fill="#d4a64a" text-anchor="middle">Hello</text>
+      <text x="0" y="18" font-family="ui-monospace, monospace" font-size="6.5" letter-spacing="2" fill="rgba(235,231,223,0.55)" text-anchor="middle">SKALD</text>
+    </g>
+  </svg>
+</template>
+
+<script type="text/babel">
+const { useState } = React;
+
+// Minimal stub state — enough to drive TopNav + the greeting's open() no-ops
+// without pulling in the full playback engine. This is a static mockup.
+function useStubState() {
+  const [search, setSearch] = useState('');
+  const [screen, setScreen] = useState('library');
+  return {
+    search, setSearch, screen, setScreen,
+    showHome: false,
+    setCurrentBookId: () => {}, setScreen: setScreen,
+  };
+}
+
+// A light, non-interactive shelf for context on the right side.
+function MockShelf() {
+  const inProg = LIBRARY.filter(b => b.progress > 0 && b.progress < 0.98).slice(0, 3);
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+      {/* Pick it up */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '0 4px 12px' }}>
+          <div style={{ fontFamily: ONYX.serif, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em' }}>Pick it up</div>
+          <div style={{ fontFamily: ONYX.mono, fontSize: 10, color: ONYX.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{inProg.length} in progress</div>
+        </div>
+        <div style={{ display: 'flex', gap: 14 }}>
+          {inProg.map(b => (
+            <Glass key={b.id} style={{ flex: 1, padding: 14, display: 'flex', gap: 14, minHeight: 110 }}>
+              <Cover book={b} w={80} />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ fontFamily: ONYX.mono, fontSize: 9, color: ONYX.textMute, letterSpacing: '0.12em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.series}</div>
+                <div style={{ marginTop: 4, fontFamily: ONYX.serif, fontSize: 17, fontWeight: 500, lineHeight: 1.1 }}>{b.title}</div>
+                <div style={{ marginTop: 2, fontSize: 12, color: ONYX.textDim }}>{b.author}</div>
+                <div style={{ flex: 1 }} />
+                <div style={{ height: 3, background: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+                  <div style={{ width: `${b.progress * 100}%`, height: '100%', background: ONYX.accent }} />
+                </div>
+                <div style={{ marginTop: 4, fontFamily: ONYX.mono, fontSize: 9.5, color: ONYX.textMute, letterSpacing: '0.06em', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{Math.round(b.progress * 100)}%</span><span>{b.dur}</span>
+                </div>
+              </div>
+            </Glass>
+          ))}
+        </div>
+      </div>
+
+      {/* The shelf */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '8px 4px 14px' }}>
+          <div style={{ fontFamily: ONYX.serif, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em' }}>The shelf</div>
+          <div style={{ fontFamily: ONYX.mono, fontSize: 10, color: ONYX.textMute, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{LIBRARY.length} titles</div>
+        </div>
+        <Glass style={{ flex: 1, padding: '20px 18px', overflow: 'auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(116px, 1fr))', gap: 14 }}>
+            {LIBRARY.map(b => (
+              <div key={b.id} className="onyx-tile" style={{ cursor: 'pointer' }}>
+                <div style={{ position: 'relative' }}>
+                  <Cover book={b} w={116} />
+                  {b.progress > 0 && b.progress < 0.98 && (
+                    <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
+                      <div style={{ width: `${b.progress * 100}%`, height: '100%', background: ONYX.accent }} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ marginTop: 7, fontSize: 11.5, fontWeight: 500, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: ONYX.text }}>{b.title}</div>
+                <div style={{ marginTop: 1, fontSize: 10.5, color: ONYX.textMute, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.author}</div>
+              </div>
+            ))}
+          </div>
+        </Glass>
+      </div>
+    </div>
+  );
+}
+
+function Mockup() {
+  const st = useStubState();
+  return (
+    <div className="skald-window">
+      <OnyxWash />
+      <Titlebar subtitle="Welcome" />
+      <div style={{ position: 'absolute', top: 44, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0 }}>
+          <GreetingPane st={st} name="Jordan" />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+            <TopNav st={st} />
+            <MockShelf />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Mockup />);
+</script>
+</body>
+</html>
