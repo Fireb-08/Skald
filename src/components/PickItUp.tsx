@@ -2,13 +2,14 @@ import React, { useRef, useState, useEffect } from 'react';
 import type { OnyxState, LibraryItem } from '../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookDur,
-  bookProgress, bookCurrentTime,
+  bookProgress,
 } from '../state/onyx';
 import Glass from './chrome/Glass';
 import Cover from './Cover';
 import Icon from './Icon';
 import ContextMenu from './ContextMenu';
 import { buildItemContextMenu } from './shelf/buildItemContextMenu';
+import { pauseAudio } from '../api/abs'; // needed to halt playback before switching books
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -24,7 +25,6 @@ export default function PickItUp({ st }: PickItUpProps) {
   const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: LibraryItem } | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
@@ -75,17 +75,28 @@ export default function PickItUp({ st }: PickItUpProps) {
     }
   };
 
-  const openBook = (id: string) => {
-    if (selectedId === id) {
-      st.setScreen('player');
-    } else {
-      setSelectedId(id);
-      st.setCurrentBookId(id);
-      if (id !== st.currentBookId) {
-        const b = st.library.find(x => x.id === id);
-        if (b) st.setPosition(bookCurrentTime(b, st.mediaProgress));
-      }
+  const handlePickItUpClick = async (book: LibraryItem) => {
+    // If this book is already the current book, do nothing — the sidebar
+    // play button will handle play/pause as normal.
+    if (book.id === st.currentBookId) return;
+
+    // If a book is actively playing, pause it before switching.
+    // This prevents audio from continuing over the transition.
+    if (st.playing) {
+      await pauseAudio().catch(console.error);
+      st.setPlaying(false);
     }
+
+    // Update currentBookId to the selected book so the Focus panel
+    // and sidebar play button now target this book.
+    st.setCurrentBookId(book.id);
+    st.setFocusedBookId(book.id);
+
+    // Reset session state so the sidebar knows no session is open
+    // for the new book — the play button will open a fresh one.
+    st.setSessionId('');
+    st.setSessionReady(false);
+    st.setPosition(0);
   };
 
   return (
@@ -125,7 +136,7 @@ export default function PickItUp({ st }: PickItUpProps) {
           {inProg.map(b => {
             const prog = bookProgress(b, st.mediaProgress);
             return (
-              <Glass key={b.id} translucent={st.translucent} onClick={() => openBook(b.id)} onContextMenu={e => onContextMenu(e, b)} style={{ flexGrow: 0, flexShrink: 0, flexBasis: 260, padding: 14, display: 'flex', gap: 14, minHeight: 110, cursor: 'pointer' }}>
+              <Glass key={b.id} translucent={st.translucent} onClick={() => handlePickItUpClick(b)} onContextMenu={e => onContextMenu(e, b)} style={{ flexGrow: 0, flexShrink: 0, flexBasis: 260, padding: 14, display: 'flex', gap: 14, minHeight: 110, cursor: 'pointer' }}>
                 <Cover item={b} size={80} serverUrl={st.serverUrl} />
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                   <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>{bookSeries(b)}</div>
