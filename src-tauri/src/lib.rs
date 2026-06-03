@@ -96,6 +96,8 @@ pub fn run() {
             // Stats commands for GreetingPane
             commands::get_user_stats,
             commands::get_library_stats,
+            // Downloads — Phase A: stream book file to disk
+            commands::download_item,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,

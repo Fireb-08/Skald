@@ -1,6 +1,6 @@
 import type { LibraryItem, OnyxState, MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
-import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem } from '../../api/abs';
+import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, downloadItem } from '../../api/abs'; // downloadItem added for Phase A
 // Canonical play function — routes through shared resume and UI-sync logic
 import { playBook } from '../../api/playbook';
 
@@ -26,6 +26,29 @@ export function buildItemContextMenu(
   };
 
   const items: ContextMenuItem[] = [
+    {
+      // Phase A: simple download trigger visible to all users.
+      // Constructs a filename from the book title and fires the Rust streaming command.
+      // Progress reporting and a download registry are deferred to Phase B.
+      label: 'Download',
+      onClick: () => {
+        const title = item.media?.metadata?.title ?? item.id;
+        // ABS serves multi-file audiobooks as a zip archive at this endpoint.
+        const fileName = `${title}.zip`; // Phase B may inspect Content-Disposition instead
+        // Show an info toast immediately so the user knows the download started.
+        st.setToast({ message: `Downloading "${title}"…`, type: 'info' });
+        downloadItem(st.serverUrl, item.id, fileName)
+          .then(path => {
+            // Log the full local path so we can verify the file landed correctly.
+            console.log('[download] completed:', path);
+            st.setToast({ message: `Downloaded "${title}"`, type: 'success' });
+          })
+          .catch(e => {
+            console.error('[download] failed:', e);
+            st.setToast({ message: `Download failed: ${String(e)}`, type: 'error' });
+          });
+      },
+    },
     {
       label: 'Play Book',
       onClick: async () => {

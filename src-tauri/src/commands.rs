@@ -713,6 +713,77 @@ pub async fn delete_session(
         .await
 }
 
+/// Streams GET /api/items/{id}/download to a local file in the app's downloads directory.
+/// Chunks the response body rather than buffering it so multi-GB audiobooks don't exhaust
+/// memory. Returns the absolute path of the written file.
+///
+/// Phase A: pure file transfer, no progress events or download registry yet.
+/// Phase B will add Tauri progress events and a persistent registry.
+#[tauri::command]
+pub async fn download_item(
+    server_url: String,
+    item_id: String,
+    file_name: String,
+) -> Result<String, String> {
+    use futures_util::StreamExt; // .next() on the byte stream
+    use tokio::io::AsyncWriteExt; // .write_all() and .flush() on the async file
+
+    // Load the auth token using the same pattern as every other command.
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+
+    // Resolve the downloads directory under the app's local-data folder.
+    // Phase B will expose this path in the Downloads settings section.
+    let downloads_dir = directories::ProjectDirs::from("com", "skald", "Skald")
+        .map(|dirs| dirs.data_local_dir().join("downloads")) // e.g. AppData\Local\skald\Skald\downloads
+        .ok_or_else(|| "Could not determine downloads directory".to_string())?;
+
+    // Create the downloads directory (and any parents) if it does not already exist.
+    std::fs::create_dir_all(&downloads_dir)
+        .map_err(|e| format!("Failed to create downloads directory: {e}"))?;
+
+    // Sanitise the caller-supplied file name to prevent path-traversal attacks.
+    // Path separators and colons are replaced with underscores.
+    let safe_name = file_name.replace(['/', '\\', ':'], "_");
+    let file_path = downloads_dir.join(&safe_name); // full absolute path on disk
+
+    // Build and send the download request with the Bearer token.
+    // The token-in-header pattern is used here (unlike media streaming which uses
+    // token-in-URL per CLAUDE.md lesson 2) because reqwest handles headers fine.
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/api/items/{}/download", server_url.trim_end_matches('/'), item_id))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("Download request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("Download failed: HTTP {}", response.status()));
+    }
+
+    // Create (or truncate) the destination file, overwriting any partial previous download.
+    let mut file = tokio::fs::File::create(&file_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {e}"))?;
+
+    // Stream the response body to disk in chunks.
+    // Audiobooks can be several GB — never buffer the full body in memory.
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Stream error: {e}"))?;
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Write error: {e}"))?;
+    }
+
+    // Flush any OS-level write buffers so the file is fully committed to disk.
+    file.flush().await.map_err(|e| format!("Flush error: {e}"))?;
+
+    // Return the absolute file path so the frontend can show it or log it.
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 /// GET /api/users/online → openSessions — returns all currently active playback sessions.
 /// The /api/users/online response contains both connected user records and an openSessions
 /// array; this command extracts only the sessions, which is what the Settings panel needs.

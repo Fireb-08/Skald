@@ -544,6 +544,15 @@ export function deleteSession(serverUrl: string, sessionId: string): Promise<voi
   return invoke('delete_session', { serverUrl, sessionId });
 }
 
+// ── Downloads ──────────────────────────────────────────────────────────────
+
+/** Streams GET /api/items/{id}/download to a local file in the app's downloads directory.
+ *  Returns the absolute path of the written file once streaming is complete.
+ *  Phase A: no progress events yet — those come in Phase B. */
+export function downloadItem(serverUrl: string, itemId: string, fileName: string): Promise<string> {
+  return invoke('download_item', { serverUrl, itemId, fileName }); // Rust handles streaming + auth
+}
+
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.
  *  Replaces the old 5-minute updatedAt proxy; this is the authoritative open-sessions list.
  *  Sessions include all users' active playback, not just the authenticated caller's. */
