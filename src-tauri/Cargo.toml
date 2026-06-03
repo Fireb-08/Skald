@@ -37,6 +37,9 @@ futures-util = "0.3"
 # CancellationToken — used in download_item to support user-initiated cancel.
 # CancellationToken lives in the "rt" feature, not "sync".
 tokio-util = { version = "0.7", features = ["rt"] }
+# zip: extract downloaded audiobook archives from the ABS server.
+# deflate is the compression codec ABS uses; bzip2/zstd are not needed.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # Used temporarily in connect_socket to decode JWT payload for expiry diagnostics
 base64 = "0.21"
 

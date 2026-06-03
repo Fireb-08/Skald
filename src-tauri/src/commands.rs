@@ -906,22 +906,112 @@ pub async fn download_item(
         return Err(msg);
     }
 
-    // Use the on-disk size for the registry — more reliable than bytes_downloaded
-    // when Content-Encoding compression causes a discrepancy.
-    let file_size = std::fs::metadata(&file_path)
-        .map(|m| m.len())
-        .unwrap_or(bytes_downloaded);
+    // ── ZIP extraction ────────────────────────────────────────────────────────
+    // The ABS download endpoint returns a ZIP archive. Extract it into a
+    // subdirectory named after item_id so multiple books never overwrite each
+    // other's files even when they have identically-named tracks inside.
+    let extract_dir = dl_dir.join(&item_id);
+    std::fs::create_dir_all(&extract_dir)
+        .map_err(|e| format!("Failed to create extract dir: {e}"))?;
+
+    // Run extraction inside a closure so all failure branches share one cleanup
+    // block rather than duplicating the remove_dir_all / remove_file calls.
+    let zip_result: Result<(), String> = (|| {
+        let zip_file = std::fs::File::open(&file_path)
+            .map_err(|e| format!("Failed to open zip: {e}"))?;
+        let mut archive = zip::ZipArchive::new(zip_file)
+            .map_err(|e| format!("Failed to read zip: {e}"))?;
+
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| format!("Zip entry error: {e}"))?;
+            // Skip directory entries — only extract regular files.
+            if entry.is_dir() { continue; }
+            // mangled_name() normalises path separators; .file_name() then strips
+            // any leading path components to prevent path-traversal writes outside
+            // extract_dir (e.g. a malicious entry named "../../evil.exe").
+            let entry_name = entry.mangled_name();
+            let entry_path = extract_dir.join(entry_name.file_name().unwrap_or_default());
+            let mut out = std::fs::File::create(&entry_path)
+                .map_err(|e| format!("Failed to create extracted file: {e}"))?;
+            std::io::copy(&mut entry, &mut out)
+                .map_err(|e| format!("Extraction error: {e}"))?;
+        }
+        Ok(())
+    })();
+
+    // On extraction failure: clean up whatever was partially written, remove the
+    // ZIP, evict the registry token, and surface the error to the frontend.
+    if let Err(e) = zip_result {
+        let _ = std::fs::remove_dir_all(&extract_dir); // partial extracted files
+        let _ = std::fs::remove_file(&file_path);      // the ZIP itself
+        cancel_registry.lock().await.remove(&item_id);
+        let _ = app_handle.emit("download-failed", serde_json::json!({
+            "itemId": item_id,
+            "title": title,
+            "error": e.clone(),
+        }));
+        return Err(e);
+    }
+
+    // Delete the ZIP after successful extraction — the audio files are now in
+    // extract_dir and the ZIP serves no further purpose.
+    // Non-fatal: if removal fails (e.g. the file is transiently locked) the
+    // download is still usable — log and continue rather than failing.
+    if let Err(e) = std::fs::remove_file(&file_path) {
+        eprintln!("[download_item] could not remove zip {}: {e}", file_path.display());
+    }
+
+    // ── Locate the primary audio file ─────────────────────────────────────────
+    // Single-file books: the registry points directly to the audio file.
+    // Multi-file books: the registry points to the directory; Phase D will scan
+    // it and build a playlist sorted by file name (= chapter order for ABS exports).
+    let audio_extensions = ["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a"];
+    let mut audio_files: Vec<_> = std::fs::read_dir(&extract_dir)
+        .map_err(|e| format!("Failed to read extract dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            // Retain only entries whose extension is a known audio format.
+            e.path().extension()
+                .and_then(|x| x.to_str())
+                .map(|x| audio_extensions.contains(&x.to_lowercase().as_str()))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    // Sort by file name so multi-file books play in chapter order.
+    audio_files.sort_by_key(|e| e.file_name());
+
+    let playback_path = if audio_files.len() == 1 {
+        // Single file — point directly to the audio file.
+        audio_files[0].path().to_string_lossy().to_string()
+    } else {
+        // Multi-file (or no recognised audio files) — point to the directory.
+        // Phase D will scan the directory and build a VLC playlist from it.
+        extract_dir.to_string_lossy().to_string()
+    };
+
+    // Sum the sizes of all extracted audio files for the storage display in Settings.
+    // Falls back to bytes_downloaded if no audio files were found (edge case).
+    let file_size: u64 = {
+        let sum: u64 = audio_files.iter()
+            .filter_map(|e| e.metadata().ok())
+            .map(|m| m.len())
+            .sum();
+        if sum > 0 { sum } else { bytes_downloaded }
+    };
 
     let downloaded_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
 
+    // Store the audio file path (or directory for multi-file books), not the ZIP.
     downloads::upsert_record(&dl_dir, downloads::DownloadRecord {
         item_id: item_id.clone(),
         title: title.clone(),
         author,
-        file_path: file_path.to_string_lossy().into_owned(),
+        file_path: playback_path.clone(),
         file_size,
         downloaded_at,
     })?;
@@ -934,7 +1024,7 @@ pub async fn download_item(
         "title": title,
     }));
 
-    Ok(file_path.to_string_lossy().to_string())
+    Ok(playback_path)
 }
 
 /// Signals an in-progress download to abort on its next chunk boundary.
@@ -972,23 +1062,50 @@ pub fn get_downloads() -> Result<Vec<downloads::DownloadRecord>, String> {
     Ok(downloads::load_registry(&dir))
 }
 
-/// Removes a downloaded book: deletes the audio file from disk and removes its
-/// registry entry. The registry entry is always removed even when the file is
-/// missing so the UI stays consistent. Returns an error if the file could not
-/// be deleted (e.g. already removed outside the app); callers should still
-/// remove the row from their local state because the registry is clean.
+/// Removes a downloaded book: deletes the entire extracted directory (audio file,
+/// cover image, and any other extracted files) and removes the registry entry.
+/// The registry entry is always removed even when the directory is missing so
+/// the UI stays consistent. Returns an error if the directory could not be
+/// deleted; callers should still remove the row from local state because the
+/// registry is already clean.
 #[tauri::command]
 pub fn remove_download(item_id: String) -> Result<(), String> {
     let dir = downloads_dir()?;
     let records = downloads::load_registry(&dir);
 
-    // Attempt file deletion and capture any error without short-circuiting —
-    // the registry entry must be removed even when the file is already gone.
-    let file_err = if let Some(record) = records.iter().find(|r| r.item_id == item_id) {
-        match std::fs::remove_file(&record.file_path) {
-            Ok(()) => None,
-            // File not found or permission error — report to caller after cleanup.
-            Err(e) => Some(format!("Could not delete file: {e}")),
+    // Capture any directory-removal error without short-circuiting —
+    // the registry entry must be removed even when the files are already gone.
+    let dir_err = if let Some(record) = records.iter().find(|r| r.item_id == item_id) {
+        // The download registry stores the audio file path (or directory path for
+        // multi-file books). The actual download lives in a directory named after
+        // item_id that also contains the cover image and other extracted files.
+        // Walk up to that item_id directory so we remove everything in one call.
+        let file_path = std::path::Path::new(&record.file_path);
+
+        // For a single-file book the stored path is the audio file, so its parent
+        // is the item_id extraction directory. For a multi-file book the stored path
+        // IS the item_id directory already, so parent() is the downloads root —
+        // detect that case and use file_path directly.
+        let extract_dir = if file_path.is_dir() {
+            // Multi-file: file_path already points to the item_id directory.
+            file_path.to_path_buf()
+        } else {
+            // Single-file: step up one level to the item_id directory.
+            file_path.parent()
+                .ok_or_else(|| "Could not determine extract directory".to_string())?
+                .to_path_buf()
+        };
+
+        if extract_dir.exists() {
+            // Recursively remove the item_id directory and all its contents —
+            // audio file, cover image, and any other files extracted from the ZIP.
+            match std::fs::remove_dir_all(&extract_dir) {
+                Ok(()) => None,
+                Err(e) => Some(format!("Failed to remove download directory: {e}")),
+            }
+        } else {
+            // Directory already gone (manually deleted outside the app) — not an error.
+            None
         }
     } else {
         // item_id not in the registry — nothing to delete from disk.
@@ -998,8 +1115,8 @@ pub fn remove_download(item_id: String) -> Result<(), String> {
     // Always remove the registry entry so the downloads list stays consistent.
     downloads::remove_record(&dir, &item_id)?;
 
-    // Propagate the file error only after the registry is already clean.
-    if let Some(e) = file_err {
+    // Propagate the directory error only after the registry is already clean.
+    if let Some(e) = dir_err {
         return Err(e);
     }
 

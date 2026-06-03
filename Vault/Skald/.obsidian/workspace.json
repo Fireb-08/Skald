@@ -83,12 +83,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Useful commands.md",
+                "file": "Skald Download Implementation Roadmap.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Useful commands"
+              "title": "Skald Download Implementation Roadmap"
             }
           }
         ],
@@ -256,11 +256,11 @@
   },
   "active": "cfcf8c84f0bc7d04",
   "lastOpenFiles": [
+    "SKALD CODEBASE DUPLICATION AUDIT REPORT.md",
+    "Useful commands.md",
     "Skald Roadmap.md",
     "Skald Download Implementation Roadmap.md",
-    "Useful commands.md",
     "Skald Live sync Roadmap.md",
-    "SKALD CODEBASE DUPLICATION AUDIT REPORT.md",
     "Remaining bugs and fixes.md",
     "Welcome.md"
   ]
