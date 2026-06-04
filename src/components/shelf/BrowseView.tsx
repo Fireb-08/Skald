@@ -19,7 +19,7 @@ export interface BrowseViewProps {
 }
 
 export default function BrowseView({
-  st, title, subtitle, showModeToggle = false, children, inline = false, shelfTabsSlot,
+  st, title, subtitle, showModeToggle = false, children, inline = false, shelfTabsSlot: _shelfTabsSlot,
 }: BrowseViewProps) {
   if (inline) {
     return (

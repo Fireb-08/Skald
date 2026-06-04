@@ -8,13 +8,6 @@ import ViewModeToggle from './ViewModeToggle';
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
-const SORT_LABELS: Record<string, string> = {
-  recently: 'recently added',
-  title: 'title',
-  author: 'author',
-  'most-listened': 'most listened',
-};
-
 const TABS = [
   { id: 'library',     label: 'Home'        },
   { id: 'series',      label: 'Series'      },
@@ -87,32 +80,6 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   } else if (st.librarySort === 'most-listened') {
     filtered.sort((a, b) => bookProgress(b, st.mediaProgress) - bookProgress(a, st.mediaProgress));
   }
-
-  let shelfCount = filtered.length;
-  if (st.groupBySeries && st.contextFilter?.kind !== 'series') {
-    const seen = new Set<string>();
-    shelfCount = filtered.filter(b => {
-      const name = seriesNameOf(bookSeries(b));
-      if (!name) return true;
-      if (seen.has(name)) return false;
-      seen.add(name);
-      return true;
-    }).length;
-  }
-
-  const countText = (() => {
-    let t = `${filtered.length} title${filtered.length === 1 ? '' : 's'}`;
-    if (st.search) t += ` matching "${st.search}"`;
-    if (st.contextFilter?.kind === 'series') {
-      t += ' · sort: volume order';
-    } else {
-      t += ` · sort: ${SORT_LABELS[st.librarySort] ?? 'recently added'}`;
-    }
-    if (st.groupBySeries && st.contextFilter?.kind !== 'series' && shelfCount !== filtered.length) {
-      t += ` · ${shelfCount} series grouped`;
-    }
-    return t;
-  })();
 
   const isLibrary = st.shelfTab === 'library';
 

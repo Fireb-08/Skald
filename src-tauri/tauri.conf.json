@@ -43,17 +43,12 @@
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
-      "tsp": false
-    },
-    "nsis": {
-      "displayLanguageSelector": false,
-      "installerIcon": "icons/icon.ico",
-      "headerImage": null,
-      "sidebarImage": null,
-      "installMode": "currentUser"
-    },
-    "msi": {
-      "enableElevatedUpdateTask": false
+      "tsp": false,
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser"
+      }
     }
   }
 }

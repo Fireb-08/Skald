@@ -8,9 +8,9 @@ import { seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../
 import { playBook, togglePlayback } from '../api/playbook';
 import {
   SPEEDS,
-  chapterAt, chapterStart, fmtTime, fmtRemaining,
+  chapterAt, chapterStart, fmtTime, // fmtRemaining removed — not used
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookDur,
-  bookProgress, bookCurrentTime, bookSynopsis,
+  bookProgress, bookCurrentTime, // bookSynopsis removed — not rendered
 } from '../state/onyx';
 import Glass from './chrome/Glass';
 import Cover from './Cover';
@@ -263,9 +263,6 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   const focusProgress = st.currentBookId === focus.id
     ? st.position / (totalSecs || 1)
     : bookProgress(focus, st.mediaProgress);
-  const remaining = st.currentBookId === focus.id
-    ? totalSecs - st.position
-    : totalSecs * (1 - bookProgress(focus, st.mediaProgress));
   const chapters = st.currentBookChapters;
   const { idx: chIdx } = chapterAt(chapters, st.position);
   const chapterCount = chapters.length;
@@ -337,8 +334,6 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   const focusSeries = bookSeries(focus);
   const focusAuthor = bookAuthor(focus);
   const focusNarrator = bookNarrator(focus);
-  const focusSynopsis = bookSynopsis(focus);
-
   return (
     <Glass
       translucent={st.translucent}
