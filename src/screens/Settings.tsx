@@ -72,15 +72,6 @@ export default function Settings({ st, onLogout }: SettingsProps) {
       <div style={{ flex: 1, display: 'flex', gap: 24, minHeight: 0 }}>
         {/* Sidebar */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-          {/* Profile header */}
-          <div style={{ padding: '4px 10px 18px', borderBottom: '1px solid var(--onyx-line)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15 }}>J</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--onyx-text)' }}>Jordan</div>
-              <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>jordan@home.lan</div>
-            </div>
-          </div>
-
           {/* Nav items */}
           {NAV.map(s => {
             // Build the label — append a count badge for Downloads when books are present.
