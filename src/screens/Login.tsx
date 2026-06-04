@@ -367,7 +367,7 @@ export default function Login({ st }: LoginProps) {
                   style={{ ...underline, flex: 1 }}
                   value={host}
                   onChange={e => setHost(e.target.value)}
-                  placeholder="***REDACTED-HOST***:13378"
+                  placeholder="e.g. 192.168.1.100:13378"
                   spellCheck={false}
                 />
               </div>
@@ -386,7 +386,7 @@ export default function Login({ st }: LoginProps) {
                     style={underline}
                     value={user}
                     onChange={e => setUser(e.target.value)}
-                    placeholder="username"
+                    placeholder="Username"
                     spellCheck={false}
                   />
                 </label>
@@ -427,7 +427,7 @@ export default function Login({ st }: LoginProps) {
                   }}
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
-                  placeholder="***REDACTED-JWT***…"
+                  placeholder="Paste your API key here"
                   spellCheck={false}
                   autoComplete="off"
                 />
