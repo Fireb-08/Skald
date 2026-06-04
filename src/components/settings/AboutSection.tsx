@@ -1,3 +1,4 @@
+import lyreIcon from '../../assets/lyre.png';
 import { SectionHead, Row, Pill, SERIF, MONO } from './shared';
 
 export default function AboutSection() {
@@ -5,7 +6,16 @@ export default function AboutSection() {
     <div>
       <SectionHead title="About" />
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '0 0 24px', borderBottom: '1px solid var(--onyx-line)' }}>
-        <div style={{ width: 56, height: 56, borderRadius: 12, background: 'var(--onyx-glass-strong)', border: '1px solid var(--onyx-glass-edge)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-accent)', fontFamily: SERIF, fontSize: 30, fontWeight: 600 }}>S</div>
+        <img
+          src={lyreIcon}
+          alt="Skald"
+          style={{
+            width: 64,
+            height: 64,
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 0 12px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.3))',
+          }}
+        />
         <div>
           <div style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 500 }}>Skald<span style={{ color: 'var(--onyx-accent)' }}>.</span></div>
           <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 2 }}>v0.1.0 · Onyx · alpha</div>

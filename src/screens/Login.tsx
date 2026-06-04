@@ -46,7 +46,7 @@ export default function Login({ st }: LoginProps) {
   }, [schemeOpen]);
 
   // ── Submit handler ──────────────────────────────────────────────────────────
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     // Server URL is required for both auth methods
     if (!host.trim()) return setError('A server address is required.');
@@ -138,7 +138,7 @@ export default function Login({ st }: LoginProps) {
       fontFamily: SANS,
     }}>
         {/* Titlebar: absolutely positioned, left: 0, right: 0 — spans the full window width */}
-        <Titlebar isDark subtitle="Saga" />
+        <Titlebar isDark minimal />
 
         {/* ── LEFT PANEL — 268px manuscript column ───────────────────────── */}
         <div style={{
@@ -367,7 +367,7 @@ export default function Login({ st }: LoginProps) {
                   style={{ ...underline, flex: 1 }}
                   value={host}
                   onChange={e => setHost(e.target.value)}
-                  placeholder="e.g. 192.168.1.100:13378"
+
                   spellCheck={false}
                 />
               </div>

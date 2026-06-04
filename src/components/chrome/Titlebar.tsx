@@ -5,6 +5,8 @@ import lyreIcon from '../../assets/lyre.png';
 export interface TitlebarProps {
   subtitle?: string;
   isDark: boolean;
+  // When true, only "SKALD" is shown — no theme name or subtitle.
+  minimal?: boolean;
   // True when the library was loaded from the disk cache (server unreachable).
   // Displays a persistent amber OFFLINE pill so the user always knows they are
   // browsing cached data rather than a live server connection.
@@ -25,7 +27,7 @@ const HANDLERS: Record<string, () => void> = {
   close: () => { void getCurrentWindow().close(); },
 };
 
-export default function Titlebar({ subtitle, isDark, isOffline }: TitlebarProps) {
+export default function Titlebar({ subtitle, isDark, minimal, isOffline }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -59,7 +61,7 @@ export default function Titlebar({ subtitle, isDark, isOffline }: TitlebarProps)
         />
         {/* App name + optional theme/subtitle */}
         <div style={{ fontFamily: mono, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-          Skald · {themeName}{subtitle ? ` · ${subtitle}` : ''}
+          {minimal ? 'Skald' : `Skald · ${themeName}${subtitle ? ` · ${subtitle}` : ''}`}
         </div>
         {/* Offline indicator — shown when the library loaded from disk cache.
             Amber pill gives the user a persistent signal that they are in offline mode. */}
