@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import lyreIcon from '../../assets/lyre.png';
 
 export interface TitlebarProps {
   subtitle?: string;
@@ -44,16 +45,18 @@ export default function Titlebar({ subtitle, isDark, isOffline }: TitlebarProps)
   return (
     <div style={bar} data-tauri-drag-region>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* App icon */}
-        <div style={{
-          width: 18, height: 18, borderRadius: 5,
-          background: 'var(--onyx-glass-strong)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          border: '1px solid var(--onyx-glass-edge)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 10, fontWeight: 700, color: 'var(--onyx-accent)',
-        }}>S</div>
+        {/* Lyre logo mark — transparent PNG sits cleanly against the dark titlebar */}
+        <img
+          src={lyreIcon}
+          alt="Skald"
+          style={{
+            width: 20,
+            height: 20,
+            objectFit: 'contain',
+            // Slight brightness boost so the gold reads clearly at small size
+            filter: 'brightness(1.1)',
+          }}
+        />
         {/* App name + optional theme/subtitle */}
         <div style={{ fontFamily: mono, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
           Skald · {themeName}{subtitle ? ` · ${subtitle}` : ''}
