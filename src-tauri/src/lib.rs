@@ -109,6 +109,8 @@ pub fn run() {
             commands::get_downloads,
             commands::remove_download,
             commands::cancel_download,
+            // Downloads — Phase D: offline playback via local file
+            commands::play_local_file,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,

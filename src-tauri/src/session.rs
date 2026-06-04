@@ -17,6 +17,11 @@ pub struct SessionManager {
     // app startup before the user has a chance to see the window.
     pub player: Arc<Mutex<Option<AudioPlayer>>>,
     active: Arc<AtomicBool>,
+    // True while playing from a local file (no server session).
+    // Set by play_local(); cleared by start_session() when returning to online playback.
+    // The sync task is never spawned during local playback, so this flag is
+    // primarily an observability marker for the shutdown handler and future phases.
+    pub is_local: bool,
 }
 
 impl SessionManager {
@@ -28,6 +33,7 @@ impl SessionManager {
             time_listened: Arc::new(Mutex::new(0.0)),
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
+            is_local: false,
         }
     }
 
@@ -40,8 +46,10 @@ impl SessionManager {
         app: tauri::AppHandle<R>,
         start_time: Option<f64>,
     ) -> Result<f64, String> {
-        // Stop any tasks from a previous session.
+        // Stop any tasks from a previous session (online or local).
         self.active.store(false, Ordering::Relaxed);
+        // Clear the local flag — this is an online session, sync is required.
+        self.is_local = false;
 
         // Initialize the audio player on first call (deferred to avoid
         // requiring libvlc.dll on PATH at startup).
@@ -138,6 +146,139 @@ impl SessionManager {
         });
 
         Ok(session.current_time)
+    }
+
+    /// Load a local audio file into LibVLC and start playback without opening a
+    /// server session. Used by the offline playback path introduced in Phase D.
+    ///
+    /// Behaviour differences from start_session:
+    /// - No server call is made; session_id stays None.
+    /// - Only the 1-second tick task is spawned (no 10-second sync task).
+    /// - is_local is set to true so the shutdown handler skips the HTTP close.
+    pub async fn play_local<R: tauri::Runtime>(
+        &mut self,
+        file_path: &str,
+        start_time: f64,
+        app: tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        // Kill any background tasks from a previous online or local session so
+        // stale sync or tick loops do not race with the new local playback.
+        self.active.store(false, Ordering::Relaxed);
+
+        // No server session — clear the ID so the shutdown handler and
+        // close_active_session both exit early without an HTTP call.
+        self.session_id = None;
+
+        // Mark as local so any code that inspects this flag knows we are offline.
+        self.is_local = true;
+
+        // Initialize the audio player on first call (deferred init matches start_session).
+        {
+            let mut p = self.player.lock().unwrap();
+            if p.is_none() {
+                *p = Some(AudioPlayer::new()?);
+            }
+        }
+
+        // Build a file:/// URI for LibVLC from the registry path.
+        // If the path is a directory (multi-file book), scan for audio files sorted
+        // by name — alphabetical order matches ABS export chapter order — and use
+        // the first file. Single-file books are loaded directly.
+        let audio_ext = ["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a"];
+        let uri = if std::path::Path::new(file_path).is_dir() {
+            let mut files: Vec<_> = std::fs::read_dir(file_path)
+                .map_err(|e| format!("Failed to read download directory: {e}"))?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        .map(|x| audio_ext.contains(&x.to_lowercase().as_str()))
+                        .unwrap_or(false)
+                })
+                .collect();
+            // Sort by file name so multi-file books play in chapter order.
+            files.sort_by_key(|e| e.file_name());
+            if files.is_empty() {
+                return Err("No audio files found in download directory".to_string());
+            }
+            // LibVLC expects forward slashes even on Windows.
+            format!(
+                "file:///{}",
+                files[0].path().to_string_lossy().replace('\\', "/")
+            )
+        } else {
+            // Single audio file — convert the Windows path to a file:/// URI.
+            format!("file:///{}", file_path.replace('\\', "/"))
+        };
+
+        // Load the URI into LibVLC. AudioPlayer::load() applies the :start-time
+        // media option when start_time > 0, so no explicit seek is needed after play().
+        {
+            let guard = self.player.lock().unwrap();
+            if let Some(p) = guard.as_ref() {
+                p.load(&uri, start_time)?;
+            }
+        }
+
+        // Create a fresh active flag for the new tick task. The old flag was set to
+        // false above, so any previous tick task exits on its next iteration.
+        let active = Arc::new(AtomicBool::new(true));
+        self.active = Arc::clone(&active);
+
+        // Reset progress counters for the new local playback session.
+        *self.current_time.lock().unwrap() = start_time;
+        *self.time_listened.lock().unwrap() = 0.0;
+
+        // ── Tick task: every 1 second ────────────────────────────────────────
+        // Identical to start_session's tick task — emits playback-tick events so
+        // the waveform, chapter indicator, and transport controls all stay live.
+        // No sync task is spawned because there is no server session to sync to.
+        let ct_tick     = Arc::clone(&self.current_time);
+        let tl_tick     = Arc::clone(&self.time_listened);
+        let player_tick = Arc::clone(&self.player);
+        let active_tick = Arc::clone(&active);
+        let app_tick    = app;
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                if !active_tick.load(Ordering::Relaxed) {
+                    break;
+                }
+                let (pos, dur, playing) = {
+                    let guard = player_tick.lock().unwrap();
+                    match guard.as_ref() {
+                        Some(p) => (p.position(), p.duration(), p.is_playing()),
+                        None    => (0.0, 0.0, false),
+                    }
+                };
+                *ct_tick.lock().unwrap() = pos;
+                if playing {
+                    *tl_tick.lock().unwrap() += 1.0;
+                }
+                let _ = app_tick.emit(
+                    "playback-tick",
+                    serde_json::json!({
+                        "currentTime": pos,
+                        "duration":    dur,
+                        "isPlaying":   playing,
+                    }),
+                );
+            }
+        });
+
+        // Start playback after the tick task is spawned so the first tick fires
+        // while audio is already playing (avoids a spurious isPlaying=false tick).
+        {
+            let guard = self.player.lock().unwrap();
+            if let Some(p) = guard.as_ref() {
+                p.play()?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Sync the current position to the server.

@@ -3,13 +3,55 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume } from './abs';
+import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile } from './abs';
 
 export async function playBook(
   st: OnyxState,
   bookId: string,
   startTimeOverride?: number, // only for chapter clicks / bookmark jumps
 ): Promise<void> {
+  // ── Offline path: play from local file when the book is downloaded ──────────
+  // If the book is downloaded locally, play from disk rather than opening a
+  // server session — this enables offline playback without network access.
+  const localDownload = st.downloads.find(d => d.itemId === bookId);
+  if (localDownload) {
+    // Clear any stale online session state — there is no server session in the
+    // offline path, so these flags must not mislead other components.
+    st.setSessionReady(false);
+    st.setSessionId('');
+
+    // Resolve start position: explicit override wins, then saved server progress,
+    // then 0. The saved position may be from a prior online session; using it
+    // means the user resumes where they left off even when offline.
+    const savedProgress = st.mediaProgress.find(p => p.libraryItemId === bookId);
+    const offlineStart = startTimeOverride ?? savedProgress?.currentTime ?? 0;
+
+    // Tell LibVLC to open the local file. The Rust command handles file:/// URI
+    // construction and starts the 1-second tick loop so playback-tick events flow.
+    await playLocalFile(localDownload.filePath, offlineStart);
+
+    // Signal to the frontend that we are in local playback mode so transport
+    // controls bypass session management and call audio commands directly.
+    st.setIsLocalPlayback(true);
+
+    // Seed the UI position to the resolved start time immediately, before the
+    // first playback-tick event (~1 second later). Without this the waveform
+    // and timestamp display 0:00 for the first tick interval even though LibVLC
+    // has already seeked to offlineStart — mirroring st.setPosition(result.currentTime)
+    // in the online path.
+    st.setPosition(offlineStart);
+
+    // Sync UI state to match what LibVLC just started playing.
+    st.setCurrentBookId(bookId);
+    st.setFocusedBookId(bookId);
+    st.setPlaying(true);
+    return;
+  }
+
+  // ── Online path: existing session-based playback unchanged ──────────────────
+  // Ensure local playback flag is cleared when starting an online session.
+  st.setIsLocalPlayback(false);
+
   // 1. Tear down any existing session so the server commits its final state
   // Log session close failures so ghost sessions can be diagnosed.
   // We still proceed even on failure — a new session open will work regardless,

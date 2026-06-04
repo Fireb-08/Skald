@@ -590,6 +590,15 @@ export function cancelDownload(itemId: string): Promise<void> {
   return invoke('cancel_download', { itemId });
 }
 
+/** Phase D — opens a local audio file in LibVLC for offline playback.
+ *  filePath may point to a single audio file or a directory (multi-file book);
+ *  the Rust layer resolves the correct first file in the latter case.
+ *  Starts the 1-second playback-tick loop so all transport controls remain live.
+ *  Does NOT open a server session — no network access is required. */
+export function playLocalFile(filePath: string, startTime: number): Promise<void> {
+  return invoke('play_local_file', { filePath, startTime });
+}
+
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.
  *  Replaces the old 5-minute updatedAt proxy; this is the authoritative open-sessions list.
  *  Sessions include all users' active playback, not just the authenticated caller's. */

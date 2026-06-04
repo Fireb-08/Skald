@@ -463,6 +463,23 @@ pub async fn close_active_session(
     result
 }
 
+/// Opens a local audio file in LibVLC for offline playback.
+/// Uses the same AudioPlayer state as the online path — all existing
+/// transport controls (pause, seek, speed) work identically because they all
+/// go through SessionManager.player, which this command also uses.
+/// file_path may be either a single audio file path or a directory path
+/// (multi-file book); the session layer resolves the correct first file.
+#[tauri::command]
+pub async fn play_local_file(
+    file_path: String,
+    start_time: f64,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<(), String> {
+    let mut mgr = state.lock().await;
+    mgr.play_local(&file_path, start_time, app).await
+}
+
 pub type ShortcutActionMap =
     std::sync::Arc<std::sync::RwLock<std::collections::HashMap<u32, String>>>;
 

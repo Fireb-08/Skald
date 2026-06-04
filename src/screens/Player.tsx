@@ -21,7 +21,9 @@ import type { OLRatings, OLShelves } from '../api/reviewCache';
 import MiniPlayer from '../components/player/MiniPlayer';
 // Canonical play function — all "start this book" paths route through here
 // for consistent resume-from-saved-position and UI-sync behaviour.
-import { playBook } from '../api/playbook';
+// togglePlayback is used by the local playback branch to pause/resume
+// without touching session state.
+import { playBook, togglePlayback } from '../api/playbook';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -372,6 +374,16 @@ export default function Player({ st }: PlayerProps) {
 
   const handlePlayPause = async () => {
     try {
+      // Local playback mode — no session management needed.
+      // Call audio commands directly, same as the MiniPlayer toggle.
+      // Without this branch, the !st.sessionReady check below would fire
+      // (we never set sessionReady=true for local files) and call playBook
+      // again, restarting the file from the beginning instead of pausing.
+      if (st.isLocalPlayback) {
+        await togglePlayback(st);
+        return;
+      }
+
       if (isFocusedDifferent && !st.playing) {
         // User pressed play while viewing a different book — start that book
         // via the canonical function so it resumes from saved position.

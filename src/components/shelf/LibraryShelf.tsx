@@ -131,6 +131,20 @@ function ShelfList({ books, st, openBook, onContextMenu }: { books: LibraryItem[
                         <div style={{ width: `${prog * 100}%`, height: '100%', background: 'var(--onyx-accent)' }} />
                       </div>
                     )}
+                    {/* Downloaded badge — shows when the book is available offline */}
+                    {st.downloads.find(d => d.itemId === b.id) && (
+                      <div style={{
+                        position: 'absolute', bottom: st.showProgressOverlay && prog > 0 ? 4 : 2, right: 1,
+                        zIndex: 3,
+                        background: 'rgba(0,0,0,0.72)', borderRadius: 2,
+                        padding: '1px 3px',
+                        display: 'inline-flex', alignItems: 'center',
+                        color: 'var(--onyx-accent)', fontSize: 8, fontFamily: MONO,
+                        lineHeight: 1, userSelect: 'none',
+                      }}>
+                        ↓
+                      </div>
+                    )}
                   </div>
                 </td>
                 {/* Title + series */}
@@ -278,6 +292,20 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
                   {st.showProgressOverlay && prog > 0 && (
                     <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: 'rgba(0,0,0,0.4)' }}>
                       <div style={{ width: `${prog * 100}%`, height: '100%', background: 'var(--onyx-accent)' }} />
+                    </div>
+                  )}
+                  {/* Downloaded badge — visible when the book is available for offline playback */}
+                  {st.downloads.find(d => d.itemId === b.id) && (
+                    <div style={{
+                      position: 'absolute', bottom: st.showProgressOverlay && prog > 0 ? 6 : 4, right: 4,
+                      zIndex: 3,
+                      background: 'rgba(0,0,0,0.72)', borderRadius: 3,
+                      padding: '1px 4px',
+                      display: 'inline-flex', alignItems: 'center',
+                      color: 'var(--onyx-accent)', fontSize: 9, fontFamily: MONO,
+                      lineHeight: 1, userSelect: 'none',
+                    }}>
+                      ↓
                     </div>
                   )}
                 </div>

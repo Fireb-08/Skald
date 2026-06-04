@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions } from '../api/abs';
+import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads } from '../api/abs';
 
 export type { User };
 import {
@@ -15,6 +15,7 @@ import {
 
 export type { LibraryItem, MediaProgress, ListeningStats };
 export type { AbsBookmark };
+export type { DownloadRecord };
 
 // ─── Local-only interfaces ────────────────────────────────────────────────────
 
@@ -291,6 +292,14 @@ export interface OnyxState {
   // and kept up-to-date by refreshLibrary(). Used by GreetingPane to call
   // getLibraryStats() without needing to drill the ID through every call site.
   currentLibraryId: string;
+  // Track which books are downloaded locally so the playback path can
+  // route LibVLC to the local file instead of the HTTP stream.
+  downloads: DownloadRecord[];
+  setDownloads: Dispatch<SetStateAction<DownloadRecord[]>>;
+  // Tracks whether the current playback source is a local file rather than
+  // a server stream. When true, transport controls bypass session logic.
+  isLocalPlayback: boolean;
+  setIsLocalPlayback: (on: boolean) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -433,6 +442,37 @@ export function useOnyxState(): OnyxState {
   const [mediaProgress, setMediaProgress] = useState<MediaProgress[]>([]);
   const [listeningStats, setListeningStats] = useState<ListeningStats | null>(null);
   const [bookmarks, setBookmarks] = useState<AbsBookmark[]>([]);
+
+  // ── Downloads registry ──────────────────────────────────────────────────────
+  // Which books are stored on disk for offline playback. Loaded from the
+  // persistent JSON registry once on mount and refreshed after each completed
+  // download so playBook can immediately route to the local file.
+  const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
+
+  // True while LibVLC is playing a local file (no server session open).
+  // Cleared whenever an online session is started so transport controls
+  // revert to session-aware behaviour automatically.
+  const [isLocalPlayback, setIsLocalPlayback] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Initial load — reads the registry from disk; works before any server connection.
+    getDownloads()
+      .then(setDownloads)
+      .catch(e => console.error('[downloads] initial load failed:', e));
+
+    // Re-load whenever a download completes. The download-complete event fires
+    // after ZIP extraction and registry write, so getDownloads() returns the
+    // updated record immediately.
+    let unlisten: (() => void) | undefined;
+    listen('download-complete', () => {
+      getDownloads()
+        .then(setDownloads)
+        .catch(e => console.error('[downloads] refresh after complete failed:', e));
+    }).then(fn => { unlisten = fn; });
+
+    return () => { unlisten?.(); };
+  }, []); // runs once on mount; callers use setDownloads for immediate optimistic updates
+
   // Tracks the active library's ID so live sync handlers can filter events
   // that belong to a different library (e.g., a podcast library vs. books).
   const [currentLibraryId, setCurrentLibraryId] = useState('');
@@ -895,6 +935,8 @@ export function useOnyxState(): OnyxState {
     authToken, setAuthToken,
     user, setUser,
     library, libraryLoading, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
+    downloads, setDownloads,
+    isLocalPlayback, setIsLocalPlayback,
     screen, setScreen,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
