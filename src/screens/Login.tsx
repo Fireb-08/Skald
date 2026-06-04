@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { OnyxState } from '../state/onyx';
 import { login, saveToken, loginWithApiKey } from '../api/abs';
 import Titlebar from '../components/chrome/Titlebar';
+import lyreIcon from '../assets/lyre.png';
 
 // Typography constants matching the Saga design tokens
 const SERIF = '"Source Serif 4", "Source Serif Pro", Georgia, serif';
@@ -176,6 +177,27 @@ export default function Login({ st }: LoginProps) {
                 The teller<br />returns to<br />the{' '}
                 <span style={{ fontStyle: 'italic', color: '#d4a64a' }}>hall</span>.
               </div>
+            </div>
+
+            {/* Lyre logo mark — centered in the left panel between headline and footer quote */}
+            <div style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '24px 0',
+            }}>
+              <img
+                src={lyreIcon}
+                alt="Skald"
+                style={{
+                  width: 140,
+                  height: 140,
+                  objectFit: 'contain',
+                  opacity: 0.85,
+                  filter: 'drop-shadow(0 0 18px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35))',
+                }}
+              />
             </div>
 
             {/* Bottom quote block — italic serif, 13px, maxWidth 200px */}
