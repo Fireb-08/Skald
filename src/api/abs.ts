@@ -125,6 +125,14 @@ export interface Bookmark {
   time: number;
 }
 
+// Mirrors downloads::LocalStopPoint — a position snapshot recorded locally
+// at pause, book-switch, and app-close, independent of the server.
+export interface LocalStopPoint {
+  itemId: string;
+  position: number;    // playback position in seconds
+  recordedAt: number;  // Unix timestamp ms — displayed as date/time in the UI
+}
+
 export interface AudioDevice {
   id: string;
   name: string;
@@ -667,5 +675,17 @@ export function saveChapterCache(itemId: string, chapters: unknown): Promise<voi
 // (i.e. the book was never opened while online after the cache was introduced).
 export function loadChapterCache(itemId: string): Promise<unknown[] | null> {
   return invoke('load_chapter_cache', { itemId });
+}
+
+// Appends a stop point for the given book, keeping the 10 most recent.
+// Called at pause, book-switch, and app-close as a position safety net.
+export function recordStopPoint(itemId: string, position: number): Promise<void> {
+  return invoke('record_stop_point', { itemId, position });
+}
+
+// Returns the stop-point log for a book, most recent first.
+// Returns an empty array when no local history exists.
+export function getStopPoints(itemId: string): Promise<LocalStopPoint[]> {
+  return invoke('get_stop_points', { itemId });
 }
 

@@ -167,3 +167,69 @@ pub fn remove_progress_entry(downloads_dir: &Path, item_id: &str) -> Result<(), 
     queue.retain(|e| e.item_id != item_id);
     save_progress_queue(downloads_dir, &queue)
 }
+
+// ── Local playback stop-point log ─────────────────────────────────────────────
+// Records the position at which the user stopped playing each book.
+// Written independently of the server as a safety net against position loss.
+// Each book gets its own JSON file so one book's reads/writes never touch another.
+
+// LocalStopPoint — a single recorded stopping point for a book.
+// Written independently of the server as a safety net against position loss.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalStopPoint {
+    pub item_id: String,
+    pub position: f64,    // playback position in seconds
+    pub recorded_at: i64, // Unix timestamp ms — shown as date/time in the UI
+}
+
+// Build the path for a book's stop-point log file.
+// Each book uses a separate file so reads and writes are independent.
+fn local_log_path(data_dir: &Path, item_id: &str) -> std::path::PathBuf {
+    // Sanitize the item_id to prevent path traversal on any malformed id.
+    // ABS ids are alphanumeric with hyphens/underscores; everything else becomes '_'.
+    let safe_id: String = item_id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    data_dir.join(format!("local_log_{safe_id}.json"))
+}
+
+// Load stop points for a specific book, most recent first.
+// Returns an empty vec if the file does not exist (normal on first play).
+pub fn load_stop_points(data_dir: &Path, item_id: &str) -> Vec<LocalStopPoint> {
+    let path = local_log_path(data_dir, item_id);
+    let bytes = match std::fs::read(&path) {
+        Ok(b)  => b,
+        Err(_) => return Vec::new(), // missing or unreadable — treat as no history
+    };
+    // Corrupt JSON falls back to empty rather than surfacing an error.
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+// Persist the stop-point list for a book using a write-then-rename pattern
+// so the file is never left half-written if the process is killed mid-write.
+fn save_stop_points(data_dir: &Path, item_id: &str, points: &[LocalStopPoint]) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(points)
+        .map_err(|e| format!("Serialize error: {e}"))?;
+    let path = local_log_path(data_dir, item_id);
+    // Write to a .tmp sibling then rename to the live file atomically.
+    let tmp  = path.with_extension("tmp");
+    std::fs::write(&tmp, &json).map_err(|e| format!("Write error: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("Rename error: {e}"))?;
+    Ok(())
+}
+
+// Append a stop point for a book, keeping only the 10 most recent per book.
+// Called from record_stop_point command on pause, book-switch, and app-close.
+pub fn record_stop_point(data_dir: &Path, item_id: &str, position: f64) -> Result<(), String> {
+    let mut points = load_stop_points(data_dir, item_id);
+    points.insert(0, LocalStopPoint {
+        item_id: item_id.to_string(),
+        position,
+        recorded_at: chrono::Utc::now().timestamp_millis(),
+    });
+    // Keep only the 10 most recent entries — older history is not useful in the UI.
+    points.truncate(10);
+    save_stop_points(data_dir, item_id, &points)
+}

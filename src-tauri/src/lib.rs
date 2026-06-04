@@ -138,6 +138,9 @@ pub fn run() {
             commands::create_user,
             commands::update_user,
             commands::delete_user,
+            // Local stop-point log — position safety net independent of the server
+            commands::record_stop_point,
+            commands::get_stop_points,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

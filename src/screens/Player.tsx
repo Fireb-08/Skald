@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
+  recordStopPoint, getStopPoints,
 } from '../api/abs';
+import type { LocalStopPoint } from '../api/abs';
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
@@ -115,6 +117,48 @@ export default function Player({ st }: PlayerProps) {
   const sleepDefault = JSON.parse(raw) as string;
 
   const playerBookmarks = st.bookmarks.filter(bm => bm.libraryItemId === (st.focusedBookId ?? st.currentBookId));
+
+  // ── Local stop-point log ───────────────────────────────────────────────────
+  // Tab switcher state for the bookmarks panel.
+  const [bookmarkTab, setBookmarkTab] = useState<'bookmarks' | 'local'>('bookmarks');
+  // Stop points loaded from disk for the currently focused book.
+  const [stopPoints, setStopPoints] = useState<LocalStopPoint[]>([]);
+
+  // Stable callback — records the current position for the current book.
+  // Deps include currentBookId and position so the closure stays fresh.
+  const recordStop = useCallback(() => {
+    if (st.currentBookId && st.position > 0) {
+      recordStopPoint(st.currentBookId, st.position).catch(console.error);
+    }
+  }, [st.currentBookId, st.position]);
+
+  // Record a stop point when playback pauses (playing transitions true→false).
+  useEffect(() => {
+    if (!st.playing) recordStop();
+  }, [st.playing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Record a stop point when the active book changes so the previous book's
+  // position is captured before the player resets to the new book.
+  // posRef always holds the most recent position even across renders.
+  const posRef = useRef(0);
+  posRef.current = st.position;
+  const prevBookIdRef = useRef('');
+  useEffect(() => {
+    if (prevBookIdRef.current && prevBookIdRef.current !== st.currentBookId) {
+      // The book just switched — save where we were in the previous book.
+      if (posRef.current > 0) {
+        recordStopPoint(prevBookIdRef.current, posRef.current).catch(console.error);
+      }
+    }
+    prevBookIdRef.current = st.currentBookId;
+  }, [st.currentBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load stop points from disk when the Local Play tab is open or the focused book changes.
+  const focusId = st.focusedBookId ?? st.currentBookId;
+  useEffect(() => {
+    if (!focusId || bookmarkTab !== 'local') return;
+    getStopPoints(focusId).then(setStopPoints).catch(console.error);
+  }, [focusId, bookmarkTab]);
 
   const addBookmark = async () => {
     try {
@@ -817,24 +861,95 @@ export default function Player({ st }: PlayerProps) {
             </Glass>
 
             <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+
+              {/* ── Panel header: title + tab switcher + add button ── */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Bookmarks</div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{playerBookmarks.length}</div>
-                <button onClick={addBookmark} style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }} title="Bookmark current moment">
-                  <Icon name="plus" size={11} /> ADD HERE
-                </button>
-              </div>
-              <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
-                {playerBookmarks.length === 0 ? (
-                  <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
-                    No bookmarks yet
-                  </div>
-                ) : playerBookmarks.map((bm, i) => (
-                  <button key={`${bm.time}-${i}`} onClick={() => seekAudio(bm.time).catch(console.error)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < playerBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
-                    <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)', marginBottom: 4 }}>{fmtTime(bm.time)}</div>
-                    <div style={{ fontSize: 13, color: 'var(--onyx-text)', lineHeight: 1.3 }}>{bm.title}</div>
+
+                {/* Tab switcher — pill toggles between server bookmarks and local stop points */}
+                <div style={{ display: 'flex', borderRadius: 999, border: '1px solid var(--onyx-line)', overflow: 'hidden', marginLeft: 4 }}>
+                  {(['bookmarks', 'local'] as const).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setBookmarkTab(tab)}
+                      style={{
+                        background: bookmarkTab === tab ? 'var(--onyx-accent-dim)' : 'transparent',
+                        border: 'none',
+                        color: bookmarkTab === tab ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+                        fontFamily: MONO,
+                        fontSize: 9,
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase' as const,
+                        padding: '3px 10px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {tab === 'bookmarks' ? 'Saved' : 'Local'}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Count badge — shows relevant count for the active tab */}
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
+                  {bookmarkTab === 'bookmarks' ? playerBookmarks.length : stopPoints.length}
+                </div>
+
+                {/* Add-bookmark button — only shown on the Saved tab */}
+                {bookmarkTab === 'bookmarks' && (
+                  <button onClick={addBookmark} style={{ marginLeft: 'auto', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)', letterSpacing: '0.06em', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }} title="Bookmark current moment">
+                    <Icon name="plus" size={11} /> ADD HERE
                   </button>
-                ))}
+                )}
+              </div>
+
+              {/* ── Tab content ── */}
+              <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
+
+                {bookmarkTab === 'bookmarks' ? (
+                  // ── Saved bookmarks (server) ───────────────────────────────
+                  playerBookmarks.length === 0 ? (
+                    <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
+                      No bookmarks yet
+                    </div>
+                  ) : playerBookmarks.map((bm, i) => (
+                    <button key={`${bm.time}-${i}`} onClick={() => seekAudio(bm.time).catch(console.error)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < playerBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
+                      <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)', marginBottom: 4 }}>{fmtTime(bm.time)}</div>
+                      <div style={{ fontSize: 13, color: 'var(--onyx-text)', lineHeight: 1.3 }}>{bm.title}</div>
+                    </button>
+                  ))
+                ) : (
+                  // ── Local Play — stop points recorded independently of the server ──
+                  stopPoints.length === 0 ? (
+                    <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
+                      No local history yet
+                    </div>
+                  ) : stopPoints.map((point, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        // Seek to the recorded position — same pattern as chapter row click.
+                        seekAudio(point.position).catch(console.error);
+                        st.setPosition(point.position);
+                      }}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        width: '100%', padding: '8px 0', background: 'none', border: 'none',
+                        borderBottom: i < stopPoints.length - 1 ? '1px solid var(--onyx-line)' : 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {/* Date and time of the recorded stop on the left */}
+                      <span style={{ fontSize: 11, color: 'var(--onyx-text-mute)', fontFamily: MONO }}>
+                        {new Date(point.recordedAt).toLocaleDateString()}{' '}
+                        {new Date(point.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {/* Playback position in accent mono on the right */}
+                      <span style={{ fontSize: 12, color: 'var(--onyx-accent)', fontFamily: MONO }}>
+                        {fmtTime(point.position)}
+                      </span>
+                    </button>
+                  ))
+                )}
               </div>
             </Glass>
 
