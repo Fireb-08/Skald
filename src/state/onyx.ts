@@ -653,7 +653,9 @@ export function useOnyxState(): OnyxState {
   });
 
   const [librarySort, setLibrarySortRaw] = useState(
-    () => localStorage.getItem('onyx.lib.sort') ?? 'recently',
+    // Default to title ascending (A→Z) on first launch.
+    // Returning users keep their saved preference via the localStorage value.
+    () => localStorage.getItem('onyx.lib.sort') ?? 'title',
   );
   const [coverSize, setCoverSizeRaw] = useState(
     () => localStorage.getItem('onyx.lib.coverSize') ?? 'L',

@@ -202,6 +202,7 @@ interface CtxMenu { x: number; y: number; item: LibraryItem }
 export default function LibraryShelf({ st }: LibraryShelfProps) {
   const coverW = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
   const [contextMenu, setContextMenu] = useState<CtxMenu | null>(null);
+
   const [matchItem, setMatchItem] = useState<LibraryItem | null>(null);
   const [collectionItem, setCollectionItem] = useState<LibraryItem | null>(null);
   const [filesItem, setFilesItem] = useState<LibraryItem | null>(null);
