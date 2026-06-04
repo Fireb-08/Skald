@@ -55,6 +55,7 @@ export default function TopNav({ st }: TopNavProps) {
         />
         <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontFamily: mono, fontSize: 10, padding: '1px 5px', border: '1px solid var(--onyx-glass-edge)', borderRadius: 4, color: 'var(--onyx-text-mute)', pointerEvents: 'none' }}>Ctrl+K</div>
       </div>
+      {/* User avatar — initial derived from logged-in username, not hardcoded */}
       <button
         onClick={() => st.setScreen('settings')}
         title="Account & settings"
@@ -63,9 +64,9 @@ export default function TopNav({ st }: TopNavProps) {
           background: 'var(--onyx-accent)', color: 'var(--onyx-bg)',
           border: 'none', cursor: 'pointer', fontFamily: 'inherit',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 11, fontWeight: 700,
+          fontSize: 11, fontWeight: 700, flexShrink: 0,
         }}
-      >J</button>
+      >{(st.user?.username?.[0] ?? '?').toUpperCase()}</button>
     </Glass>
   );
 }
