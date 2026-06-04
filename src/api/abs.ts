@@ -594,9 +594,10 @@ export function cancelDownload(itemId: string): Promise<void> {
  *  filePath may point to a single audio file or a directory (multi-file book);
  *  the Rust layer resolves the correct first file in the latter case.
  *  Starts the 1-second playback-tick loop so all transport controls remain live.
+ *  itemId is the ABS library item ID — stored so progress can be queued offline.
  *  Does NOT open a server session — no network access is required. */
-export function playLocalFile(filePath: string, startTime: number): Promise<void> {
-  return invoke('play_local_file', { filePath, startTime });
+export function playLocalFile(filePath: string, itemId: string, startTime: number): Promise<void> {
+  return invoke('play_local_file', { filePath, itemId, startTime });
 }
 
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.
@@ -604,6 +605,32 @@ export function playLocalFile(filePath: string, startTime: number): Promise<void
  *  Sessions include all users' active playback, not just the authenticated caller's. */
 export function getOpenSessions(serverUrl: string): Promise<ListeningSession[]> {
   return invoke('get_open_sessions', { serverUrl }); // backed by GET /api/users/online
+}
+
+// ── Offline progress queue ─────────────────────────────────────────────────
+
+// Mirrors downloads::OfflineProgressEntry in src-tauri/src/downloads.rs.
+export interface OfflineProgressEntry {
+  itemId: string;
+  currentTime: number;
+  duration: number;
+  progress: number;    // 0.0–1.0
+  isFinished: boolean;
+  recordedAt: number;  // Unix ms timestamp
+}
+
+// Flushes locally queued offline progress entries to the server.
+// Called on socket reconnect and on startup after a successful library fetch.
+// Returns the number of entries that were successfully synced.
+export function flushOfflineProgress(serverUrl: string): Promise<number> {
+  return invoke('flush_offline_progress', { serverUrl });
+}
+
+// Returns the offline progress queue entry for a book, or null if none exists.
+// Called by the offline playback path to restore the last saved position when
+// the server is unreachable and st.mediaProgress has no entry for the book.
+export function getOfflineProgress(itemId: string): Promise<OfflineProgressEntry | null> {
+  return invoke('get_offline_progress', { itemId });
 }
 
 // ── Library disk cache ─────────────────────────────────────────────────────
@@ -616,5 +643,18 @@ export function saveLibraryCache(items: unknown[]): Promise<void> {
 // Loads the cached library from disk. Returns an empty array if no cache exists yet.
 export function loadLibraryCache(): Promise<unknown[]> {
   return invoke('load_library_cache');
+}
+
+// Saves chapter data for a specific item to a per-item cache file.
+// chapters should be the raw ABS Chapter array from item.media.chapters.
+// Called after every successful fetchItem so the data is available offline.
+export function saveChapterCache(itemId: string, chapters: unknown): Promise<void> {
+  return invoke('save_chapter_cache', { itemId, chapters });
+}
+
+// Loads cached chapter data for a specific item. Returns null if no cache exists
+// (i.e. the book was never opened while online after the cache was introduced).
+export function loadChapterCache(itemId: string): Promise<unknown[] | null> {
+  return invoke('load_chapter_cache', { itemId });
 }
 

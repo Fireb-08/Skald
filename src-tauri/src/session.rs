@@ -22,6 +22,9 @@ pub struct SessionManager {
     // The sync task is never spawned during local playback, so this flag is
     // primarily an observability marker for the shutdown handler and future phases.
     pub is_local: bool,
+    // ABS library item ID of the locally-playing book. Set by play_local() and
+    // used by the shutdown handler to write a final offline progress entry on exit.
+    pub local_item_id: Option<String>,
 }
 
 impl SessionManager {
@@ -34,6 +37,7 @@ impl SessionManager {
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
             is_local: false,
+            local_item_id: None,
         }
     }
 
@@ -50,6 +54,8 @@ impl SessionManager {
         self.active.store(false, Ordering::Relaxed);
         // Clear the local flag — this is an online session, sync is required.
         self.is_local = false;
+        // Clear the local item ID — no longer tracking offline progress.
+        self.local_item_id = None;
 
         // Initialize the audio player on first call (deferred to avoid
         // requiring libvlc.dll on PATH at startup).
@@ -155,9 +161,12 @@ impl SessionManager {
     /// - No server call is made; session_id stays None.
     /// - Only the 1-second tick task is spawned (no 10-second sync task).
     /// - is_local is set to true so the shutdown handler skips the HTTP close.
+    /// - item_id is stored so the tick task can queue progress entries to disk
+    ///   and the shutdown handler can write a final entry on app close.
     pub async fn play_local<R: tauri::Runtime>(
         &mut self,
         file_path: &str,
+        item_id: &str,
         start_time: f64,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
@@ -171,6 +180,9 @@ impl SessionManager {
 
         // Mark as local so any code that inspects this flag knows we are offline.
         self.is_local = true;
+        // Store the ABS item ID so the tick task and shutdown handler can key
+        // offline progress queue entries to the correct library item.
+        self.local_item_id = Some(item_id.to_string());
 
         // Initialize the audio player on first call (deferred init matches start_session).
         {
@@ -234,11 +246,18 @@ impl SessionManager {
         // Identical to start_session's tick task — emits playback-tick events so
         // the waveform, chapter indicator, and transport controls all stay live.
         // No sync task is spawned because there is no server session to sync to.
-        let ct_tick     = Arc::clone(&self.current_time);
-        let tl_tick     = Arc::clone(&self.time_listened);
-        let player_tick = Arc::clone(&self.player);
-        let active_tick = Arc::clone(&active);
-        let app_tick    = app;
+        // After each tick, progress is also queued to disk so no position is lost
+        // if the app closes before the device comes back online.
+        let ct_tick         = Arc::clone(&self.current_time);
+        let tl_tick         = Arc::clone(&self.time_listened);
+        let player_tick     = Arc::clone(&self.player);
+        let active_tick     = Arc::clone(&active);
+        let app_tick        = app;
+        // Clone the item_id string into the task — it outlives this method call.
+        let item_id_tick    = item_id.to_string();
+        // Resolve the downloads dir once before spawning; propagate None if it
+        // fails (unlikely) so the tick loop still runs without queue writes.
+        let dl_dir_tick     = crate::downloads::downloads_dir().ok();
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -266,6 +285,25 @@ impl SessionManager {
                         "isPlaying":   playing,
                     }),
                 );
+                // Queue progress locally on every tick during offline/local playback.
+                // This ensures no progress is lost even if the app closes mid-session.
+                // The queue is flushed to the server when connectivity is restored.
+                if let Some(ref dl_dir) = dl_dir_tick {
+                    let entry = crate::downloads::OfflineProgressEntry {
+                        item_id: item_id_tick.clone(),
+                        current_time: pos,
+                        duration: dur,
+                        progress: if dur > 0.0 { pos / dur } else { 0.0 },
+                        is_finished: false,
+                        // Stable timestamp without pulling in chrono — same
+                        // precision as chrono::Utc::now().timestamp_millis().
+                        recorded_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as i64,
+                    };
+                    let _ = crate::downloads::upsert_progress_entry(dl_dir, entry);
+                }
             }
         });
 

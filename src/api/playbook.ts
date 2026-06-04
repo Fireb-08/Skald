@@ -3,7 +3,7 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile } from './abs';
+import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress } from './abs';
 
 export async function playBook(
   st: OnyxState,
@@ -20,15 +20,31 @@ export async function playBook(
     st.setSessionReady(false);
     st.setSessionId('');
 
-    // Resolve start position: explicit override wins, then saved server progress,
-    // then 0. The saved position may be from a prior online session; using it
-    // means the user resumes where they left off even when offline.
-    const savedProgress = st.mediaProgress.find(p => p.libraryItemId === bookId);
-    const offlineStart = startTimeOverride ?? savedProgress?.currentTime ?? 0;
+    // Resolve start position: explicit override > server progress > offline queue > 0.
+    // When offline, st.mediaProgress may be empty since it requires a server fetch.
+    // Fall back to the offline progress queue which persists locally between launches.
+    let startTime = startTimeOverride;
+    if (startTime === undefined) {
+      const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
+      if (saved) {
+        // Server progress available (cached from a prior online launch).
+        startTime = saved.currentTime;
+      } else {
+        // No server progress — query the local offline queue written by the tick task.
+        try {
+          const offlineProgress = await getOfflineProgress(bookId);
+          startTime = offlineProgress?.currentTime ?? 0;
+        } catch {
+          startTime = 0;
+        }
+      }
+    }
 
     // Tell LibVLC to open the local file. The Rust command handles file:/// URI
     // construction and starts the 1-second tick loop so playback-tick events flow.
-    await playLocalFile(localDownload.filePath, offlineStart);
+    // bookId is passed so the session layer can key offline progress queue entries
+    // to the correct ABS library item.
+    await playLocalFile(localDownload.filePath, bookId, startTime);
 
     // Signal to the frontend that we are in local playback mode so transport
     // controls bypass session management and call audio commands directly.
@@ -37,9 +53,9 @@ export async function playBook(
     // Seed the UI position to the resolved start time immediately, before the
     // first playback-tick event (~1 second later). Without this the waveform
     // and timestamp display 0:00 for the first tick interval even though LibVLC
-    // has already seeked to offlineStart — mirroring st.setPosition(result.currentTime)
+    // has already seeked to startTime — mirroring st.setPosition(result.currentTime)
     // in the online path.
-    st.setPosition(offlineStart);
+    st.setPosition(startTime);
 
     // Sync UI state to match what LibVLC just started playing.
     st.setCurrentBookId(bookId);

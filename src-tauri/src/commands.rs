@@ -15,13 +15,6 @@ async fn delete_partial(file: tokio::fs::File, path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
 }
 
-// Resolves the downloads directory under the app's local-data folder.
-// Factored out so download_item, get_downloads, and remove_download all use the same path.
-fn downloads_dir() -> Result<std::path::PathBuf, String> {
-    directories::ProjectDirs::from("com", "skald", "Skald")
-        .map(|dirs| dirs.data_local_dir().join("downloads"))
-        .ok_or_else(|| "Could not determine downloads directory".to_string())
-}
 
 #[tauri::command]
 pub async fn login(
@@ -116,12 +109,35 @@ pub async fn open_playback_session(
 pub async fn play_audio(
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
+    // Clone the player Arc out of the lock before any async work — the tokio
+    // MutexGuard must not be held across .await points.
     let player_arc = Arc::clone(&state.lock().await.player);
-    let guard = player_arc.lock().unwrap();
-    match guard.as_ref() {
-        Some(p) => p.play(),
-        None => Err("No audio player initialized".to_string()),
+    // Lock the inner std Mutex, call play(), then release immediately so the
+    // polling loop below can re-acquire without deadlocking.
+    let play_result = {
+        let guard = player_arc.lock().unwrap();
+        match guard.as_ref() {
+            Some(p) => p.play(),
+            None    => Err("No audio player initialized".to_string()),
+        }
+    };
+    // LibVLC may need a moment to start after play() is called — the media
+    // loader runs on an internal LibVLC thread. Poll up to 2 s (20 × 100 ms)
+    // so the frontend's optimistic st.setPlaying(true) reflects actual state.
+    if play_result.is_ok() {
+        for _ in 0..20 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // Each lock/check/drop is synchronous — no guard held across await.
+            let is_playing = player_arc.lock().unwrap()
+                .as_ref()
+                .map(|p| p.is_playing())
+                .unwrap_or(false);
+            if is_playing { break; }
+        }
+        eprintln!("[play_audio] player.is_playing() after wait: {}",
+            player_arc.lock().unwrap().as_ref().map(|p| p.is_playing()).unwrap_or(false));
     }
+    play_result
 }
 
 #[tauri::command]
@@ -469,15 +485,18 @@ pub async fn close_active_session(
 /// go through SessionManager.player, which this command also uses.
 /// file_path may be either a single audio file path or a directory path
 /// (multi-file book); the session layer resolves the correct first file.
+/// item_id is stored in the session manager so the offline progress queue
+/// and the shutdown handler can write progress entries keyed to the ABS book.
 #[tauri::command]
 pub async fn play_local_file(
     file_path: String,
+    item_id: String,
     start_time: f64,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
     let mut mgr = state.lock().await;
-    mgr.play_local(&file_path, start_time, app).await
+    mgr.play_local(&file_path, &item_id, start_time, app).await
 }
 
 pub type ShortcutActionMap =
@@ -521,6 +540,94 @@ pub fn get_cache_dir() -> Result<String, String> {
     directories::ProjectDirs::from("com", "skald", "Skald")
         .map(|dirs| dirs.cache_dir().to_string_lossy().into_owned())
         .ok_or_else(|| "Could not determine cache directory".to_string())
+}
+
+// Flush offline progress entries to the server after reconnecting.
+// Uses latest-wins conflict resolution — the local recorded_at timestamp
+// is not sent; we simply write what we have. If the server has newer
+// progress (e.g. from another device used while offline), the server's
+// value will be overwritten only if our recorded_at is more recent.
+// For simplicity in v0.1.0, always write local progress on reconnect.
+#[tauri::command]
+pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let client = AbsClient::new(server_url).with_token(token);
+    let dl_dir = downloads::downloads_dir()?;
+    // Snapshot the queue before iterating so remove_progress_entry modifies the
+    // file independently of our iteration — no borrow-checker conflict.
+    let queue = downloads::load_progress_queue(&dl_dir);
+    if queue.is_empty() { return Ok(0); }
+    let mut flushed: u32 = 0;
+    for entry in &queue {
+        match client.update_progress(&entry.item_id, entry.current_time, entry.duration, entry.is_finished).await {
+            Ok(()) => {
+                // Remove only after a confirmed server write — ensures the entry
+                // survives for a retry if the app closes between syncs.
+                let _ = downloads::remove_progress_entry(&dl_dir, &entry.item_id);
+                flushed += 1;
+            }
+            Err(e) => {
+                // Non-fatal — log and continue; the entry stays for the next flush.
+                eprintln!("[flush_offline_progress] failed to sync {}: {e}", entry.item_id);
+            }
+        }
+    }
+    eprintln!("[flush_offline_progress] synced {flushed} of {} entries", queue.len());
+    Ok(flushed)
+}
+
+// Returns the offline progress queue entry for a specific item, or None if
+// no entry exists. Used by the offline playback path to restore the last
+// known position when st.mediaProgress is empty (server unreachable and no
+// cached server progress available).
+#[tauri::command]
+pub fn get_offline_progress(item_id: String) -> Result<Option<downloads::OfflineProgressEntry>, String> {
+    let dl_dir = downloads::downloads_dir()?;
+    let queue = downloads::load_progress_queue(&dl_dir);
+    // upsert_progress_entry keeps at most one entry per item_id, so find() is sufficient.
+    Ok(queue.into_iter().find(|e| e.item_id == item_id))
+}
+
+// Saves chapter data for a specific item to a per-item JSON cache file.
+// Called after every successful fetchItem so offline playback has chapters.
+// Stored separately from the library cache because the bulk library endpoint
+// returns chapters: [] — only the single-item fetchItem response has real data.
+#[tauri::command]
+pub async fn save_chapter_cache(
+    item_id: String,
+    chapters: serde_json::Value,
+) -> Result<(), String> {
+    let cache_path = std::path::PathBuf::from(get_cache_dir()?)
+        .join(format!("chapters_{}.json", item_id));
+    // Ensure the cache directory exists before writing — get_cache_dir() resolves
+    // the path but does not create it.
+    std::fs::create_dir_all(cache_path.parent().unwrap_or(&cache_path))
+        .map_err(|e| format!("Create dir failed: {e}"))?;
+    eprintln!("[chapter_cache] saving to: {}", cache_path.display());
+    let json = serde_json::to_string(&chapters)
+        .map_err(|e| format!("Serialize failed: {e}"))?;
+    std::fs::write(&cache_path, json)
+        .map_err(|e| format!("Write failed: {e}"))?;
+    eprintln!("[chapter_cache] saved successfully");
+    Ok(())
+}
+
+// Loads chapter data for a specific item from the per-item cache file.
+// Returns None if no cache exists yet (e.g. the book was never opened online).
+#[tauri::command]
+pub async fn load_chapter_cache(
+    item_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let cache_path = std::path::PathBuf::from(get_cache_dir()?)
+        .join(format!("chapters_{}.json", item_id));
+    // Missing file is normal on first offline launch — not an error.
+    if !cache_path.exists() { return Ok(None); }
+    let json = std::fs::read_to_string(&cache_path)
+        .map_err(|e| format!("Read failed: {e}"))?;
+    let val = serde_json::from_str(&json)
+        .map_err(|e| format!("Parse failed: {e}"))?;
+    Ok(Some(val))
 }
 
 // Saves the library to a local JSON cache file so it can be loaded
@@ -801,7 +908,7 @@ pub async fn download_item(
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
 
     // Resolve and create the downloads directory (e.g. AppData\Local\skald\Skald\downloads).
-    let dl_dir = downloads_dir()?;
+    let dl_dir = downloads::downloads_dir()?;
     std::fs::create_dir_all(&dl_dir)
         .map_err(|e| format!("Failed to create downloads directory: {e}"))?;
 
@@ -1100,7 +1207,7 @@ pub async fn cancel_download(
 /// Called by Settings → Downloads on mount to populate the downloads list.
 #[tauri::command]
 pub fn get_downloads() -> Result<Vec<downloads::DownloadRecord>, String> {
-    let dir = downloads_dir()?;
+    let dir = downloads::downloads_dir()?;
     // If the directory does not yet exist, no downloads have been taken; return empty.
     if !dir.exists() {
         return Ok(Vec::new());
@@ -1116,7 +1223,7 @@ pub fn get_downloads() -> Result<Vec<downloads::DownloadRecord>, String> {
 /// registry is already clean.
 #[tauri::command]
 pub fn remove_download(item_id: String) -> Result<(), String> {
-    let dir = downloads_dir()?;
+    let dir = downloads::downloads_dir()?;
     let records = downloads::load_registry(&dir);
 
     // Capture any directory-removal error without short-circuiting —

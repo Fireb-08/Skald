@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache } from '../api/abs';
 
 export type { User };
 import {
@@ -508,6 +508,9 @@ export function useOnyxState(): OnyxState {
         // Persist the library to disk after every successful fetch so it is
         // available offline on next launch.
         saveLibraryCache(items).catch(e => console.error('[library] cache save failed:', e));
+        // Flush any offline progress that was queued while the server was unreachable.
+        // Fire-and-forget; no toast here — the reconnect handler shows one if needed.
+        flushOfflineProgress(serverUrl).catch(e => console.error('[offline] startup flush failed:', e));
       } catch (e) {
         console.warn('[library] fetch failed, attempting cache fallback:', e);
         try {
@@ -571,8 +574,47 @@ export function useOnyxState(): OnyxState {
     if (!serverUrl || !authToken || !currentBookId) { setCurrentBookChapters([]); return; }
     let cancelled = false;
     fetchItem(serverUrl, currentBookId)
-      .then(item => { if (!cancelled) setCurrentBookChapters(bookChapters(item)); })
-      .catch(e => console.error('[chapters] fetchItem failed:', e));
+      .then(item => {
+        if (cancelled) return;
+        // fetchItem returns the full item including detailed chapter data.
+        const chapters = bookChapters(item);
+        if (chapters.length > 0) {
+          // Server returned chapter data — use it (most accurate source).
+          setCurrentBookChapters(chapters);
+          // Persist chapters to disk after every successful online fetch so they
+          // are available for offline playback. The bulk library endpoint returns
+          // chapters: [] — only the single-item fetchItem endpoint has real data.
+          saveChapterCache(currentBookId, item.media.chapters)
+            .catch(e => console.error('[chapters] cache save failed:', e));
+        } else {
+          // Server returned the item but with no chapters — unusual but possible
+          // on some ABS versions. The per-item cache may still have real data
+          // from a prior fetch, so attempt to load it before giving up.
+          loadChapterCache(currentBookId)
+            .then(cached => {
+              if (!cancelled && cached && Array.isArray(cached) && cached.length > 0) {
+                // Map raw ABS chapter objects to the onyx Chapter shape.
+                setCurrentBookChapters(bookChapters({ media: { chapters: cached } } as LibraryItem));
+              }
+            })
+            .catch(e => console.error('[chapters] cache load (empty-response path) failed:', e));
+        }
+      })
+      .catch(async e => {
+        console.error('[chapters] fetchItem failed:', e);
+        if (cancelled) return;
+        // The bulk library endpoint sends chapters: [] — the per-item cache written
+        // by the online path above is the only source with real chapter data.
+        try {
+          const cached = await loadChapterCache(currentBookId);
+          if (cached && Array.isArray(cached) && cached.length > 0) {
+            // Map raw ABS chapter objects to the onyx Chapter shape.
+            setCurrentBookChapters(bookChapters({ media: { chapters: cached } } as LibraryItem));
+          }
+        } catch (ce) {
+          console.error('[chapters] cache load failed:', ce);
+        }
+      });
     return () => { cancelled = true; };
   }, [currentBookId, serverUrl, authToken]);
 

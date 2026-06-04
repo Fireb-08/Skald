@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { closeActiveSession, connectSocket, disconnectSocket } from './api/abs';
+import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe } from './api/abs';
 import Toast from './components/ui/Toast';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import DownloadProgressToast from './components/downloads/DownloadProgressToast';
@@ -81,9 +81,26 @@ export default function App() {
     }).then(fn => { unlistenDisconnected = fn; });
 
     // socket-reconnected fires after the socket re-authenticates following a drop.
-    listen('socket-reconnected', () => {
+    listen('socket-reconnected', async () => {
       if (localStorage.getItem('onyx.sync.live') === 'true') {
         st.setToast({ message: 'Live sync restored', type: 'success' });
+      }
+      // When live sync reconnects after an offline period, flush any progress
+      // updates that were queued locally during the disconnection window.
+      try {
+        const count = await flushOfflineProgress(st.serverUrl);
+        if (count > 0) {
+          // Override the "live sync restored" toast with a more informative one.
+          st.setToast({
+            message: `Synced ${count} offline progress update${count > 1 ? 's' : ''} to server`,
+            type: 'success',
+          });
+          // Refresh mediaProgress so cover overlays and Pick it up reflect the synced values.
+          const me = await getMe(st.serverUrl);
+          st.setMediaProgress(me.mediaProgress);
+        }
+      } catch (e) {
+        console.error('[offline] progress flush failed:', e);
       }
     }).then(fn => { unlistenReconnected = fn; });
 

@@ -94,6 +94,14 @@ pub fn run() {
             // Library disk cache — read/write for offline launch fallback
             commands::save_library_cache,
             commands::load_library_cache,
+            // Per-item chapter cache — bulk library endpoint omits chapter data;
+            // this cache is written from fetchItem results while online.
+            commands::save_chapter_cache,
+            commands::load_chapter_cache,
+            // Offline progress queue — flush queued entries to the server on reconnect
+            commands::flush_offline_progress,
+            // Read one entry from the queue — used to restore position on offline launch
+            commands::get_offline_progress,
             commands::close_active_session,
             commands::close_all_open_sessions,
             commands::delete_item,
@@ -159,6 +167,38 @@ pub fn run() {
                             // the lock — prevents a racing 10-second sync from firing
                             // between the lock release and the close HTTP request below.
                             guard.cancel_tasks();
+
+                            // ── Local playback shutdown path ───────────────────────────
+                            // If the session was a local file, write the final position to
+                            // the offline progress queue and return — there is no server
+                            // session to close so no HTTP call is needed.
+                            if guard.is_local {
+                                if let Some(ref item_id) = guard.local_item_id {
+                                    let pos = *guard.current_time.lock().unwrap();
+                                    // Read duration directly from the player.
+                                    let dur = {
+                                        let p = guard.player.lock().unwrap();
+                                        p.as_ref().map(|pl| pl.duration()).unwrap_or(0.0)
+                                    };
+                                    if let Ok(dl_dir) = downloads::downloads_dir() {
+                                        let entry = downloads::OfflineProgressEntry {
+                                            item_id: item_id.clone(),
+                                            current_time: pos,
+                                            duration: dur,
+                                            progress: if dur > 0.0 { pos / dur } else { 0.0 },
+                                            is_finished: false,
+                                            recorded_at: std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis() as i64,
+                                        };
+                                        let _ = downloads::upsert_progress_entry(&dl_dir, entry);
+                                        eprintln!("[shutdown] offline progress queued for {item_id} at {pos:.1}s");
+                                    }
+                                }
+                                return; // no server session — nothing more to do
+                            }
+
                             match guard.session_id.clone() {
                                 None => return,
                                 Some(id) => (
