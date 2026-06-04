@@ -27,6 +27,11 @@ Lightbringer Saga #3
 # Tauri
 src-tauri/WixTools/
 
+# Code-signing certificates and secrets — never commit these
+*.pfx
+*.p12
+.env
+
 # Bundled VLC runtime — populated locally from the VLC installation.
 # Not committed; build.rs copies these to the binary output directory.
 src-tauri/vlc-dist/

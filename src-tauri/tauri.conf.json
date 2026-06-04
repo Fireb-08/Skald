@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["msi", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +39,21 @@
     "resources": {
       "vlc-dist/libvlc.dll": "libvlc.dll",
       "vlc-dist/libvlccore.dll": "libvlccore.dll"
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": false
+    },
+    "nsis": {
+      "displayLanguageSelector": false,
+      "installerIcon": "icons/icon.ico",
+      "headerImage": null,
+      "sidebarImage": null,
+      "installMode": "currentUser"
+    },
+    "msi": {
+      "enableElevatedUpdateTask": false
     }
   }
 }
