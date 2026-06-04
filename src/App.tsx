@@ -1,10 +1,10 @@
 // Root application component. Renders the Saga login screen when the user
 // has no saved auth token; otherwise renders the main library/player shell.
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe } from './api/abs';
+import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint } from './api/abs';
 import Toast from './components/ui/Toast';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import DownloadProgressToast from './components/downloads/DownloadProgressToast';
@@ -117,18 +117,30 @@ export default function App() {
   // a chance to initiate session close before the window disappears.  The
   // Rust ExitRequested handler is the authoritative close path; this is a
   // belt-and-suspenders safety net only.
+
+  // Refs let the beforeunload handler (registered with empty deps) see the
+  // current book/position without capturing stale closure values.
+  const stopBookRef = useRef('');
+  const stopPosRef  = useRef(0);
+  useEffect(() => { stopBookRef.current = st.currentBookId; }, [st.currentBookId]);
+  useEffect(() => { stopPosRef.current  = st.position;      }, [st.position]);
+
   useEffect(() => {
     const handleBeforeUnload = () => {
       // Best-effort session close on window dismiss — fire-and-forget since
       // beforeunload cannot await async operations. The Rust ExitRequested
       // handler is the authoritative close; this is a safety net only.
       closeActiveSession().catch(() => {});
+      // Record a local stop point so position is preserved even if server sync fails.
+      if (stopBookRef.current && stopPosRef.current > 0) {
+        recordStopPoint(stopBookRef.current, stopPosRef.current).catch(() => {});
+      }
     };
 
     // Register once on mount; clean up if the component ever unmounts.
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []); // empty deps — register once for the lifetime of the app
+  }, []); // empty deps — handler uses refs, not captured state
 
   // ── Auth gate ───────────────────────────────────────────────────────────
   // st.authToken is initialised synchronously from localStorage, so this

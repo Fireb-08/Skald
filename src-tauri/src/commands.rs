@@ -1353,3 +1353,22 @@ pub async fn close_session(
         .await
 }
 
+// record_stop_point — writes a local position snapshot for the given book.
+// Called from the frontend at pause, book-switch, and app-close.
+// Reuses the downloads directory so no additional path resolution is needed.
+#[tauri::command]
+pub fn record_stop_point(item_id: String, position: f64) -> Result<(), String> {
+    let data_dir = downloads::downloads_dir()?;
+    // Ensure the directory exists — it may not exist if the user has never downloaded anything.
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("Create dir: {e}"))?;
+    downloads::record_stop_point(&data_dir, &item_id, position)
+}
+
+// get_stop_points — returns the stop-point log for a book, most recent first.
+// Returns an empty vec when no history exists; never errors on a missing file.
+#[tauri::command]
+pub fn get_stop_points(item_id: String) -> Result<Vec<downloads::LocalStopPoint>, String> {
+    let data_dir = downloads::downloads_dir()?;
+    Ok(downloads::load_stop_points(&data_dir, &item_id))
+}
+
