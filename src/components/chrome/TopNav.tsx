@@ -20,8 +20,8 @@ export default function TopNav({ st }: TopNavProps) {
   }, [st.showHome, st.screen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    {/* overflow: visible — active tab underline protrudes below via position:absolute, must not be clipped */}
     <Glass translucent={st.translucent} style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 18, overflow: 'visible' }}>
+      {/* overflow: visible — active tab underline protrudes below via position:absolute, must not be clipped */}
       {items.map(n => {
         const active = st.screen === n.id;
         return (
