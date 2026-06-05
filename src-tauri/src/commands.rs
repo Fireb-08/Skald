@@ -229,6 +229,22 @@ pub async fn get_library_series(
         .await
 }
 
+/// Fetch books belonging to one series using the ABS server-side filter.
+/// The series_id must be Base64-encoded by the API layer before appending to the filter param.
+#[tauri::command]
+pub async fn get_series_items(
+    server_url: String,
+    library_id: String,
+    series_id: String,
+) -> Result<Vec<models::LibraryItem>, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .get_series_items(&library_id, &series_id)
+        .await
+}
+
 #[tauri::command]
 pub async fn get_continue_listening(
     server_url: String,

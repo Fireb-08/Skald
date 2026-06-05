@@ -82,6 +82,7 @@ pub fn run() {
             commands::fetch_libraries,
             commands::fetch_library_items,
             commands::get_library_series,
+            commands::get_series_items,
             commands::get_continue_listening,
             commands::fetch_item,
             commands::fetch_listening_stats,

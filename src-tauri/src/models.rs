@@ -66,6 +66,7 @@ pub struct CollectionsResponse {
 }
 
 /// A single series returned by GET /api/libraries/{id}/series.
+/// The series endpoint returns each series with its books array already populated.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LibrarySeries {
@@ -75,6 +76,9 @@ pub struct LibrarySeries {
     pub name_ignore_prefix: String,
     #[serde(default)]
     pub num_books: u32,
+    /// Books belonging to this series — populated by the series endpoint directly.
+    #[serde(default)]
+    pub books: Vec<LibraryItem>,
 }
 
 /// Wrapper for GET /api/libraries/{id}/series response.
