@@ -126,7 +126,8 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
             <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {isLibrary && st.contextFilter ? st.contextFilter.value : 'The shelf'}
+              {/* Always show "The shelf" — active filter is already indicated by the filter pill below */}
+              The shelf
             </div>
             {isLibrary && st.contextFilter && (
               <button onClick={() => st.setContextFilter(null)} style={{
