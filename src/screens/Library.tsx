@@ -25,8 +25,8 @@ export default function Library({ st }: LibraryProps) {
   }, [st.library, st.serverUrl, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    {/* overflow: visible required — TopNav active tab indicator protrudes below nav bar via position:absolute */}
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>
+      {/* overflow: visible required — TopNav active tab indicator protrudes below nav bar via position:absolute */}
       {/* Left slot: GreetingPane until the user starts playback, then FocusPanel.
           currentBookId is '' on cold launch and only set by playBook(), so
           clicking a shelf book (which sets focusedBookId only) leaves the pane intact.
