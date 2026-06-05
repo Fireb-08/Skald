@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import Icon from '../Icon';
@@ -100,9 +101,12 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
         </span>
       </button>
 
-      {st.deviceOpen && (
-        // Fixed positioning with viewport coordinates so the panel escapes any
-        // overflow-clipping ancestor (Glass panels, scrollable containers, etc.).
+      {/* Portal to document.body so the panel renders outside #root entirely.
+          InterfaceScalePicker applies transform:scale() to #root, which makes
+          position:fixed children position relative to that element rather than
+          the viewport — placing them off-screen. Portalling out of #root bypasses
+          the transform ancestor and restores true viewport-relative positioning. */}
+      {st.deviceOpen && ReactDOM.createPortal(
         <div
           ref={panelRef}
           style={{
@@ -115,7 +119,6 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
             borderRadius: 10,
             boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,166,74,0.08)',
             padding: 6,
-            // Elevated above all panels, Glass layers, and compact tab strips.
             zIndex: 9999,
           }}
         >
@@ -152,7 +155,8 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
               {d.id === st.device && <Icon name="dot" size={10} color="var(--onyx-accent)" />}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
