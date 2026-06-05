@@ -461,48 +461,58 @@ export default function MatchModal({ item, serverUrl, library, onClose, onComple
     return Array.from(names).sort();
   }, [library]);
 
+  /* Maps live item + search result into Option B field shape */
+  const buildFields = (src: SearchResult): MatchField[] => {
+    const m = item.media?.metadata;
+    const raw: Omit<MatchField, 'status'>[] = [
+      { key: 'cover',       label: 'Cover',       type: 'cover',    current: null,                        incoming: src.cover ?? null },
+      { key: 'title',       label: 'Title',       type: 'text',     current: m?.title ?? '',               incoming: src.title ?? '' },
+      { key: 'subtitle',    label: 'Subtitle',    type: 'text',     current: m?.subtitle ?? '',            incoming: src.subtitle ?? '' },
+      { key: 'author',      label: 'Author',      type: 'text',     current: m?.authorName ?? '',          incoming: src.author ?? '' },
+      { key: 'narrator',    label: 'Narrator',    type: 'text',     current: m?.narratorName ?? '',        incoming: src.narrator ?? '' },
+      { key: 'series',      label: 'Series',      type: 'text',     current: m?.seriesName ?? '',          incoming: seriesStr(src.series) },
+      { key: 'publisher',   label: 'Publisher',   type: 'text',     current: m?.publisher ?? '',           incoming: src.publisher ?? '' },
+      { key: 'year',        label: 'Year',        type: 'text',     current: m?.publishedYear ?? '',       incoming: src.publishedYear ?? '' },
+      { key: 'genres',      label: 'Genres',      type: 'chips',    current: m?.genres ?? [],              incoming: src.genres ?? [] },
+      { key: 'tags',        label: 'Tags',        type: 'chips',    current: item.media?.tags ?? [],       incoming: src.tags ?? [] },
+      { key: 'language',    label: 'Language',    type: 'text',     current: m?.language ?? '',            incoming: src.language ?? '' },
+      { key: 'isbn',        label: 'ISBN',        type: 'mono',     current: m?.isbn ?? '',                incoming: src.isbn ?? '' },
+      { key: 'asin',        label: 'ASIN',        type: 'mono',     current: '',                           incoming: src.asin ?? '' },
+      { key: 'description', label: 'Description', type: 'longtext', current: m?.description ?? '',         incoming: src.description ?? '' },
+    ];
+    return raw.map(f => ({ ...f, status: fieldStatus(f) }));
+  };
+
   // ── Field definitions — derived from item + selected ─────────────────────
   const fields = useMemo((): MatchField[] => {
     if (!selected) return [];
-    const incomingSeries = seriesStr(selected.series);
-    const raw: Omit<MatchField, 'status'>[] = [
-      { key: 'cover',       label: 'Cover',       type: 'cover',    current: null,                                         incoming: selected.cover ?? null },
-      { key: 'title',       label: 'Title',       type: 'text',     current: meta.title ?? '',                             incoming: selected.title ?? '' },
-      { key: 'subtitle',    label: 'Subtitle',    type: 'text',     current: meta.subtitle ?? '',                          incoming: selected.subtitle ?? '' },
-      { key: 'author',      label: 'Author',      type: 'text',     current: bookAuthor(item),                             incoming: selected.author ?? '' },
-      { key: 'narrator',    label: 'Narrator',    type: 'text',     current: meta.narratorName ?? '',                      incoming: selected.narrator ?? '' },
-      { key: 'series',      label: 'Series',      type: 'text',     current: meta.seriesName ?? '',                        incoming: incomingSeries },
-      { key: 'publisher',   label: 'Publisher',   type: 'text',     current: meta.publisher ?? '',                         incoming: selected.publisher ?? '' },
-      { key: 'year',        label: 'Year',        type: 'text',     current: meta.publishedYear ?? '',                     incoming: selected.publishedYear ?? '' },
-      { key: 'genres',      label: 'Genres',      type: 'chips',    current: meta.genres ?? [],                            incoming: selected.genres ?? [] },
-      { key: 'tags',        label: 'Tags',        type: 'chips',    current: item.media.tags ?? [],                        incoming: selected.tags ?? [] },
-      { key: 'language',    label: 'Language',    type: 'text',     current: meta.language ?? '',                          incoming: selected.language ?? '' },
-      { key: 'isbn',        label: 'ISBN',        type: 'mono',     current: meta.isbn ?? (meta as Record<string, unknown>).isbn13 as string ?? (meta as Record<string, unknown>).isbn10 as string ?? '', incoming: selected.isbn ?? '' },
-      { key: 'asin',        label: 'ASIN',        type: 'mono',     current: '',                                           incoming: selected.asin ?? '' },
-      { key: 'description', label: 'Description', type: 'longtext', current: meta.description ?? '',                       incoming: selected.description ?? '' },
-    ];
-    return raw.map(f => ({ ...f, status: fieldStatus(f) }));
-  }, [selected, item]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildFields(selected);
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changedFields = useMemo(() => fields.filter(f => f.status !== 'same'), [fields]);
   const sameFields    = useMemo(() => fields.filter(f => f.status === 'same'),  [fields]);
 
-  // Initialize base whenever a new result is selected (fields recomputes).
+  // Initialize base whenever a new result is selected.
   useEffect(() => {
-    if (fields.length === 0) return;
-    setBase(Object.fromEntries(changedFields.map(f => [f.key, 'incoming' as const])));
+    if (!selected) return;
+    const fs = buildFields(selected);
+    setBase(Object.fromEntries(
+      fs.filter(f => f.status !== 'same').map(f => [f.key, 'incoming' as const])
+    ));
     setEdits({});
     setEditingKey(null);
-  }, [fields]); // eslint-disable-line react-hooks/exhaustive-deps
+    setOnlyChanges(true);
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Option B helpers ──────────────────────────────────────────────────────
-  const resolve = (f: MatchField): unknown => {
+  // Resolve the value that will be saved for a field — edits take priority over base toggle
+  const resolveField = (f: MatchField): unknown => {
     if (edits[f.key] !== undefined) return edits[f.key];
     if (f.status === 'same') return f.current;
     return base[f.key] === 'incoming' ? f.incoming : f.current;
   };
   const isEdited  = (f: MatchField) => edits[f.key] !== undefined && normVal(edits[f.key]) !== normVal(f.incoming);
-  const isApplied = (f: MatchField) => normVal(resolve(f)) !== normVal(f.current);
+  const isApplied = (f: MatchField) => normVal(resolveField(f)) !== normVal(f.current);
 
   const toggle   = (k: string) => setBase(b => ({ ...b, [k]: b[k] === 'incoming' ? 'current' : 'incoming' }));
   const saveEdit = (k: string, v: unknown) => { setEdits(e => ({ ...e, [k]: v })); setEditingKey(null); };
@@ -554,7 +564,7 @@ export default function MatchModal({ item, serverUrl, library, onClose, onComple
       for (const f of fields) {
         if (f.key === 'cover') continue; // cover update requires separate endpoint
         if (!isApplied(f)) continue;
-        const val = resolve(f);
+        const val = resolveField(f);
         switch (f.key) {
           case 'title':       metadata.title         = val; break;
           case 'subtitle':    metadata.subtitle      = val; break;
@@ -741,7 +751,7 @@ export default function MatchModal({ item, serverUrl, library, onClose, onComple
                 <CompareRow
                   key={f.key} field={f}
                   base={base[f.key] as 'incoming' | 'current' | undefined}
-                  resolved={resolve(f)} edited={isEdited(f)} applied={isApplied(f)}
+                  resolved={resolveField(f)} edited={isEdited(f)} applied={isApplied(f)}
                   editing={editingKey === f.key}
                   onToggle={() => toggle(f.key)}
                   onStartEdit={() => setEditingKey(f.key)}
