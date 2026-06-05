@@ -292,7 +292,8 @@ export default function Player({ st }: PlayerProps) {
   // Collapse the synopsis to a hover popover when the window is too short to
   // show it inline alongside the cover. 500px matches the point where the cover
   // has already been shrunk to its minimum (120px) and no vertical space remains.
-  const synopsisCollapsed = containerHeight < 500;
+  // Collapse synopsis to a popover when the container is too short to show it inline.
+  const synopsisCollapsed = containerHeight < 620;
   // Controls visibility of the hover popover when synopsisCollapsed is true.
   const [synopsisOpen, setSynopsisOpen] = useState(false);
   // Ref on the SYNOPSIS label wrapper — measured on hover for portal positioning.
