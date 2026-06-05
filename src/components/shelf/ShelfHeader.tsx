@@ -150,37 +150,35 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
           )}
         </div>
 
-        {/* Wrapper clips the pill — flex-allocated width gives overflowX:auto a definite bound */}
-        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
-          <div
-            className="shelf-tab-pill"
-            style={{
-              display: 'flex',
-              alignItems: 'center', gap: 4, padding: '4px',
-              background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
-              borderRadius: 10,
-              flexWrap: 'nowrap',
-              overflowX: 'auto',
-              scrollbarWidth: 'none',
-              msOverflowStyle: 'none' as 'none',
-            }}
-          >
-            {TABS.map(t => {
-              const active = st.shelfTab === t.id;
-              return (
-                <button key={t.id} onClick={() => st.setShelfTab(t.id)} style={{
-                  // No flexShrink: 0 — buttons compress at small widths so Collections stays visible.
-                  padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
-                  background: active ? 'var(--onyx-accent-dim)' : 'transparent',
-                  border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-                  color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
-                  fontSize: 12, fontWeight: active ? 600 : 500,
-                  whiteSpace: 'nowrap',
-                }}>
-                  {t.label}
-                </button>
-              );
-            })}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
+            background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
+            borderRadius: 10, flexWrap: 'nowrap',
+          }}>
+            {TABS
+              .filter(t => {
+                // Hide Collections tab when horizontal space is insufficient.
+                // containerWidth measures the full ShelfHeader; 400px leaves enough room
+                // for all other tabs. Adjust threshold after testing if needed.
+                if (t.id === 'collections' && containerWidth <= 400) return false;
+                return true;
+              })
+              .map(t => {
+                const active = st.shelfTab === t.id;
+                return (
+                  <button key={t.id} onClick={() => st.setShelfTab(t.id)} style={{
+                    padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
+                    background: active ? 'var(--onyx-accent-dim)' : 'transparent',
+                    border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,
+                    color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
+                    fontSize: 12, fontWeight: active ? 600 : 500,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {t.label}
+                  </button>
+                );
+              })}
           </div>
         </div>
 
