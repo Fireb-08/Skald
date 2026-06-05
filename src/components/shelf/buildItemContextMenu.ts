@@ -1,6 +1,6 @@
 import { bookAuthor, type LibraryItem, type OnyxState, type MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem } from '../ContextMenu';
-import { updateProgress, deleteProgress, getMe, closeActiveSession, rescanItem, deleteItem, downloadItem, removeDownload } from '../../api/abs';
+import { updateProgress, deleteProgress, closeActiveSession, rescanItem, deleteItem, downloadItem, removeDownload } from '../../api/abs';
 // Canonical play function — routes through shared resume and UI-sync logic
 import { playBook } from '../../api/playbook';
 
@@ -18,15 +18,6 @@ export function buildItemContextMenu(
   // Used to toggle the first menu item between Download and Delete Download.
   // Prevents duplicate downloads and gives a shelf-level management action.
   const existingDownload = st.downloads.find(d => d.itemId === item.id);
-
-  const refreshProgress = async () => {
-    try {
-      const me = await getMe(st.serverUrl);
-      st.setMediaProgress(me.mediaProgress);
-    } catch (e) {
-      console.error('[ctx] refresh progress failed:', e);
-    }
-  };
 
   const items: ContextMenuItem[] = [
     existingDownload
@@ -126,13 +117,22 @@ export function buildItemContextMenu(
     },
     {
       label: 'Remove from Continue Listening',
-      onClick: async () => {
-        try {
-          await deleteProgress(st.serverUrl, item.id);
-          await refreshProgress();
-        } catch (e) {
-          console.error('[ctx] delete progress failed:', e);
+      onClick: () => {
+        // The DELETE endpoint requires the progress record's own id, not the library item id.
+        const progressRecord = st.mediaProgress.find(p => p.libraryItemId === item.id);
+        if (!progressRecord) {
+          st.setToast({ message: 'No progress record found for this book.', type: 'info' });
+          return;
         }
+        const title = item.media?.metadata?.title ?? item.id;
+        deleteProgress(st.serverUrl, progressRecord.id)
+          .then(() => {
+            st.setMediaProgress(st.mediaProgress.filter(p => p.id !== progressRecord.id));
+            st.setToast({ message: `Removed "${title}" from Continue Listening`, type: 'success' });
+          })
+          .catch(e => {
+            st.setToast({ message: `Failed to remove: ${String(e)}`, type: 'error' });
+          });
       },
     },
   ];
