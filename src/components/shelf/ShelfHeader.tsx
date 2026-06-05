@@ -126,10 +126,16 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
             <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 500, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {/* Always show "The shelf" — active filter is already indicated by the filter pill below */}
+              {/* Always show "The shelf" — active filter is indicated by the pill row below */}
               The shelf
             </div>
-            {isLibrary && st.contextFilter && (
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {subtitleText}
+          </div>
+          {/* Context filter pill — own row beneath the shelf title, left-aligned */}
+          {isLibrary && st.contextFilter && (
+            <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 6 }}>
               <button onClick={() => st.setContextFilter(null)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px 4px 10px',
                 background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', borderRadius: 999,
@@ -140,11 +146,8 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
                 {st.contextFilter.value}
                 <span style={{ fontSize: 13, marginLeft: 2, lineHeight: 1 }}>×</span>
               </button>
-            )}
-          </div>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            {subtitleText}
-          </div>
+            </div>
+          )}
         </div>
 
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', minWidth: 0 }}>
