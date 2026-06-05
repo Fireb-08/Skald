@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import Icon from '../Icon';
 import { getAudioDevices, setAudioDevice } from '../../api/abs';
@@ -6,9 +7,13 @@ import type { AudioDevice } from '../../api/abs';
 
 export interface DeviceSelectorProps {
   st: OnyxState;
+  // Compact variant: shows icon only, no device name — used in the transport bar.
+  compact?: boolean;
+  // Optional outer style override — used to constrain width in transport slot.
+  style?: CSSProperties;
 }
 
-export default function DeviceSelector({ st }: DeviceSelectorProps) {
+export default function DeviceSelector({ st, compact, style }: DeviceSelectorProps) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const ref = useRef<HTMLDivElement>(null);
   const mono = "'JetBrains Mono', ui-monospace, monospace";
@@ -36,11 +41,13 @@ export default function DeviceSelector({ st }: DeviceSelectorProps) {
   const current = devices.find(d => d.id === st.device) ?? devices[0];
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    // Outer style prop allows the parent to constrain width (e.g. maxWidth: 120 in compact slot).
+    <div ref={ref} style={{ position: 'relative', ...style }}>
       <button
         onClick={() => st.setDeviceOpen(!st.deviceOpen)}
         style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px 6px 12px',
+          display: 'flex', alignItems: 'center', gap: compact ? 6 : 10,
+          padding: compact ? '6px 10px' : '6px 10px 6px 12px',
           border: `1px solid ${st.deviceOpen ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
           borderRadius: 8,
           background: st.deviceOpen ? 'var(--onyx-accent-dim)' : 'var(--onyx-glass)',
@@ -50,9 +57,12 @@ export default function DeviceSelector({ st }: DeviceSelectorProps) {
       >
         <span style={{ width: 6, height: 6, borderRadius: 3, background: '#5ac88a', boxShadow: '0 0 6px #5ac88a' }} />
         <Icon name="headphones" size={14} color="var(--onyx-text-dim)" />
-        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, textAlign: 'left' }}>
-          <span style={{ fontSize: 11.5, color: 'var(--onyx-text)' }}>{current?.name ?? 'Audio output'}</span>
-        </div>
+        {/* Device name — hidden in compact mode to fit the narrow transport slot */}
+        {!compact && (
+          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.1, textAlign: 'left' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--onyx-text)' }}>{current?.name ?? 'Audio output'}</span>
+          </div>
+        )}
         <span style={{
           color: 'var(--onyx-text-dim)', marginLeft: 4,
           display: 'inline-flex',

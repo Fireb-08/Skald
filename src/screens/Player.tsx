@@ -503,10 +503,13 @@ export default function Player({ st }: PlayerProps) {
         </button>
         <span>·</span>
         <span>{bSeries}</span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 'normal' }}>
-          <VolumeControl st={st} />
-          <DeviceSelector st={st} />
-        </div>
+        {/* Volume and device controls — hidden in compact mode, they move to the transport bar */}
+        {!isCompact && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 'normal' }}>
+            <VolumeControl st={st} />
+            <DeviceSelector st={st} />
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, display: 'flex', gap: 32, alignItems: 'stretch', minHeight: 0, overflow: 'hidden' }}>
@@ -680,8 +683,12 @@ export default function Player({ st }: PlayerProps) {
 
               <div ref={transportRef} style={{ marginTop: isCompact ? 6 : 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
 
-              {/* Left group — speed pills; fixed width to balance the right group */}
-              <div style={{ flex: '0 0 auto', minWidth: 160, display: 'flex', gap: 6 }}>
+              {/* Left group — speed pills normally; volume control in compact (speed recovers when window grows) */}
+              {isCompact ? (
+                // Compact: volume slider replaces the speed pills to reclaim horizontal space.
+                <VolumeControl st={st} compact style={{ flex: '0 0 auto', minWidth: 0, maxWidth: 120 }} />
+              ) : null}
+              <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: isCompact ? 'none' : 'flex', gap: 6 }}>
                 {transportWidth >= 620 && !isCompact ? (
                   SPEEDS.map(s => (
                     <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(console.error); }} style={{
@@ -738,9 +745,12 @@ export default function Player({ st }: PlayerProps) {
                 </button>
               </div>
 
-              {/* Right group — secondary controls (bookmark, sleep timer); matches left group
-                  width so the center group remains geometrically centered regardless of content */}
-              <div style={{ flex: '0 0 auto', minWidth: 160, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              {/* Right group — bookmark/sleep normally; device selector in compact */}
+              {isCompact && (
+                // Compact: device selector replaces bookmark/sleep to reclaim horizontal space.
+                <DeviceSelector st={st} compact style={{ flex: '0 0 auto', minWidth: 0, maxWidth: 120 }} />
+              )}
+              <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: isCompact ? 'none' : 'flex', justifyContent: 'flex-end', gap: 8 }}>
                 <button onClick={addBookmark} style={isCompact ? { ...transportBtnSmall(), width: 28, height: 28 } : transportBtnSmall()} title="Bookmark this moment">
                   <Icon name="bookmark" size={isCompact ? 11 : 15} />
                 </button>
