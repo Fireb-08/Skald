@@ -284,6 +284,13 @@ export default function Player({ st }: PlayerProps) {
   const maxByWidth  = Math.max(120, Math.round(leftColumnWidth * 0.85));
   const coverSize   = Math.min(maxByHeight, maxByWidth, leftColumnWidth);
 
+  // Collapse the synopsis to a hover popover when the window is too short to
+  // show it inline alongside the cover. 500px matches the point where the cover
+  // has already been shrunk to its minimum (120px) and no vertical space remains.
+  const synopsisCollapsed = containerHeight < 500;
+  // Controls visibility of the hover popover when synopsisCollapsed is true.
+  const [synopsisOpen, setSynopsisOpen] = useState(false);
+
   const waveformRef = useRef<HTMLDivElement>(null);
   const [waveWidth, setWaveWidth] = useState(600);
 
@@ -525,25 +532,79 @@ export default function Player({ st }: PlayerProps) {
               </>}
             </div>
 
-            {/* Synopsis */}
-            <div style={{ marginTop: 24, width: '100%', textAlign: 'left', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 8 }}>
-                Synopsis
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto' }}>
-                {b.media?.metadata?.description ? (
-                  <div
-                    style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
-                    dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
-                  />
-                ) : (
-                  <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
-                    No synopsis available.
-                  </div>
-                )}
+            {/* Synopsis — inline when space allows, collapsed to hover popover when cramped */}
+            {synopsisCollapsed ? (
+              // Window too short to show synopsis inline: render a dotted SYNOPSIS label
+              // that reveals the full text in a floating popover on hover.
+              <div style={{ marginTop: 16, width: '100%', textAlign: 'left' }}>
+                <div
+                  style={{ position: 'relative', display: 'inline-block' }}
+                  onMouseEnter={() => setSynopsisOpen(true)}
+                  onMouseLeave={() => setSynopsisOpen(false)}
+                >
+                  {/* Dotted underline signals that hovering reveals more content */}
+                  <span style={{
+                    fontSize: 10,
+                    fontFamily: MONO,
+                    letterSpacing: '0.14em',
+                    textTransform: 'uppercase' as const,
+                    color: 'var(--onyx-text-mute)',
+                    cursor: 'default',
+                    borderBottom: '1px dotted var(--onyx-text-mute)',
+                    paddingBottom: 1,
+                  }}>
+                    Synopsis
+                  </span>
 
+                  {/* Popover — floats above the label, scrollable for long descriptions */}
+                  {synopsisOpen && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      zIndex: 200,
+                      width: 280,
+                      maxHeight: 320,
+                      overflowY: 'auto',
+                      background: 'var(--onyx-panel)',
+                      border: '1px solid var(--onyx-glass-edge)',
+                      borderRadius: 8,
+                      padding: '12px 14px',
+                      fontSize: 13,
+                      color: 'var(--onyx-text)',
+                      lineHeight: 1.6,
+                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                      marginBottom: 6,
+                    }}>
+                      {b.media?.metadata?.description ? (
+                        <div dangerouslySetInnerHTML={{ __html: b.media.metadata.description }} />
+                      ) : (
+                        <span style={{ fontStyle: 'italic', color: 'var(--onyx-text-mute)' }}>No synopsis available.</span>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              // Normal inline synopsis — full scrollable block when there is enough room.
+              <div style={{ marginTop: 24, width: '100%', textAlign: 'left', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 8 }}>
+                  Synopsis
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto' }}>
+                  {b.media?.metadata?.description ? (
+                    <div
+                      style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
+                      dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
+                    />
+                  ) : (
+                    <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
+                      No synopsis available.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
