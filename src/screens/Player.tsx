@@ -745,12 +745,12 @@ export default function Player({ st }: PlayerProps) {
                 </button>
               </div>
 
-              {/* Right group — bookmark/sleep normally; device selector in compact */}
-              {isCompact && (
-                // Compact: device selector replaces bookmark/sleep to reclaim horizontal space.
-                <DeviceSelector st={st} compact style={{ flex: '0 0 auto', minWidth: 0, maxWidth: 120 }} />
-              )}
-              <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: isCompact ? 'none' : 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              {/* Right group — device selector (compact only) + bookmark + sleep timer; visible in both compact and full modes */}
+              <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: 'flex' /* Visible in both compact and full modes */, justifyContent: 'flex-end', gap: 8 }}>
+                {isCompact && (
+                  /* In compact mode, device selector moves here to sit left of bookmark/sleep */
+                  <DeviceSelector st={st} compact style={{ flex: '0 0 auto', minWidth: 0, maxWidth: 120 }} />
+                )}
                 <button onClick={addBookmark} style={isCompact ? { ...transportBtnSmall(), width: 28, height: 28 } : transportBtnSmall()} title="Bookmark this moment">
                   <Icon name="bookmark" size={isCompact ? 11 : 15} />
                 </button>
