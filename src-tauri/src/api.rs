@@ -144,6 +144,39 @@ impl AbsClient {
         Ok(body.results)
     }
 
+    /// GET /api/libraries/{id}/items?filter=series.{base64_id} — returns books for one series.
+    ///
+    /// ABS server-side filter format: "group.value" where value is the Base64-encoded ID.
+    /// Base64 encoding is REQUIRED — the server rejects unencoded IDs silently (returns empty).
+    pub async fn get_series_items(&self, library_id: &str, series_id: &str) -> Result<Vec<LibraryItem>, String> {
+        use base64::Engine;
+        // Standard Base64 encoding (not URL-safe) is what ABS expects.
+        let encoded_id = base64::engine::general_purpose::STANDARD.encode(series_id);
+
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            results: Vec<LibraryItem>,
+        }
+
+        let resp = self
+            .http
+            .get(format!(
+                "{}/api/libraries/{library_id}/items?filter=series.{encoded_id}",
+                self.root()
+            ))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_series_items failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.results)
+    }
+
     /// GET /api/libraries/{id}/personalized — returns the continue-listening shelf entities.
     /// The endpoint returns multiple named shelves; we extract only "continue-listening".
     pub async fn get_continue_listening(&self, library_id: &str) -> Result<Vec<LibraryItem>, String> {
