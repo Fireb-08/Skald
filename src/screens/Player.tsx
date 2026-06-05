@@ -284,6 +284,10 @@ export default function Player({ st }: PlayerProps) {
   const maxByWidth  = Math.max(120, Math.round(leftColumnWidth * 0.85));
   const coverSize   = Math.min(maxByHeight, maxByWidth, leftColumnWidth);
 
+  // Compact mode: reduce transport bar chrome when the window is too short for
+  // the full layout. At 600px the waveform, buttons, and spacing are halved.
+  const isCompact = containerHeight < 600;
+
   // Collapse the synopsis to a hover popover when the window is too short to
   // show it inline alongside the cover. 500px matches the point where the cover
   // has already been shrunk to its minimum (120px) and no vertical space remains.
@@ -667,14 +671,14 @@ export default function Player({ st }: PlayerProps) {
               </div>
 
               <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
-                <Waveform width={waveWidth} height={72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
+                <Waveform width={waveWidth} height={isCompact ? 36 : 72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
               </div>
 
-              <div ref={transportRef} style={{ marginTop: 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
+              <div ref={transportRef} style={{ marginTop: isCompact ? 6 : 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
 
               {/* Left group — speed pills; fixed width to balance the right group */}
               <div style={{ flex: '0 0 auto', minWidth: 160, display: 'flex', gap: 6 }}>
-                {transportWidth >= 620 ? (
+                {transportWidth >= 620 && !isCompact ? (
                   SPEEDS.map(s => (
                     <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(console.error); }} style={{
                       padding: '7px 12px', borderRadius: 6, fontFamily: MONO, fontSize: 11,
@@ -713,28 +717,28 @@ export default function Player({ st }: PlayerProps) {
               {/* Center group — primary transport controls; flex: 1 with centered content
                   ensures play/pause/skip always sit at the geometric center of the row */}
               <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 14 }}>
-                <button onClick={() => seekAudio(Math.max(0, st.position - 30)).catch(console.error)} title="Back 30s" style={transportBtn()}>
-                  <Icon name="skip-back" size={20} />
+                <button onClick={() => seekAudio(Math.max(0, st.position - 30)).catch(console.error)} title="Back 30s" style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                  <Icon name="skip-back" size={isCompact ? 14 : 20} />
                 </button>
                 <button
                   onClick={handlePlayPause}
                   title={st.playing ? 'Pause (space)' : 'Play (space)'}
-                  style={{ width: 64, height: 64, borderRadius: 32, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', boxShadow: '0 12px 32px rgba(212,166,74,0.4)' }}
+                  style={{ width: isCompact ? 36 : 64, height: isCompact ? 36 : 64, borderRadius: isCompact ? 18 : 32, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', boxShadow: '0 12px 32px rgba(212,166,74,0.4)' }}
                 >
                   <span style={{ display: 'inline-flex', marginLeft: st.playing ? 0 : 3 }}>
-                    <Icon name={st.playing ? 'pause' : 'play'} size={26} />
+                    <Icon name={st.playing ? 'pause' : 'play'} size={isCompact ? 15 : 26} />
                   </span>
                 </button>
-                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + 30)).catch(console.error)} title="Forward 30s" style={transportBtn()}>
-                  <Icon name="skip-forward" size={20} />
+                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + 30)).catch(console.error)} title="Forward 30s" style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                  <Icon name="skip-forward" size={isCompact ? 14 : 20} />
                 </button>
               </div>
 
               {/* Right group — secondary controls (bookmark, sleep timer); matches left group
                   width so the center group remains geometrically centered regardless of content */}
               <div style={{ flex: '0 0 auto', minWidth: 160, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button onClick={addBookmark} style={transportBtnSmall()} title="Bookmark this moment">
-                  <Icon name="bookmark" size={15} />
+                <button onClick={addBookmark} style={isCompact ? { ...transportBtnSmall(), width: 28, height: 28 } : transportBtnSmall()} title="Bookmark this moment">
+                  <Icon name="bookmark" size={isCompact ? 11 : 15} />
                 </button>
                 <div ref={sleepRef} style={{ position: 'relative', zIndex: 200 }}>
                   <button
@@ -745,7 +749,8 @@ export default function Player({ st }: PlayerProps) {
                       background: sleepMode != null ? 'var(--onyx-accent-dim)' : 'var(--onyx-glass)',
                       border: `1px solid ${sleepMode != null ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
                       color: sleepMode != null ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
-                      width: sleepMode != null ? 'auto' : 40,
+                      width: sleepMode != null ? 'auto' : (isCompact ? 28 : 40),
+                      height: isCompact ? 28 : 40,
                       padding: sleepMode != null ? '0 10px' : 0,
                       gap: 6,
                     }}
