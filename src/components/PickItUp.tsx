@@ -26,7 +26,7 @@ export default function PickItUp({ st }: PickItUpProps) {
     getContinueListening(st.serverUrl, st.currentLibraryId)
       .then(setContinueItems)
       .catch(console.error);
-  }, [st.serverUrl, st.currentLibraryId]);
+  }, [st.serverUrl, st.currentLibraryId, st.mediaProgress]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
