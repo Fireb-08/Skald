@@ -150,17 +150,17 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
           )}
         </div>
 
-        {/* Clip the scroll container — tabs scroll inside, not the page */}
-        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
+        {/* Width-bounded container — gives pill a definite constraint so overflowX:auto can trigger */}
+        <div style={{ flex: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
           <div
             className="shelf-tab-pill"
             style={{
-              display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
+              display: 'inline-flex', /* Sizes to content; maxWidth caps it at parent */
+              alignItems: 'center', gap: 4, padding: '4px',
               background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
               borderRadius: 10,
               flexWrap: 'nowrap',
-              flexShrink: 1,   /* Allow the pill to shrink when parent is narrow */
-              minWidth: 0,     /* Required for flexShrink to work correctly */
+              maxWidth: '100%',  /* Cannot exceed parent — triggers internal scroll */
               overflowX: 'auto',
               scrollbarWidth: 'none',
               msOverflowStyle: 'none' as 'none',
