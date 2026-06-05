@@ -295,6 +295,10 @@ export default function Player({ st }: PlayerProps) {
   // Controls visibility of the hover popover when synopsisCollapsed is true.
   const [synopsisOpen, setSynopsisOpen] = useState(false);
 
+  // Active pane in the compact single-column carousel — only used when isCompact.
+  // Defaults to chapters as that is the most-used panel during playback.
+  const [activePane, setActivePane] = useState<'details' | 'chapters' | 'bookmarks'>('chapters');
+
   const waveformRef = useRef<HTMLDivElement>(null);
   const [waveWidth, setWaveWidth] = useState(600);
 
@@ -781,10 +785,38 @@ export default function Player({ st }: PlayerProps) {
             )}
           </Glass>
 
-          <div style={{ flex: 1, display: 'flex', gap: 18, minHeight: 0, overflow: 'hidden' }}>
+          {/* Bottom row — three columns at full size, single tabbed pane in compact mode */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: isCompact ? 'column' : 'row', gap: isCompact ? 0 : 18, minHeight: 0, overflow: 'hidden' }}>
 
-            {/* ── Details panel ─────────────────────────────────────── */}
-            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            {/* Compact-only pill tab strip — switches the single visible pane */}
+            {isCompact && (
+              <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexShrink: 0 }}>
+                {(['details', 'chapters', 'bookmarks'] as const).map(pane => (
+                  <button
+                    key={pane}
+                    onClick={() => setActivePane(pane)}
+                    style={{
+                      // Active pill: gold tint; inactive: ghost
+                      background: activePane === pane ? 'var(--onyx-accent-dim)' : 'transparent',
+                      border: `1px solid ${activePane === pane ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+                      borderRadius: 999,
+                      color: activePane === pane ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+                      fontFamily: MONO,
+                      fontSize: 10,
+                      letterSpacing: '0.12em',
+                      textTransform: 'uppercase' as const,
+                      padding: '3px 12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {pane[0].toUpperCase() + pane.slice(1)}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* ── Details panel — hidden in compact mode unless selected ── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: !isCompact || activePane === 'details' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
               <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 14 }}>Details</div>
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, marginRight: -8, paddingRight: 8 }}>
                 {(() => {
@@ -875,8 +907,8 @@ export default function Player({ st }: PlayerProps) {
               </div>
             </Glass>
 
-            {/* ── Chapters panel ────────────────────────────────────── */}
-            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            {/* ── Chapters panel — hidden in compact mode unless selected ── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: !isCompact || activePane === 'chapters' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{displayChapters.length} · {bookDur(b)} total</div>
@@ -944,7 +976,8 @@ export default function Player({ st }: PlayerProps) {
               </div>
             </Glass>
 
-            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            {/* ── Bookmarks panel — hidden in compact mode unless selected ── */}
+            <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: !isCompact || activePane === 'bookmarks' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
 
               {/* ── Panel header: title + tab switcher + add button ── */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
