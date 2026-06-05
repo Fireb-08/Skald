@@ -44,6 +44,8 @@ export interface ContextFilter {
   kind: 'series' | 'author' | 'narrator' | 'collection';
   value: string;
   bookIds?: string[];
+  // For series filters: the ABS series ID used for exact book matching.
+  seriesId?: string;
 }
 
 export interface ChapterPosition {

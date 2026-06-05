@@ -75,8 +75,20 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   const toggleInline = containerWidth >= 700;
   const filtered = st.library.filter(b => {
     if (st.contextFilter) {
-      const { kind, value, bookIds } = st.contextFilter;
-      if (kind === 'series'     && seriesNameOf(b) !== value)                   return false;
+      const { kind, value, bookIds, seriesId } = st.contextFilter;
+      if (kind === 'series') {
+        if (seriesId) {
+          // Match by series ID when available — exact, unambiguous.
+          const bSeries = b.media?.metadata?.series as SeriesObject | SeriesObject[] | null | undefined;
+          const arr = Array.isArray(bSeries) ? bSeries : bSeries ? [bSeries] : [];
+          if (!arr.some(s => s.id === seriesId)) {
+            // Fall back to name comparison for books that lack a series.id (bulk library response).
+            if (seriesNameOf(b) !== value) return false;
+          }
+        } else if (seriesNameOf(b) !== value) {
+          return false;
+        }
+      }
       if (kind === 'author'     && bookAuthor(b)   !== value)                    return false;
       if (kind === 'narrator'   && bookNarrator(b) !== value)                    return false;
       if (kind === 'collection' && !(bookIds ?? []).includes(b.id))              return false;

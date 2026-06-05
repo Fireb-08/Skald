@@ -65,6 +65,24 @@ pub struct CollectionsResponse {
     pub results: Vec<Collection>,
 }
 
+/// A single series returned by GET /api/libraries/{id}/series.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySeries {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub name_ignore_prefix: String,
+    #[serde(default)]
+    pub num_books: u32,
+}
+
+/// Wrapper for GET /api/libraries/{id}/series response.
+#[derive(Debug, Deserialize)]
+pub struct LibrarySeriesResponse {
+    pub results: Vec<LibrarySeries>,
+}
+
 /// A single Audiobookshelf library.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

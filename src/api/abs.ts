@@ -385,6 +385,18 @@ export function getContinueListening(serverUrl: string, libraryId: string): Prom
   return invoke('get_continue_listening', { serverUrl, libraryId });
 }
 
+// Series object returned by GET /api/libraries/{id}/series.
+export interface Series {
+  id: string;
+  name: string;
+  nameIgnorePrefix: string;
+  numBooks: number;
+}
+
+export function fetchLibrarySeries(serverUrl: string, libraryId: string): Promise<Series[]> {
+  return invoke('get_library_series', { serverUrl, libraryId });
+}
+
 export function closeActiveSession(): Promise<void> {
   return invoke('close_active_session');
 }

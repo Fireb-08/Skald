@@ -1,7 +1,9 @@
+import { useState, useEffect } from 'react';
 import type { OnyxState, LibraryItem } from '../../../state/onyx';
 import { groupMatchesFilter } from '../../../lib/shelfFilters';
 import { bookTitle, bookAuthor, bookSeries, bookDurSecs } from '../../../state/onyx';
-import type { SeriesObject } from '../../../api/abs';
+import type { SeriesObject, Series } from '../../../api/abs';
+import { fetchLibrarySeries } from '../../../api/abs';
 import BrowseView, { posterTile, seriesTotalDur } from '../BrowseView';
 import BrowseList from '../BrowseList';
 import CoverFan from '../CoverFan';
@@ -11,6 +13,7 @@ const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
 interface SeriesGroup {
+  id?: string;
   name: string;
   books: LibraryItem[];
 }
@@ -47,20 +50,32 @@ export interface SeriesViewProps {
 }
 
 export default function SeriesView({ st, inline = false }: SeriesViewProps) {
-  const groups: Record<string, LibraryItem[]> = {};
-  for (const b of st.library) {
-    const name = seriesNameOf(b);
-    if (!name) continue;
-    if (!groups[name]) groups[name] = [];
-    groups[name].push(b);
-  }
+  // Fetch the canonical series list from the dedicated endpoint — gives clean names and IDs.
+  const [fetchedSeries, setFetchedSeries] = useState<Series[]>([]);
+  useEffect(() => {
+    if (!st.serverUrl || !st.currentLibraryId) return;
+    fetchLibrarySeries(st.serverUrl, st.currentLibraryId)
+      .then(setFetchedSeries)
+      .catch(console.error);
+  }, [st.serverUrl, st.currentLibraryId]);
 
-  let seriesList: SeriesGroup[] = Object.entries(groups)
-    .map(([name, books]) => ({
-      name,
-      books: books.slice().sort((a, b) => seriesVolOf(a) - seriesVolOf(b)),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // For each fetched series, find matching books from the local library by series ID.
+  // Falls back to name matching for books whose series field lacks an ID (minified responses).
+  let seriesList: SeriesGroup[] = fetchedSeries.map(s => {
+    const books = st.library
+      .filter(b => {
+        const bSeries = b.media?.metadata?.series as SeriesObject | SeriesObject[] | null | undefined;
+        if (bSeries) {
+          const arr = Array.isArray(bSeries) ? bSeries : [bSeries];
+          if (arr.some(so => so.id === s.id)) return true;
+        }
+        // Fallback: match by cleaned name if series object/ID is absent (bulk library endpoint).
+        return seriesNameOf(b) === s.name;
+      })
+      .slice()
+      .sort((a, b) => seriesVolOf(a) - seriesVolOf(b));
+    return { id: s.id, name: s.name, books };
+  }).filter(s => s.books.length > 0);
 
   if (st.search) {
     const q = st.search.toLowerCase();
@@ -74,8 +89,8 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
     seriesList = seriesList.filter(s => groupMatchesFilter(s.books, st.filter, st.mediaProgress));
   }
 
-  const openSeries = (name: string) => {
-    st.setContextFilter({ kind: 'series', value: name });
+  const openSeries = (name: string, seriesId?: string) => {
+    st.setContextFilter({ kind: 'series', value: name, seriesId });
     st.setShelfTab('library');
     st.setScreen('library');
   };
@@ -85,7 +100,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
       {st.libraryView === 'grid' ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 22 }}>
           {seriesList.map(s => (
-            <button key={s.name} onClick={() => openSeries(s.name)} className="onyx-poster" style={posterTile()}>
+            <button key={s.name} onClick={() => openSeries(s.name, s.id)} className="onyx-poster" style={posterTile()}>
               <CoverFan books={s.books.slice(0, 5)} serverUrl={st.serverUrl} />
               <div style={{ padding: '18px 16px 16px', textAlign: 'center' }}>
                 <div style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 500, lineHeight: 1.1, color: 'var(--onyx-text)', letterSpacing: '-0.01em' }}>{s.name}</div>
@@ -109,7 +124,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
           ]}
           rows={seriesList.map(s => ({
             key: s.name,
-            onClick: () => openSeries(s.name),
+            onClick: () => openSeries(s.name, s.id),
             leading: <Cover item={s.books[0]} size={28} serverUrl={st.serverUrl} />,
             sort: {
               name:   s.name,

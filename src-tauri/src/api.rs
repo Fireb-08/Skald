@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, Library, LibraryItem, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, User, UserStats};
+use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -114,6 +114,30 @@ impl AbsClient {
 
         if !resp.status().is_success() {
             return Err(format!("get_library_items failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.results)
+    }
+
+    /// GET /api/libraries/{id}/series?limit=0 — returns all series in a library.
+    /// limit=0 disables pagination and returns all results in a single response.
+    pub async fn get_library_series(&self, library_id: &str) -> Result<Vec<LibrarySeries>, String> {
+        #[derive(serde::Deserialize)]
+        struct Wrapper {
+            results: Vec<LibrarySeries>,
+        }
+
+        let resp = self
+            .http
+            .get(format!("{}/api/libraries/{library_id}/series?limit=0", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_library_series failed: HTTP {}", resp.status()));
         }
 
         let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
