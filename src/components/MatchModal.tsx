@@ -4,7 +4,6 @@ import ReactDOM from 'react-dom';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
 import { searchBooks, updateMedia, fetchItem } from '../api/abs';
-import Cover from './Cover';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -193,44 +192,40 @@ function Check({ on, onClick, size = 17, accent = MATCH_ONYX.accent }: {
   );
 }
 
-/* Metadata Match Option B — see design-handoff/metadata_match */
-function ValueCell({ field, side, value, dim, strike, coverItem, coverServerUrl }: {
+/* Read-only field renderer — Option B design, see design-handoff/metadata_match/option-b.jsx */
+function ValueCell({ field, side, value, dim, strike, currentCoverUrl, incomingCoverUrl }: {
   field: MatchField; side: 'current' | 'incoming'; value: unknown;
   dim?: boolean; strike?: boolean;
-  coverItem?: LibraryItem; coverServerUrl?: string;
+  currentCoverUrl?: string; incomingCoverUrl?: string;
 }) {
   if (field.type === 'cover') {
-    if (side === 'current' && coverItem && coverServerUrl) {
-      return <Cover item={coverItem} size={46} serverUrl={coverServerUrl} />;
-    }
-    if (side === 'incoming' && value && typeof value === 'string') {
-      return <img src={value} alt="" style={{ width: 46, height: 46, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }} />;
-    }
-    return <div style={{ width: 46, height: 46, borderRadius: 4, background: MX.glassStrong, flexShrink: 0 }} />;
+    const url = side === 'current' ? currentCoverUrl : incomingCoverUrl;
+    if (url) return <img src={url} alt="" width={46} height={46} style={{ borderRadius: 4, objectFit: 'cover' as const, flexShrink: 0 }} />;
+    return <div style={{ width: 46, height: 46, borderRadius: 4, background: MATCH_ONYX.glassStrong, flexShrink: 0 }} />;
   }
   const empty = Array.isArray(value) ? value.length === 0 : !value;
   if (field.type === 'chips') {
-    if (empty) return <span style={{ fontSize: 11, color: MX.textMute, fontStyle: 'italic' }}>none</span>;
+    if (empty) return <span style={{ fontSize: 11, color: MATCH_ONYX.textMute, fontStyle: 'italic' }}>none</span>;
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
         {(value as string[]).map((t, i) => (
           <span key={i} style={{
             fontSize: 10.5, padding: '2px 7px', borderRadius: 20,
-            color: dim ? MX.textMute : MX.textDim, background: MX.glass, border: `1px solid ${MX.line}`,
+            color: dim ? MATCH_ONYX.textMute : MATCH_ONYX.textDim, background: MATCH_ONYX.glass, border: `1px solid ${MATCH_ONYX.line}`,
           }}>{t}</span>
         ))}
       </div>
     );
   }
   if (empty) {
-    return <span style={{ fontSize: 12, color: MX.textMute, fontStyle: 'italic', fontFamily: SANS }}>empty</span>;
+    return <span style={{ fontSize: 12, color: MATCH_ONYX.textMute, fontStyle: 'italic', fontFamily: MATCH_ONYX.sans }}>empty</span>;
   }
   const isLong = field.type === 'longtext';
   return (
     <span style={{
       fontSize: isLong ? 11.5 : 12.5, lineHeight: isLong ? 1.45 : 1.3,
-      fontFamily: field.type === 'mono' ? MONO : SANS,
-      color: dim ? MX.textMute : MX.textDim,
+      fontFamily: field.type === 'mono' ? MATCH_ONYX.mono : MATCH_ONYX.sans,
+      color: dim ? MATCH_ONYX.textMute : MATCH_ONYX.textDim,
       textDecoration: strike ? 'line-through' : 'none',
       textDecorationColor: 'rgba(235,231,223,0.25)',
       display: '-webkit-box' as const, WebkitLineClamp: isLong ? 4 : 2,
@@ -239,7 +234,7 @@ function ValueCell({ field, side, value, dim, strike, coverItem, coverServerUrl 
   );
 }
 
-/* Metadata Match Option B — see design-handoff/metadata_match */
+/* Inline editor for the result cell — commits on Save/Enter, discards on Cancel/Esc */
 function EditField({ field, value, onSave, onCancel }: {
   field: MatchField; value: unknown;
   onSave: (v: unknown) => void; onCancel: () => void;
@@ -263,9 +258,9 @@ function EditField({ field, value, onSave, onCancel }: {
     else if (e.key === 'Enter' && (field.type !== 'longtext' || e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
   };
   const inputStyle: CSSProperties = {
-    width: '100%', boxSizing: 'border-box', background: MX.panel2,
-    border: `1px solid ${MX.accentEdge}`, borderRadius: 6, color: MX.text,
-    fontFamily: field.type === 'mono' ? MONO : SANS,
+    width: '100%', boxSizing: 'border-box', background: MATCH_ONYX.panel2,
+    border: `1px solid ${MATCH_ONYX.accentEdge}`, borderRadius: 6, color: MATCH_ONYX.text,
+    fontFamily: field.type === 'mono' ? MATCH_ONYX.mono : MATCH_ONYX.sans,
     fontSize: field.type === 'longtext' ? 11.5 : 12.5, lineHeight: 1.4,
     padding: '7px 9px', outline: 'none', resize: 'vertical' as const,
   };
@@ -280,18 +275,18 @@ function EditField({ field, value, onSave, onCancel }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <button onClick={commit} style={{
           display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6,
-          border: 'none', cursor: 'pointer', background: MX.accent, color: MX.bg,
-          fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase' as const, fontWeight: 600,
+          border: 'none', cursor: 'pointer', background: MATCH_ONYX.accent, color: MATCH_ONYX.bg,
+          fontFamily: MATCH_ONYX.mono, fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase' as const, fontWeight: 600,
         }}>
-          <Glyph name="check" size={11} color={MX.bg} sw={2} />Save
+          <Glyph name="check" size={11} color={MATCH_ONYX.bg} sw={2} />Save
         </button>
         <button onClick={onCancel} style={{
-          padding: '4px 10px', borderRadius: 6, border: `1px solid ${MX.glassEdge}`,
-          cursor: 'pointer', background: 'transparent', color: MX.textDim,
-          fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase' as const,
+          padding: '4px 10px', borderRadius: 6, border: `1px solid ${MATCH_ONYX.glassEdge}`,
+          cursor: 'pointer', background: 'transparent', color: MATCH_ONYX.textDim,
+          fontFamily: MATCH_ONYX.mono, fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase' as const,
         }}>Cancel</button>
         <span style={{ flex: 1 }} />
-        <span style={{ fontFamily: MONO, fontSize: 8.5, color: MX.textMute, letterSpacing: '0.04em' }}>
+        <span style={{ fontFamily: MATCH_ONYX.mono, fontSize: 8.5, color: MATCH_ONYX.textMute, letterSpacing: '0.04em' }}>
           {field.type === 'longtext' ? '⌘↵ save · esc' : '↵ save · esc'}
         </span>
       </div>
@@ -299,36 +294,36 @@ function EditField({ field, value, onSave, onCancel }: {
   );
 }
 
-/* Metadata Match Option B — see design-handoff/metadata_match */
+/* 4-column diff row — label | current | toggle | result — Option B layout */
 function CompareRow({ field, base, resolved, edited, applied, editing,
                       onToggle, onStartEdit, onSaveEdit, onCancelEdit, onRevert,
-                      coverItem, coverServerUrl }: {
+                      currentCoverUrl, incomingCoverUrl }: {
   field: MatchField; base: 'incoming' | 'current' | undefined;
   resolved: unknown; edited: boolean; applied: boolean; editing: boolean;
   onToggle: () => void; onStartEdit: () => void;
   onSaveEdit: (v: unknown) => void; onCancelEdit: () => void; onRevert: () => void;
-  coverItem?: LibraryItem; coverServerUrl?: string;
+  currentCoverUrl?: string; incomingCoverUrl?: string;
 }) {
   const changed = field.status !== 'same';
-  const accent = field.status === 'added' ? MX.add : MX.accent;
+  const accent = field.status === 'added' ? MATCH_ONYX.add : MATCH_ONYX.accent;
   const tintBg = !applied ? 'transparent'
     : edited ? 'rgba(255,255,255,0.05)'
-    : field.status === 'added' ? MX.addDim : 'rgba(212,166,74,0.07)';
-  const tintBar = edited ? MX.textDim : accent;
+    : field.status === 'added' ? MATCH_ONYX.addDim : 'rgba(212,166,74,0.07)';
+  const tintBar = edited ? MATCH_ONYX.textDim : accent;
   const canEdit = field.type !== 'cover';
 
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '78px 1fr 38px 1fr',
       alignItems: editing ? 'start' : 'center',
-      borderBottom: `1px solid ${MX.line}`, minHeight: 50,
+      borderBottom: `1px solid ${MATCH_ONYX.line}`, minHeight: 50,
     }}>
       {/* label + status tag */}
       <div style={{ padding: '12px 10px 12px 16px', display: 'flex', flexDirection: 'column', gap: 5 }}>
         <span style={{
-          fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em',
+          fontFamily: MATCH_ONYX.mono, fontSize: 9, letterSpacing: '0.08em',
           textTransform: 'uppercase' as const, lineHeight: 1.2,
-          color: (changed || edited) ? MX.textDim : MX.textMute,
+          color: (changed || edited) ? MATCH_ONYX.textDim : MATCH_ONYX.textMute,
         }}>{field.label}</span>
         {edited
           ? <StatusTag status="edited" style={{ alignSelf: 'flex-start' }} />
@@ -337,7 +332,7 @@ function CompareRow({ field, base, resolved, edited, applied, editing,
       {/* current value */}
       <div style={{ padding: '12px 14px', minWidth: 0 }}>
         <ValueCell field={field} side="current" value={field.current}
-          dim strike={applied} coverItem={coverItem} coverServerUrl={coverServerUrl} />
+          dim strike={applied} currentCoverUrl={currentCoverUrl} incomingCoverUrl={incomingCoverUrl} />
       </div>
       {/* accept toggle / revert button */}
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', paddingTop: editing ? 12 : 0 }}>
@@ -345,9 +340,9 @@ function CompareRow({ field, base, resolved, edited, applied, editing,
           <button onClick={onRevert} title="Revert to source value" style={{
             width: 26, height: 26, borderRadius: 13, cursor: 'pointer', padding: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'transparent', border: `1.5px solid ${MX.lineStrong}`,
+            background: 'transparent', border: `1.5px solid ${MATCH_ONYX.lineStrong}`,
           }}>
-            <Glyph name="revert" size={13} color={MX.textDim} />
+            <Glyph name="revert" size={13} color={MATCH_ONYX.textDim} />
           </button>
         ) : changed ? (
           <button onClick={onToggle}
@@ -356,14 +351,14 @@ function CompareRow({ field, base, resolved, edited, applied, editing,
               width: 26, height: 26, borderRadius: 13, cursor: 'pointer', padding: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: base === 'incoming' ? accent : 'transparent',
-              border: `1.5px solid ${base === 'incoming' ? accent : MX.lineStrong}`,
+              border: `1.5px solid ${base === 'incoming' ? accent : MATCH_ONYX.lineStrong}`,
               transition: 'all .12s',
             }}>
             <Glyph name={base === 'incoming' ? 'check' : 'right'} size={13}
-              color={base === 'incoming' ? MX.bg : MX.textMute} sw={2} />
+              color={base === 'incoming' ? MATCH_ONYX.bg : MATCH_ONYX.textMute} sw={2} />
           </button>
         ) : (
-          <Glyph name="check" size={12} color={MX.textMute} />
+          <Glyph name="check" size={12} color={MATCH_ONYX.textMute} />
         )}
       </div>
       {/* result cell — read or edit mode */}
@@ -379,15 +374,15 @@ function CompareRow({ field, base, resolved, edited, applied, editing,
           <>
             <div style={{ minWidth: 0, flex: 1 }}>
               <ValueCell field={field} side="incoming" value={resolved}
-                dim={!applied && !edited} coverItem={coverItem} coverServerUrl={coverServerUrl} />
+                dim={!applied && !edited} currentCoverUrl={currentCoverUrl} incomingCoverUrl={incomingCoverUrl} />
             </div>
             {canEdit && (
               <button onClick={onStartEdit} title={`Edit ${field.label}`} style={{
                 background: 'none', border: 'none', cursor: 'pointer', padding: 3, marginRight: -3,
-                display: 'flex', color: MX.textMute, flexShrink: 0, alignSelf: 'flex-start',
+                display: 'flex', color: MATCH_ONYX.textMute, flexShrink: 0, alignSelf: 'flex-start',
               }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = MX.accent; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = MX.textMute; }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = MATCH_ONYX.accent; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = MATCH_ONYX.textMute; }}
               >
                 <Glyph name="edit" size={13} />
               </button>
@@ -753,7 +748,7 @@ export default function MatchModal({ item, serverUrl, library, onClose, onComple
                   onSaveEdit={v => saveEdit(f.key, v)}
                   onCancelEdit={() => setEditingKey(null)}
                   onRevert={() => revert(f.key)}
-                  coverItem={item} coverServerUrl={serverUrl}
+                  incomingCoverUrl={selected.cover}
                 />
               ))}
               {/* "N more match" footer strip — only in Changes mode */}
