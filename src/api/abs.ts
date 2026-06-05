@@ -385,16 +385,23 @@ export function getContinueListening(serverUrl: string, libraryId: string): Prom
   return invoke('get_continue_listening', { serverUrl, libraryId });
 }
 
-// Series object returned by GET /api/libraries/{id}/series.
+// Series as returned by GET /api/libraries/{id}/series.
+// Note: numBooks is unreliable (returns 0) — use books.length for counts.
 export interface Series {
   id: string;
   name: string;
   nameIgnorePrefix: string;
-  numBooks: number;
+  books: LibraryItem[];
 }
 
-export function fetchLibrarySeries(serverUrl: string, libraryId: string): Promise<Series[]> {
+// Fetch all series in a library, each with its books array populated.
+export function getLibrarySeries(serverUrl: string, libraryId: string): Promise<Series[]> {
   return invoke('get_library_series', { serverUrl, libraryId });
+}
+
+// Fetch books for a single series via server-side filter (Base64-encoded server-side).
+export function getSeriesItems(serverUrl: string, libraryId: string, seriesId: string): Promise<LibraryItem[]> {
+  return invoke('get_series_items', { serverUrl, libraryId, seriesId });
 }
 
 export function closeActiveSession(): Promise<void> {

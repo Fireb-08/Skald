@@ -3,7 +3,7 @@ import type { OnyxState, LibraryItem } from '../../../state/onyx';
 import { groupMatchesFilter } from '../../../lib/shelfFilters';
 import { bookTitle, bookAuthor, bookSeries, bookDurSecs } from '../../../state/onyx';
 import type { SeriesObject, Series } from '../../../api/abs';
-import { fetchLibrarySeries } from '../../../api/abs';
+import { getLibrarySeries } from '../../../api/abs';
 import BrowseView, { posterTile, seriesTotalDur } from '../BrowseView';
 import BrowseList from '../BrowseList';
 import CoverFan from '../CoverFan';
@@ -54,7 +54,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
   const [fetchedSeries, setFetchedSeries] = useState<Series[]>([]);
   useEffect(() => {
     if (!st.serverUrl || !st.currentLibraryId) return;
-    fetchLibrarySeries(st.serverUrl, st.currentLibraryId)
+    getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(setFetchedSeries)
       .catch(console.error);
   }, [st.serverUrl, st.currentLibraryId]);
@@ -94,6 +94,8 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
     st.setShelfTab('library');
     st.setScreen('library');
   };
+
+  console.log('[SeriesView] series count:', seriesList.length, 'first item:', seriesList[0]);
 
   return (
     <BrowseView st={st} title="Series" subtitle={`${seriesList.length} series in your library`} showModeToggle inline={inline}>

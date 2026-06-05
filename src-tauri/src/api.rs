@@ -128,9 +128,13 @@ impl AbsClient {
             results: Vec<LibrarySeries>,
         }
 
+        // Do NOT use limit=0 — this server interprets it as "zero results"
+        // (total is reported but results array is empty). Use a high limit instead.
+        // limit=1000 safely covers any realistic library; for libraries with >1000
+        // series, pagination via &page=N would be needed but is omitted here.
         let resp = self
             .http
-            .get(format!("{}/api/libraries/{library_id}/series?limit=0", self.root()))
+            .get(format!("{}/api/libraries/{library_id}/series?limit=1000", self.root()))
             .header("Authorization", self.auth_header()?)
             .send()
             .await
