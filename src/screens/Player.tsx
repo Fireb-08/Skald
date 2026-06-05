@@ -300,6 +300,8 @@ export default function Player({ st }: PlayerProps) {
   const synopsisTriggerRef = useRef<HTMLDivElement>(null);
   // Viewport-relative position for the fixed portal popover.
   const [synopsisPos, setSynopsisPos] = useState({ bottom: 0, left: 0 });
+  // Timer ref used to delay close so the mouse can travel from the label to the popover.
+  const synopsisCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Active pane in the compact single-column carousel — only used when isCompact.
   // Defaults to chapters as that is the most-used panel during playback.
@@ -558,6 +560,8 @@ export default function Player({ st }: PlayerProps) {
                   ref={synopsisTriggerRef}
                   style={{ display: 'inline-block' }}
                   onMouseEnter={() => {
+                    // Cancel any pending close so re-entering the label keeps the popover open.
+                    if (synopsisCloseTimer.current) clearTimeout(synopsisCloseTimer.current);
                     if (synopsisTriggerRef.current) {
                       // Measure trigger in viewport coordinates for fixed portal positioning.
                       const r = synopsisTriggerRef.current.getBoundingClientRect();
@@ -565,7 +569,10 @@ export default function Player({ st }: PlayerProps) {
                     }
                     setSynopsisOpen(true);
                   }}
-                  onMouseLeave={() => setSynopsisOpen(false)}
+                  onMouseLeave={() => {
+                    // Delay close so mouse can travel to the popover without it dismissing.
+                    synopsisCloseTimer.current = setTimeout(() => setSynopsisOpen(false), 120);
+                  }}
                 >
                   {/* Dotted underline signals that hovering reveals more content */}
                   <span style={{
@@ -584,23 +591,32 @@ export default function Player({ st }: PlayerProps) {
                   {/* Popover via portal — fixed positioning on document.body escapes
                       overflow clipping and the transform:scale() on #root. */}
                   {synopsisOpen && ReactDOM.createPortal(
-                    <div style={{
-                      position: 'fixed',
-                      bottom: synopsisPos.bottom,
-                      left: synopsisPos.left,
-                      zIndex: 9999,
-                      width: 280,
-                      maxHeight: 320,
-                      overflowY: 'auto',
-                      background: 'var(--onyx-panel)',
-                      border: '1px solid var(--onyx-glass-edge)',
-                      borderRadius: 8,
-                      padding: '12px 14px',
-                      fontSize: 13,
-                      color: 'var(--onyx-text)',
-                      lineHeight: 1.6,
-                      boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-                    }}>
+                    <div
+                      onMouseEnter={() => {
+                        // Cancel the pending close when mouse enters the popover.
+                        if (synopsisCloseTimer.current) clearTimeout(synopsisCloseTimer.current);
+                      }}
+                      onMouseLeave={() => {
+                        // Close when mouse leaves the popover itself.
+                        setSynopsisOpen(false);
+                      }}
+                      style={{
+                        position: 'fixed',
+                        bottom: synopsisPos.bottom,
+                        left: synopsisPos.left,
+                        zIndex: 9999,
+                        width: 340, /* Wider and taller to show more synopsis text without scrolling */
+                        maxHeight: 420,
+                        overflowY: 'auto',
+                        background: 'var(--onyx-panel)',
+                        border: '1px solid var(--onyx-glass-edge)',
+                        borderRadius: 8,
+                        padding: '12px 14px',
+                        fontSize: 13,
+                        color: 'var(--onyx-text)',
+                        lineHeight: 1.6,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                      }}>
                       {b.media?.metadata?.description ? (
                         <div dangerouslySetInnerHTML={{ __html: b.media.metadata.description }} />
                       ) : (
