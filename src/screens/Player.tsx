@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import {
   playAudio, pauseAudio,
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
@@ -294,6 +295,10 @@ export default function Player({ st }: PlayerProps) {
   const synopsisCollapsed = containerHeight < 500;
   // Controls visibility of the hover popover when synopsisCollapsed is true.
   const [synopsisOpen, setSynopsisOpen] = useState(false);
+  // Ref on the SYNOPSIS label wrapper — measured on hover for portal positioning.
+  const synopsisTriggerRef = useRef<HTMLDivElement>(null);
+  // Viewport-relative position for the fixed portal popover.
+  const [synopsisPos, setSynopsisPos] = useState({ bottom: 0, left: 0 });
 
   // Active pane in the compact single-column carousel — only used when isCompact.
   // Defaults to chapters as that is the most-used panel during playback.
@@ -549,8 +554,16 @@ export default function Player({ st }: PlayerProps) {
               // that reveals the full text in a floating popover on hover.
               <div style={{ marginTop: 16, width: '100%', textAlign: 'left' }}>
                 <div
-                  style={{ position: 'relative', display: 'inline-block' }}
-                  onMouseEnter={() => setSynopsisOpen(true)}
+                  ref={synopsisTriggerRef}
+                  style={{ display: 'inline-block' }}
+                  onMouseEnter={() => {
+                    if (synopsisTriggerRef.current) {
+                      // Measure trigger in viewport coordinates for fixed portal positioning.
+                      const r = synopsisTriggerRef.current.getBoundingClientRect();
+                      setSynopsisPos({ bottom: window.innerHeight - r.top + 6, left: r.left });
+                    }
+                    setSynopsisOpen(true);
+                  }}
                   onMouseLeave={() => setSynopsisOpen(false)}
                 >
                   {/* Dotted underline signals that hovering reveals more content */}
@@ -567,13 +580,14 @@ export default function Player({ st }: PlayerProps) {
                     Synopsis
                   </span>
 
-                  {/* Popover — floats above the label, scrollable for long descriptions */}
-                  {synopsisOpen && (
+                  {/* Popover via portal — fixed positioning on document.body escapes
+                      overflow clipping and the transform:scale() on #root. */}
+                  {synopsisOpen && ReactDOM.createPortal(
                     <div style={{
-                      position: 'absolute',
-                      bottom: '100%',
-                      left: 0,
-                      zIndex: 200,
+                      position: 'fixed',
+                      bottom: synopsisPos.bottom,
+                      left: synopsisPos.left,
+                      zIndex: 9999,
                       width: 280,
                       maxHeight: 320,
                       overflowY: 'auto',
@@ -585,14 +599,14 @@ export default function Player({ st }: PlayerProps) {
                       color: 'var(--onyx-text)',
                       lineHeight: 1.6,
                       boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-                      marginBottom: 6,
                     }}>
                       {b.media?.metadata?.description ? (
                         <div dangerouslySetInnerHTML={{ __html: b.media.metadata.description }} />
                       ) : (
                         <span style={{ fontStyle: 'italic', color: 'var(--onyx-text-mute)' }}>No synopsis available.</span>
                       )}
-                    </div>
+                    </div>,
+                    document.body,
                   )}
                 </div>
               </div>
