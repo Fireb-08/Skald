@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio } from '../api/abs';
 
 export type { User };
 import {
@@ -1002,7 +1002,13 @@ export function useOnyxState(): OnyxState {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
-      if (e.code === 'Space') { e.preventDefault(); setPlaying(p => !p); }
+      // Call the LibVLC pause/resume command directly.
+      // setPlaying alone only updates the React icon — LibVLC keeps running.
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (playingRef.current) { pauseAudio().catch(console.error); setPlaying(false); }
+        else { playAudio().catch(console.error); setPlaying(true); }
+      }
       if (e.code === 'ArrowLeft'  && !e.metaKey && !e.ctrlKey) setPosition(p => Math.max(0, p - 30));
       if (e.code === 'ArrowRight' && !e.metaKey && !e.ctrlKey) setPosition(p => Math.min(bookSecs, p + 30));
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {

@@ -289,16 +289,22 @@ export default function FocusPanel({ st }: FocusPanelProps) {
   };
 
   const handleContinue = async () => {
+    // Mirrors the Player view's handlePlayPause: decide using the same props the
+    // icon reads (st.playing / st.currentBookId) so the icon and the action can
+    // never disagree. Only cold-start for a different book or a missing session.
     try {
-      if (!st.sessionReady || focus.id !== st.currentBookId) {
-        // No session open or a different book is loaded — start this book
-        // via the canonical function so it resumes from saved position.
-        await playBook(st, focus.id);
-      } else {
-        // Session is already open for this book — toggle play/pause.
-        // togglePlayback pairs the LibVLC call with st.setPlaying so the
-        // UI icon updates immediately without waiting for playback-tick.
+      if (st.isLocalPlayback) {
+        // Local playback has no server session — toggle audio directly.
         await togglePlayback(st);
+      } else if (st.playing && st.currentBookId === focus.id) {
+        // This book is playing (icon shows pause) → pause.
+        await togglePlayback(st);
+      } else if (st.sessionReady && st.currentBookId === focus.id) {
+        // Session open for this book but paused → resume from current position.
+        await togglePlayback(st);
+      } else {
+        // Different book or no open session → cold start from saved position.
+        await playBook(st, focus.id);
       }
     } catch (err) {
       console.error('[handleContinue] failed:', err);
@@ -316,7 +322,10 @@ export default function FocusPanel({ st }: FocusPanelProps) {
           <Cover item={focus} size={48} serverUrl={st.serverUrl} />
         </div>
         <button
-          onClick={() => { st.setPlaying(p => !p); openBook(focus.id); }}
+          // Use handleContinue — same as the main play button.
+          // Direct setPlaying() does not invoke LibVLC; it only flips the icon
+          // while audio keeps running, causing an immediate re-open on pause.
+          onClick={() => handleContinue()}
           style={{ width: 32, height: 32, borderRadius: 16, border: 'none', background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <Icon name={st.playing && st.currentBookId === focus.id ? 'pause' : 'play'} size={12} />
@@ -401,7 +410,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
 
       <div style={{ marginTop: 18, display: 'flex', gap: 10 }}>
         <button
-          onClick={handleContinue}
+          onClick={() => handleContinue()}
           style={{ flex: 1, height: 44, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', border: 'none', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }}
         >
           <Icon name={st.playing && st.currentBookId === focus.id ? 'pause' : 'play'} size={14} />
