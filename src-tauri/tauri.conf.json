@@ -40,6 +40,7 @@
     "resources": {
       "vlc-dist/libvlc.dll": "libvlc.dll",
       "vlc-dist/libvlccore.dll": "libvlccore.dll",
+      "vlc-dist/vlc-cache-gen.exe": "vlc-cache-gen.exe",
       "vlc-dist/plugins/**/*": "plugins/"
     },
     "windows": {
@@ -49,7 +50,8 @@
       "nsis": {
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh"
       }
     }
   }
