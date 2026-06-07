@@ -1,6 +1,9 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import ReactDOM from 'react-dom';
+// convertFileSrc turns the absolute disk path get_cover now returns into an
+// asset:// URL WebView2 can load directly.
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
 import { searchBooks, updateMedia, fetchItem, getCover } from '../api/abs';
@@ -418,14 +421,16 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
   const [submitting, setSubmitting]   = useState(false);
   const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
 
-  // Fetch current item cover as data URL (same pattern as Cover.tsx)
+  // Fetch the current item's cover (same pattern as Cover.tsx). get_cover now
+  // returns an absolute file path, so convert it to an asset:// URL here — the
+  // shared ValueCell <img> renders this directly alongside remote incoming
+  // cover URLs, which must stay untouched.
   useEffect(() => {
     let cancelled = false;
     getCover(serverUrl, item.id)
-      .then(bytes => {
+      .then(path => {
         if (cancelled) return;
-        const binary = new Uint8Array(bytes).reduce((s, b) => s + String.fromCharCode(b), '');
-        setCurrentCoverUrl(`data:image/jpeg;base64,${btoa(binary)}`);
+        setCurrentCoverUrl(convertFileSrc(path));
       })
       .catch(() => {});
     return () => { cancelled = true; };
