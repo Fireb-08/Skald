@@ -25,7 +25,10 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
     let cancelled = false;
     // get_cover now returns an absolute file path, not raw bytes — store it
     // directly and let convertFileSrc handle the asset:// conversion at render.
-    getCover(serverUrl, item.id)
+    // Request a 400px-wide cover: the shelf maxes at 148px and the Focus panel
+    // and Player stay within 400px on a 1280px window, so 400px gives ~2×
+    // headroom for high-DPI rendering without over-fetching full-size art.
+    getCover(serverUrl, item.id, 400)
       .then(path => {
         if (cancelled) return;
         setCoverSrc(path);

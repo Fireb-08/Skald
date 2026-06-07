@@ -408,10 +408,17 @@ impl AbsClient {
     }
 
     /// GET /api/items/{id}/cover — returns raw image bytes.
-    pub async fn fetch_cover(&self, item_id: &str) -> Result<Vec<u8>, String> {
+    /// When `width` is `Some(w)`, appends `?width={w}` so ABS resizes the cover
+    /// server-side (see the ABS API `width` query parameter on the cover route).
+    /// When `None`, the original full-size cover is requested unchanged.
+    pub async fn fetch_cover(&self, item_id: &str, width: Option<u32>) -> Result<Vec<u8>, String> {
+        let url = match width {
+            Some(w) => format!("{}/api/items/{item_id}/cover?width={w}", self.root()),
+            None => format!("{}/api/items/{item_id}/cover", self.root()),
+        };
         let resp = self
             .http
-            .get(format!("{}/api/items/{item_id}/cover", self.root()))
+            .get(url)
             .header("Authorization", self.auth_header()?)
             .send()
             .await

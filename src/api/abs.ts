@@ -296,8 +296,10 @@ export function syncSession(
 // Resolves to the absolute path of the cached cover file on disk (NOT a data
 // URI or raw bytes). Pass the result through convertFileSrc() before using it
 // as an <img src> so WebView2 loads it via Tauri's asset protocol.
-export function getCover(serverUrl: string, itemId: string): Promise<string> {
-  return invoke('get_cover', { serverUrl, itemId });
+// `width` (when provided) asks ABS to resize the cover server-side and is
+// folded into the cache key so different widths don't collide.
+export function getCover(serverUrl: string, itemId: string, width?: number): Promise<string> {
+  return invoke('get_cover', { serverUrl, itemId, width: width ?? null });
 }
 
 export function getAudioDevices(): Promise<AudioDevice[]> {
