@@ -4,6 +4,7 @@ import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress,
 } from '../../state/onyx';
 import type { SeriesObject } from '../../api/abs';
+import { getLibrarySeries } from '../../api/abs';
 import ViewModeToggle from './ViewModeToggle';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -59,6 +60,21 @@ export interface ShelfHeaderProps {
 export default function ShelfHeader({ st }: ShelfHeaderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(9999);
+
+  // Canonical series count from GET /api/libraries/{id}/series — the same
+  // authoritative source SeriesView uses. Deriving the count from a Set of
+  // series names over st.library miscounts (the bulk library response omits
+  // series objects for many books and falls back to the flat seriesName string),
+  // so we fetch the real list and use its length for the subtitle.
+  const [seriesCount, setSeriesCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!st.serverUrl || !st.currentLibraryId) { setSeriesCount(null); return; }
+    let cancelled = false;
+    getLibrarySeries(st.serverUrl, st.currentLibraryId)
+      .then(list => { if (!cancelled) setSeriesCount(list.length); })
+      .catch(console.error);
+    return () => { cancelled = true; };
+  }, [st.serverUrl, st.currentLibraryId]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -124,7 +140,9 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   const subtitleText = (() => {
     switch (st.shelfTab) {
       case 'series': {
-        const n = new Set(st.library.map(b => seriesNameOf(b)).filter(Boolean)).size;
+        // Prefer the canonical count from the series endpoint; fall back to the
+        // library-derived estimate only while that fetch is still in flight.
+        const n = seriesCount ?? new Set(st.library.map(b => seriesNameOf(b)).filter(Boolean)).size;
         return `${n} series`;
       }
       case 'authors': {

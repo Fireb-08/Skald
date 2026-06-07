@@ -175,7 +175,9 @@
       "PowerShell($vd = \"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\\\\src-tauri\\\\vlc-dist\"; Remove-Item \"$vd\\\\plugins\\\\plugins.dat\" -ErrorAction SilentlyContinue; Push-Location $vd; & \".\\\\vlc-cache-gen.exe\" \"plugins\"; Write-Output \"exit=$LASTEXITCODE\"; Pop-Location; $f = Get-Item \"$vd\\\\plugins\\\\plugins.dat\" -ErrorAction SilentlyContinue; Write-Output \\(\"our-plugins relative -> size=\" + $\\(if\\($f\\){$f.Length}else{\"MISSING\"}\\)\\))",
       "PowerShell($vd=\"C:\\\\Users\\\\fireb\\\\Documents\\\\Skald\\\\src-tauri\\\\vlc-dist\"; Remove-Item \"$vd\\\\plugins\\\\plugins.dat\" -ErrorAction SilentlyContinue; & \"$vd\\\\vlc-cache-gen.exe\" \"$vd\\\\plugins\"; Write-Output \"exit=$LASTEXITCODE\"; $f=Get-Item \"$vd\\\\plugins\\\\plugins.dat\" -ErrorAction SilentlyContinue; Write-Output \\(\"our-exe + ABSOLUTE path -> size=\" + $\\(if\\($f\\){$f.Length}else{\"MISSING\"}\\)\\))",
       "Bash(git check-ignore *)",
-      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src-tauri/tauri.conf.json','utf8'\\)\\); console.log\\('tauri.conf.json: valid JSON'\\)\")"
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('src-tauri/tauri.conf.json','utf8'\\)\\); console.log\\('tauri.conf.json: valid JSON'\\)\")",
+      "PowerShell(pnpm add @tanstack/react-virtual)",
+      "PowerShell(pnpm exec tsc --noEmit -p tsconfig.json)"
     ],
     "additionalDirectories": [
       "C:\\Program Files\\VideoLAN\\VLC"
