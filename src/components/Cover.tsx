@@ -1,4 +1,7 @@
 import { useState, useEffect, type CSSProperties } from 'react';
+// convertFileSrc turns an absolute disk path into an asset:// URL that WebView2
+// can fetch directly through Tauri's asset protocol.
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookPalette, bookTpl, bookTitle, bookAuthor, bookSeries } from '../state/onyx';
 import { getCover } from '../api/abs';
@@ -20,11 +23,12 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
   useEffect(() => {
     if (!serverUrl) return;
     let cancelled = false;
+    // get_cover now returns an absolute file path, not raw bytes — store it
+    // directly and let convertFileSrc handle the asset:// conversion at render.
     getCover(serverUrl, item.id)
-      .then(bytes => {
+      .then(path => {
         if (cancelled) return;
-        const binary = new Uint8Array(bytes).reduce((s, b) => s + String.fromCharCode(b), '');
-        setCoverSrc(`data:image/jpeg;base64,${btoa(binary)}`);
+        setCoverSrc(path);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -55,7 +59,9 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
   if (coverSrc) {
     return (
       <div style={base} className={className} onClick={onClick}>
-        <img src={coverSrc} draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
+        {/* convertFileSrc turns the absolute disk path into an asset:// URL WebView2 can load. */}
+        {/* loading="lazy" defers offscreen cover fetches until they scroll into view. */}
+        <img src={convertFileSrc(coverSrc)} loading="lazy" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
       </div>
     );
   }

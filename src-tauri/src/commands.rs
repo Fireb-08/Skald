@@ -375,18 +375,23 @@ pub async fn set_audio_device(
 pub async fn get_cover(
     server_url: String,
     item_id: String,
-) -> Result<Vec<u8>, String> {
-    if cover_cache::is_cached(&item_id) {
-        return cover_cache::load_cover(&item_id);
+) -> Result<String, String> {
+    // Returns the absolute path of the cached cover file on disk rather than its
+    // bytes. The frontend converts this path to an asset:// URL via Tauri's
+    // convertFileSrc so WebView2 can fetch the image straight from disk through
+    // the asset protocol — no base64 round-trip over the IPC bridge.
+    if !cover_cache::is_cached(&item_id) {
+        // Not yet cached: fetch from ABS and write to disk as before.
+        let token = auth::load_token()?
+            .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+        let bytes = AbsClient::new(server_url)
+            .with_token(token)
+            .fetch_cover(&item_id)
+            .await?;
+        cover_cache::save_cover(&item_id, &bytes)?;
     }
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let bytes = AbsClient::new(server_url)
-        .with_token(token)
-        .fetch_cover(&item_id)
-        .await?;
-    cover_cache::save_cover(&item_id, &bytes)?;
-    Ok(bytes)
+    // The file is now guaranteed to exist in the cache — return its path.
+    Ok(cover_cache::cache_path(&item_id).to_string_lossy().into_owned())
 }
 
 #[tauri::command]

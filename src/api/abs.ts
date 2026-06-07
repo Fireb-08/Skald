@@ -293,7 +293,10 @@ export function syncSession(
   return invoke('sync_session', { serverUrl, sessionId, currentTime, timeListened });
 }
 
-export function getCover(serverUrl: string, itemId: string): Promise<number[]> {
+// Resolves to the absolute path of the cached cover file on disk (NOT a data
+// URI or raw bytes). Pass the result through convertFileSrc() before using it
+// as an <img src> so WebView2 loads it via Tauri's asset protocol.
+export function getCover(serverUrl: string, itemId: string): Promise<string> {
   return invoke('get_cover', { serverUrl, itemId });
 }
 
