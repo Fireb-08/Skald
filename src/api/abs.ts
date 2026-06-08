@@ -430,6 +430,11 @@ export function searchBooks(
   return invoke('search_books', { serverUrl, title, author, provider });
 }
 
+// GET /api/search/providers?mediaType=… — list of metadata providers the server supports
+export function searchProviders(serverUrl: string, mediaType: string): Promise<unknown> {
+  return invoke('search_providers', { serverUrl, mediaType });
+}
+
 // ── Admin user-management wrappers ─────────────────────────────────────────
 // These four functions call the Rust admin commands. They are only invoked
 // from AccountSection when the logged-in user is admin or root.

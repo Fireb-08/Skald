@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
-import { searchBooks, updateMedia, fetchItem, getCover } from '../api/abs';
+import { searchBooks, searchProviders, updateMedia, fetchItem, getCover } from '../api/abs';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -26,12 +26,13 @@ const MATCH_ONYX = {
   mono: '"JetBrains Mono", ui-monospace, Menlo, monospace',
 };
 
-const PROVIDERS = [
-  { label: 'Audible.com',  value: 'audible'    },
-  { label: 'Google Books', value: 'google'      },
-  { label: 'iTunes',       value: 'itunes'      },
-  { label: 'Open Library', value: 'openlibrary' },
-  { label: 'FantLab.ru',   value: 'fantlab'     },
+// Used only if the live GET /api/search/providers fetch fails or returns nothing.
+const FALLBACK_PROVIDERS = [
+  { id: 'audible',    name: 'Audible.com'  },
+  { id: 'google',     name: 'Google Books' },
+  { id: 'itunes',     name: 'iTunes'       },
+  { id: 'openlibrary',name: 'Open Library' },
+  { id: 'fantlab',    name: 'FantLab.ru'   },
 ];
 
 /* Match modal local tokens — extends global Onyx theme */
@@ -411,6 +412,8 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
 
   // ── Search screen state ───────────────────────────────────────────────────
   const [provider, setProvider]       = useState('audible');
+  // Holds the list of metadata providers fetched from the server
+  const [providers, setProviders]     = useState<{ id: string; name: string }[]>([]);
   const [queryTitle, setQueryTitle]   = useState(meta.title ?? '');
   const [queryAuthor, setQueryAuthor] = useState(bookAuthor(item));
   const [searching, setSearching]     = useState(false);
@@ -435,6 +438,34 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
       .catch(() => {});
     return () => { cancelled = true; };
   }, [serverUrl, item.id]);
+
+  // Fetch the live provider list from GET /api/search/providers?mediaType=book
+  // (Bearer-authenticated via the existing invoke wrapper). Falls back to a
+  // minimal hardcoded list on failure or an empty response.
+  useEffect(() => {
+    let cancelled = false;
+    searchProviders(serverUrl, 'book')
+      .then(raw => {
+        if (cancelled) return;
+        const arr = Array.isArray(raw)
+          ? raw as { id: string; name: string }[]
+          : ((raw as Record<string, unknown>)?.providers as { id: string; name: string }[] ?? []);
+        const list = arr.length > 0 ? arr : (() => {
+          console.warn('[MatchModal] /api/search/providers returned no providers — using fallback list');
+          return FALLBACK_PROVIDERS;
+        })();
+        setProviders(list);
+        // Re-point the selection at the new list if the current value isn't in it
+        setProvider(p => list.some(x => x.id === p) ? p : (list[0]?.id ?? 'audible'));
+      })
+      .catch(e => {
+        if (cancelled) return;
+        console.warn('[MatchModal] failed to fetch /api/search/providers:', e);
+        setProviders(FALLBACK_PROVIDERS);
+        setProvider(p => FALLBACK_PROVIDERS.some(x => x.id === p) ? p : (FALLBACK_PROVIDERS[0]?.id ?? 'audible'));
+      });
+    return () => { cancelled = true; };
+  }, [serverUrl]);
 
   // ── Option B review state (replaces checked / editedValues) ───────────────
   const [base, setBase]               = useState<Record<string, 'incoming' | 'current'>>({});
@@ -589,7 +620,8 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
     textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 5,
   };
 
-  const providerLabel = PROVIDERS.find(p => p.value === provider)?.label ?? provider;
+  const providerLabel = providers.find(p => p.id === provider)?.name ?? provider;
+  const providersLoading = providers.length === 0;
 
   // ── Modal JSX ─────────────────────────────────────────────────────────────
   const modal = (
@@ -624,8 +656,11 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
             <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--onyx-line)', display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', flexShrink: 0 }}>
               <div style={{ display: 'flex', flexDirection: 'column', minWidth: 140 }}>
                 <div style={labelStyle}>Provider</div>
-                <select value={provider} onChange={e => setProvider(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-                  {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                <select value={provider} onChange={e => setProvider(e.target.value)} disabled={providersLoading}
+                  style={{ ...inputStyle, cursor: providersLoading ? 'default' : 'pointer', opacity: providersLoading ? 0.6 : 1 }}>
+                  {providersLoading
+                    ? <option value={provider}>Loading…</option>
+                    : providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 160 }}>

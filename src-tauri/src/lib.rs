@@ -103,6 +103,7 @@ pub fn run() {
             commands::delete_progress,
             commands::update_media,
             commands::search_books,
+            commands::search_providers,
             commands::get_cache_dir,
             commands::reveal_cache_dir,
             // Library disk cache — read/write for offline launch fallback

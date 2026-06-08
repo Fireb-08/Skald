@@ -427,6 +427,19 @@ pub async fn search_books(
 }
 
 #[tauri::command]
+pub async fn search_providers(
+    server_url: String,
+    media_type: String,
+) -> Result<serde_json::Value, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .search_providers(&media_type)
+        .await
+}
+
+#[tauri::command]
 pub async fn delete_item(
     server_url: String,
     item_id: String,

@@ -480,6 +480,24 @@ impl AbsClient {
         resp.json().await.map_err(|e| e.to_string())
     }
 
+    /// GET /api/search/providers?mediaType=…
+    pub async fn search_providers(&self, media_type: &str) -> Result<serde_json::Value, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/search/providers", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .query(&[("mediaType", media_type)])
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("search_providers failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
     /// POST /api/session/{id}/close  (confirmed against ApiRouter.js)
     pub async fn close_session(
         &self,
