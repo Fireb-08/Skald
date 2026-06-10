@@ -183,7 +183,8 @@
       "Read(//c/Users/fireb/AppData/Local/Skald/Skald/cache/**)",
       "Read(//c/Users/fireb/AppData/Roaming/**)",
       "Bash(powershell -NoProfile -Command \"\\(Get-Item 'src-tauri\\\\target\\\\debug\\\\skald.exe'\\).LastWriteTime\")",
-      "Bash(powershell -NoProfile -Command \"Get-Item 'src-tauri\\\\src\\\\api.rs','src-tauri\\\\src\\\\commands.rs','src-tauri\\\\src\\\\lib.rs' | Select-Object Name,LastWriteTime\")"
+      "Bash(powershell -NoProfile -Command \"Get-Item 'src-tauri\\\\src\\\\api.rs','src-tauri\\\\src\\\\commands.rs','src-tauri\\\\src\\\\lib.rs' | Select-Object Name,LastWriteTime\")",
+      "Bash(python -c ' *)"
     ],
     "additionalDirectories": [
       "C:\\Program Files\\VideoLAN\\VLC"

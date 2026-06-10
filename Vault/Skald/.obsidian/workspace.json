@@ -104,9 +104,37 @@
               "icon": "lucide-file",
               "title": "Remaining bugs and fixes"
             }
+          },
+          {
+            "id": "61694a0de4baeefb",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Skald vs. Audiobookshelf WebUI — Feature Gap Analysis.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Skald vs. Audiobookshelf WebUI — Feature Gap Analysis"
+            }
+          },
+          {
+            "id": "aecc5a4232dad3c9",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Playlist Implementation Roadmap.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Playlist Implementation Roadmap"
+            }
           }
         ],
-        "currentTab": 6
+        "currentTab": 8
       }
     ],
     "direction": "vertical"
@@ -268,15 +296,17 @@
       "bases:Create new base": false
     }
   },
-  "active": "f511ba3c6c258345",
+  "active": "aecc5a4232dad3c9",
   "lastOpenFiles": [
-    "SKALD CODEBASE DUPLICATION AUDIT REPORT.md",
+    "Skald vs. Audiobookshelf WebUI — Feature Gap Analysis.md",
+    "Playlist Implementation Roadmap.md",
     "Skald Download Implementation Roadmap.md",
+    "SKALD CODEBASE DUPLICATION AUDIT REPORT.md",
     "Skald Live sync Roadmap.md",
     "Skald Roadmap.md",
+    "Remaining bugs and fixes.md",
     "Untitled.md",
     "Useful commands.md",
-    "Remaining bugs and fixes.md",
     "Welcome.md"
   ]
 }
