@@ -64,14 +64,40 @@ pub fn run() {
         .manage(socket_state) // Socket.IO client — accessed by connect/disconnect commands
         .manage(cancel_registry) // per-download CancellationTokens — accessed by cancel_download
         .setup(|app| {
+            use tauri::Manager;
+
             // Set VLC_PLUGIN_PATH to the bundled plugins directory so LibVLC can
             // find its codecs/demuxers regardless of whether VLC is installed on
             // the target machine. Must run before the first Instance::new() call,
             // which is lazy (triggered by open_playback_session / play_local_file).
-            use tauri::Manager;
             if let Ok(resource_dir) = app.path().resource_dir() {
                 std::env::set_var("VLC_PLUGIN_PATH", resource_dir.join("plugins"));
             }
+
+            // The main window is created here instead of in tauri.conf.json so we
+            // can call disable_file_drop_handler(). Tauri 2.x removed fileDropEnabled
+            // from the JSON config schema — the option only exists on the builder.
+            //
+            // Without this, WebView2 registers a native IDropTarget that intercepts
+            // ALL drag events and returns DROPEFFECT_NONE for internal DOM drags,
+            // which forces the OS "no-drop" cursor regardless of the JS dropEffect.
+            let win = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App(std::path::PathBuf::default()),
+            )
+            .title("Skald")
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(1024.0, 640.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(true)
+            .disable_drag_drop_handler()
+            .build()?;
+
+            // [DND-DIAG] Confirm the handler was disabled at startup.
+            eprintln!("[DND-DIAG] Window '{}' created with file-drop handler disabled", win.label());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

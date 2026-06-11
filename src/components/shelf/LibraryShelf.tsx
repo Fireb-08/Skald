@@ -430,7 +430,12 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     return true;
   });
 
-  if (st.contextFilter?.kind === 'series') {
+  if (st.contextFilter?.kind === 'playlist') {
+    // Sort by the playlist's item order, not the library's default sort.
+    const order = st.contextFilter.bookIds ?? [];
+    filtered.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    console.log('[PLAYLIST-DIAG] shelf sorted by playlist order:', filtered.map(b => bookTitle(b)));
+  } else if (st.contextFilter?.kind === 'series') {
     filtered.sort((a, b) => seriesVolOf(bookSeries(a)) - seriesVolOf(bookSeries(b)));
   } else if (st.librarySort === 'title') {
     filtered.sort((a, b) => bookTitle(a).localeCompare(bookTitle(b)));
@@ -461,6 +466,9 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     st.contextFilter?.kind ?? '',
     st.contextFilter?.value ?? '',
     st.search,
+    // Include bookIds so a playlist reorder forces the virtualizer to remount
+    // with the new sort order rather than serving the stale cached layout.
+    (st.contextFilter?.bookIds ?? []).join(','),
   ].join('|');
 
   const openBook = (id: string) => {

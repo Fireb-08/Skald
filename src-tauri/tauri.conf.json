@@ -10,19 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Skald",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 1024,
-        "minHeight": 640,
-        "decorations": false,
-        "transparent": true,
-        "shadow": true,
-        "devtools": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null,
       "assetProtocol": {
