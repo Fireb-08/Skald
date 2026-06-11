@@ -41,11 +41,13 @@ export interface AudioDevice {
 }
 
 export interface ContextFilter {
-  kind: 'series' | 'author' | 'narrator' | 'collection';
+  kind: 'series' | 'author' | 'narrator' | 'collection' | 'playlist';
   value: string;
   bookIds?: string[];
   // For series filters: the ABS series ID used for exact book matching.
   seriesId?: string;
+  // For playlist filters: the ABS playlist ID.
+  playlistId?: string;
 }
 
 export interface ChapterPosition {
