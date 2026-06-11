@@ -1640,3 +1640,71 @@ pub async fn reset_eq(
     Ok(())
 }
 
+// ── Library management commands (admin only) ─────────────────────────────────
+// All five commands require an admin or root token. ABS enforces this server-side
+// and returns HTTP 403 for unauthorized callers.
+
+/// Returns all libraries with the full expanded shape (folders, settings, timestamps).
+/// Functionally identical to fetch_libraries now that Library carries all fields,
+/// but exposed under a distinct command name so the LibrariesSection can call it
+/// without aliasing concerns in the frontend.
+#[tauri::command]
+pub async fn get_libraries_full(server_url: String) -> Result<Vec<models::Library>, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url).with_token(token).get_libraries().await
+}
+
+/// Creates a new library on the server and returns the created Library.
+#[tauri::command]
+pub async fn create_library(
+    server_url: String,
+    name: String,
+    media_type: String,
+    folders: Vec<models::FolderInput>,
+    icon: Option<String>,
+    provider: Option<String>,
+    settings: Option<models::LibrarySettings>,
+) -> Result<models::Library, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let payload = models::CreateLibraryPayload { name, media_type, folders, icon, provider, settings };
+    AbsClient::new(server_url).with_token(token).create_library(&payload).await
+}
+
+/// Partially updates a library. Only fields set in the payload are sent to the server.
+#[tauri::command]
+pub async fn update_library(
+    server_url: String,
+    library_id: String,
+    payload: models::UpdateLibraryPayload,
+) -> Result<models::Library, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url).with_token(token).update_library(&library_id, &payload).await
+}
+
+/// Permanently deletes a library and all its items. Returns the deleted Library.
+#[tauri::command]
+pub async fn delete_library(
+    server_url: String,
+    library_id: String,
+) -> Result<models::Library, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url).with_token(token).delete_library(&library_id).await
+}
+
+/// Triggers a server-side library scan. `force=true` requests a full rescan;
+/// `force=false` runs an incremental scan. The server runs asynchronously.
+#[tauri::command]
+pub async fn scan_library(
+    server_url: String,
+    library_id: String,
+    force: bool,
+) -> Result<(), String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url).with_token(token).scan_library(&library_id, force).await
+}
+

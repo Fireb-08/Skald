@@ -201,6 +201,12 @@ pub fn run() {
             commands::set_eq_preamp,
             commands::apply_eq_preset,
             commands::reset_eq,
+            // Library management (admin/root only — ABS enforces this server-side)
+            commands::get_libraries_full,
+            commands::create_library,
+            commands::update_library,
+            commands::delete_library,
+            commands::scan_library,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
