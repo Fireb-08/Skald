@@ -196,3 +196,46 @@ input:focus-visible {
 .shelf-tab-pill::-webkit-scrollbar {
   display: none;
 }
+
+/* ─── Settings: styled native select ────────────────────────────────────── */
+
+.onyx-select {
+  padding: 6px 28px 6px 12px;
+  background-color: var(--onyx-glass);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(235%2C231%2C223%2C0.5)' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  border: 1px solid var(--onyx-glass-edge);
+  border-radius: 8px;
+  color: var(--onyx-text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 160px;
+}
+.onyx-select:hover  { border-color: var(--onyx-glass-hover); }
+.onyx-select:focus  { border-color: var(--onyx-accent-edge); }
+.onyx-select option { background: var(--onyx-panel2); color: var(--onyx-text); }
+
+/* ─── Equalizer: vertical band sliders ──────────────────────────────────── */
+
+.onyx-eq-slider::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  width: 3px;
+}
+
+.onyx-eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--onyx-accent);
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(212, 166, 74, 0.4);
+}
