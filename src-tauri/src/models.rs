@@ -94,13 +94,115 @@ pub struct LibrarySeriesResponse {
     pub results: Vec<LibrarySeries>,
 }
 
-/// A single Audiobookshelf library.
+/// A single folder path attached to a library (response shape).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFolder {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub full_path: String,
+    #[serde(default)]
+    pub library_id: Option<String>,
+    #[serde(default)]
+    pub added_at: Option<i64>,
+}
+
+/// Per-library settings block returned by GET /api/libraries and relatives.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySettings {
+    #[serde(default)]
+    pub cover_aspect_ratio: Option<i32>,
+    #[serde(default)]
+    pub disable_watcher: Option<bool>,
+    #[serde(default)]
+    pub auto_scan_cron_expression: Option<String>,
+    #[serde(default)]
+    pub audiobooks_only: Option<bool>,
+    #[serde(default)]
+    pub hide_single_book_series: Option<bool>,
+    #[serde(default)]
+    pub only_show_later_books_in_continue_series: Option<bool>,
+    #[serde(default)]
+    pub skip_matching_media_with_asin: Option<bool>,
+    #[serde(default)]
+    pub skip_matching_media_with_isbn: Option<bool>,
+    #[serde(default)]
+    pub metadata_precedence: Option<Vec<String>>,
+    #[serde(default)]
+    pub mark_as_finished_percent_complete: Option<f32>,
+    #[serde(default)]
+    pub mark_as_finished_time_remaining: Option<f32>,
+    #[serde(default)]
+    pub podcast_search_region: Option<String>,
+    #[serde(default)]
+    pub epubs_allow_scripted_content: Option<bool>,
+}
+
+/// A single Audiobookshelf library — full shape from GET /api/libraries.
+/// All fields beyond id/name/mediaType use #[serde(default)] so the struct
+/// also deserialises correctly from minimal responses that omit them.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Library {
     pub id: String,
     pub name: String,
     pub media_type: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub display_order: Option<i32>,
+    #[serde(default)]
+    pub folders: Vec<LibraryFolder>,
+    #[serde(default)]
+    pub settings: Option<LibrarySettings>,
+    #[serde(default)]
+    pub last_scan: Option<i64>,
+    #[serde(default)]
+    pub created_at: Option<i64>,
+    #[serde(default)]
+    pub last_update: Option<i64>,
+}
+
+/// Minimal folder path entry used in create/update request bodies.
+/// Only fullPath is required; the server assigns id and libraryId.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderInput {
+    pub full_path: String,
+}
+
+/// Request body for POST /api/libraries.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateLibraryPayload {
+    pub name: String,
+    pub media_type: String,
+    pub folders: Vec<FolderInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<LibrarySettings>,
+}
+
+/// Request body for PATCH /api/libraries/:id — all fields optional.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLibraryPayload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<FolderInput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub settings: Option<LibrarySettings>,
 }
 
 /// Metadata block inside a LibraryFile entry.

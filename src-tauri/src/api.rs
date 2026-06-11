@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, User, UserStats};
+use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -1093,6 +1093,99 @@ impl AbsClient {
         }
 
         resp.json().await.map_err(|e| e.to_string())
+    }
+
+    // ── Library management endpoints (admin only) ────────────────────────────
+    // All four endpoints require an admin or root token. Ordinary users will
+    // receive HTTP 403 from the ABS server.
+
+    /// POST /api/libraries — creates a new library and returns the full Library object.
+    pub async fn create_library(&self, payload: &CreateLibraryPayload) -> Result<Library, String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/libraries", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("create_library failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// PATCH /api/libraries/{id} — partially updates a library and returns the updated Library.
+    /// Folder list in the payload replaces the existing folder list on the server.
+    pub async fn update_library(
+        &self,
+        library_id: &str,
+        payload: &UpdateLibraryPayload,
+    ) -> Result<Library, String> {
+        let resp = self
+            .http
+            .patch(format!("{}/api/libraries/{library_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("update_library failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// DELETE /api/libraries/{id} — permanently deletes a library and all its items.
+    /// ABS wraps the deleted library in { "library": {...} } on success.
+    pub async fn delete_library(&self, library_id: &str) -> Result<Library, String> {
+        #[derive(serde::Deserialize)]
+        struct Wrapper { library: Library }
+
+        let resp = self
+            .http
+            .delete(format!("{}/api/libraries/{library_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("delete_library failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.library)
+    }
+
+    /// POST /api/libraries/{id}/scan — triggers a server-side scan.
+    /// `force=true` appends `?force=1` to request a full rescan rather than
+    /// an incremental one. The server runs the scan asynchronously and returns
+    /// immediately; there is no completion callback.
+    pub async fn scan_library(&self, library_id: &str, force: bool) -> Result<(), String> {
+        let url = if force {
+            format!("{}/api/libraries/{library_id}/scan?force=1", self.root())
+        } else {
+            format!("{}/api/libraries/{library_id}/scan", self.root())
+        };
+
+        let resp = self
+            .http
+            .post(url)
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("scan_library failed: HTTP {}", resp.status()));
+        }
+
+        Ok(())
     }
 
     /// POST /api/playlists/collection/{id} — creates a playlist pre-populated with
