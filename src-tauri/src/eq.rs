@@ -1,18 +1,50 @@
-use std::ffi::CStr;
-use std::os::raw::c_char;
-use std::ffi::c_void;
 use serde::{Deserialize, Serialize};
 
-// Only the FFI symbols needed for from_preset are declared here; the full set
-// (set/apply/disable) lives in audio.rs alongside the AudioPlayer that owns the handle.
-extern "C" {
-    fn libvlc_audio_equalizer_new_from_preset(index: u32) -> *mut c_void;
-    fn libvlc_audio_equalizer_release(p_equalizer: *mut c_void);
-    fn libvlc_audio_equalizer_get_preamp(p_eq: *mut c_void) -> f32;
-    fn libvlc_audio_equalizer_get_amp_at_index(p_eq: *mut c_void, band: u32) -> f32;
-    fn libvlc_audio_equalizer_get_band_count() -> u32;
-    fn libvlc_audio_equalizer_get_preset_name(index: u32) -> *const c_char;
+// Audiobook-focused EQ presets. Bands map to LibVLC's fixed 10-band centres:
+// 60, 170, 310, 600, 1k, 3k, 6k, 12k, 14k, 16k Hz.
+pub struct Preset {
+    pub name: &'static str,
+    pub preamp: f32,
+    pub bands: [f32; 10],
 }
+
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        name: "Voice Clarity",
+        preamp: 0.0,
+        bands: [-2.0, -3.0, -4.0, -2.0, 0.0, 4.0, 2.0, 1.0, 0.0, 0.0],
+    },
+    Preset {
+        name: "Warm Narrator",
+        preamp: 0.0,
+        bands: [1.0, 2.0, 0.0, -1.0, 0.0, 2.0, 0.0, -1.0, -2.0, -3.0],
+    },
+    Preset {
+        name: "Commute",
+        preamp: -2.0,
+        bands: [-6.0, -5.0, -4.0, -2.0, 2.0, 6.0, 4.0, 2.0, 0.0, 0.0],
+    },
+    Preset {
+        name: "Night Mode",
+        preamp: 2.0,
+        bands: [-3.0, -2.0, 0.0, 1.0, 3.0, 4.0, 2.0, 0.0, 0.0, 0.0],
+    },
+    Preset {
+        name: "Headphones",
+        preamp: 0.0,
+        bands: [-3.0, -2.0, -2.0, 0.0, 0.0, 3.0, -1.0, 0.0, -1.0, -2.0],
+    },
+    Preset {
+        name: "Speakers",
+        preamp: 0.0,
+        bands: [-4.0, -3.0, -2.0, -1.0, 0.0, 3.0, 2.0, 1.0, 0.0, 0.0],
+    },
+    Preset {
+        name: "De-Harsh",
+        preamp: 0.0,
+        bands: [0.0, 0.0, -1.0, 0.0, 0.0, 2.0, -3.0, -2.0, -3.0, -4.0],
+    },
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,28 +67,16 @@ impl Default for EqSettings {
 }
 
 impl EqSettings {
-    /// Load one of LibVLC's built-in presets by index into an EqSettings.
-    pub fn from_preset(index: u32) -> Self {
-        unsafe {
-            let eq = libvlc_audio_equalizer_new_from_preset(index);
-            if eq.is_null() {
-                return Self::default();
-            }
-            let preamp = libvlc_audio_equalizer_get_preamp(eq);
-            let count = (libvlc_audio_equalizer_get_band_count() as usize).min(10);
-            let mut bands = [0.0f32; 10];
-            for i in 0..count {
-                bands[i] = libvlc_audio_equalizer_get_amp_at_index(eq, i as u32);
-            }
-            let name_ptr = libvlc_audio_equalizer_get_preset_name(index);
-            let preset_name = if name_ptr.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(name_ptr).to_string_lossy().into_owned())
-            };
-            libvlc_audio_equalizer_release(eq);
-            Self { enabled: true, preamp, bands, preset_name }
-        }
+    /// Build an EqSettings from one of the custom audiobook presets by index.
+    /// Returns `None` if the index is out of range.
+    pub fn from_custom_preset(index: u32) -> Option<Self> {
+        let p = PRESETS.get(index as usize)?;
+        Some(Self {
+            enabled: true,
+            preamp: p.preamp,
+            bands: p.bands,
+            preset_name: Some(p.name.to_string()),
+        })
     }
 
     /// Read persisted settings from disk. Returns `Default` if the file does

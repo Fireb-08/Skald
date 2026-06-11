@@ -1541,10 +1541,10 @@ pub async fn create_playlist_from_collection(
 
 #[tauri::command]
 pub fn get_eq_presets() -> Result<Vec<models::EqPreset>, String> {
-    Ok(audio::eq_preset_names()
-        .into_iter()
+    Ok(crate::eq::PRESETS
+        .iter()
         .enumerate()
-        .map(|(i, name)| models::EqPreset { index: i as u32, name })
+        .map(|(i, p)| models::EqPreset { index: i as u32, name: p.name.to_string() })
         .collect())
 }
 
@@ -1617,7 +1617,8 @@ pub async fn apply_eq_preset(
 ) -> Result<(), String> {
     let player_arc = Arc::clone(&state.lock().await.player);
     let guard = player_arc.lock().unwrap();
-    let settings = EqSettings::from_preset(index);
+    let settings = EqSettings::from_custom_preset(index)
+        .unwrap_or_default();
     if let Some(p) = guard.as_ref() {
         p.apply_eq_settings(&settings);
     }

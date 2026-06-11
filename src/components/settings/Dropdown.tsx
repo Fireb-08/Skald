@@ -5,6 +5,7 @@
 // is anchored correctly regardless of scroll position.
 
 import { useRef, useState, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import Icon, { type IconName } from '../Icon';
 import { MONO } from './shared';
 
@@ -134,8 +135,10 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
         </span>
       </button>
 
-      {/* Fixed-position popout — only mounted when open */}
-      {open && rect && (
+      {/* Fixed-position popout — portalled into document.body to escape any
+          ancestor backdrop-filter, which would otherwise create a new containing
+          block and break position:fixed viewport anchoring. */}
+      {open && rect && createPortal(
         <div
           ref={dropdownRef}
           style={{
@@ -208,7 +211,8 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

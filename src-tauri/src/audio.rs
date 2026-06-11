@@ -17,16 +17,11 @@ extern "C" {
     fn libvlc_audio_output_device_list_release(p_list: *mut LibVlcAudioOutputDevice);
     fn libvlc_audio_output_device_set(p_mi: *mut c_void, psz_aout: *const c_char, psz_device: *const c_char);
     fn libvlc_audio_equalizer_new() -> *mut c_void;
-    fn libvlc_audio_equalizer_new_from_preset(index: u32) -> *mut c_void;
     fn libvlc_audio_equalizer_release(p_equalizer: *mut c_void);
     fn libvlc_audio_equalizer_set_preamp(p_eq: *mut c_void, f_preamp: f32) -> i32;
-    fn libvlc_audio_equalizer_get_preamp(p_eq: *mut c_void) -> f32;
     fn libvlc_audio_equalizer_set_amp_at_index(p_eq: *mut c_void, amp: f32, band: u32) -> i32;
-    fn libvlc_audio_equalizer_get_amp_at_index(p_eq: *mut c_void, band: u32) -> f32;
     fn libvlc_audio_equalizer_get_band_count() -> u32;
     fn libvlc_audio_equalizer_get_band_frequency(index: u32) -> f32;
-    fn libvlc_audio_equalizer_get_preset_count() -> u32;
-    fn libvlc_audio_equalizer_get_preset_name(index: u32) -> *const c_char;
     fn libvlc_media_player_set_equalizer(mp: *mut c_void, p_eq: *mut c_void) -> i32;
 }
 
@@ -240,21 +235,6 @@ impl AudioPlayer {
         }
     }
 
-    /// Returns the names of all LibVLC built-in presets. Static query — no
-    /// player state needed.
-    pub fn get_preset_names(&self) -> Vec<String> {
-        unsafe {
-            let count = libvlc_audio_equalizer_get_preset_count();
-            (0..count)
-                .filter_map(|i| {
-                    let ptr = libvlc_audio_equalizer_get_preset_name(i);
-                    if ptr.is_null() { None }
-                    else { Some(CStr::from_ptr(ptr).to_string_lossy().into_owned()) }
-                })
-                .collect()
-        }
-    }
-
     /// Returns the center frequency (Hz) for each EQ band. Static query.
     pub fn get_band_frequencies(&self) -> Vec<f32> {
         unsafe {
@@ -263,20 +243,6 @@ impl AudioPlayer {
                 .map(|i| libvlc_audio_equalizer_get_band_frequency(i))
                 .collect()
         }
-    }
-}
-
-/// Returns the names of all LibVLC built-in presets. Does not require a live player.
-pub fn eq_preset_names() -> Vec<String> {
-    unsafe {
-        let count = libvlc_audio_equalizer_get_preset_count();
-        (0..count)
-            .filter_map(|i| {
-                let ptr = libvlc_audio_equalizer_get_preset_name(i);
-                if ptr.is_null() { None }
-                else { Some(CStr::from_ptr(ptr).to_string_lossy().into_owned()) }
-            })
-            .collect()
     }
 }
 
