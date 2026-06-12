@@ -226,6 +226,9 @@ pub fn run() {
             commands::create_backup,
             commands::delete_backup,
             commands::apply_backup,
+            // Scheduled tasks (admin-gated in the UI)
+            commands::get_tasks,
+            commands::validate_cron,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -17,6 +17,7 @@ import {
   IntegrationsSection,
   NotificationsSection,
   BackupSection,
+  ScheduledTasksSection,
 } from '../components/settings';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -24,7 +25,7 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace";
 export interface SettingsProps { st: OnyxState; onLogout: () => void; }
 
 type SectionId =
-  | 'account' | 'server' | 'notifications' | 'backups' | 'playback' | 'audio'
+  | 'account' | 'server' | 'notifications' | 'backups' | 'scheduled-tasks' | 'playback' | 'audio'
   | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about' | 'integrations';
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
@@ -34,6 +35,7 @@ const NAV: NavSection[] = [
   { id: 'server',          label: 'Server',          icon: 'monitor'    },
   { id: 'notifications',   label: 'Notifications',   icon: 'airplay'    },
   { id: 'backups',         label: 'Backups',         icon: 'bookmark'   },
+  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep'      },
   { id: 'playback',   label: 'Playback',   icon: 'play'       },
   { id: 'audio',      label: 'Audio',      icon: 'headphones' },
   { id: 'library',    label: 'Library',    icon: 'grid'       },
@@ -76,7 +78,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           {NAV.map(s => {
             // Hide admin-only sections from non-admin users
-            if ((s.id === 'notifications' || s.id === 'backups') && !st.isAdmin) return null;
+            if ((s.id === 'notifications' || s.id === 'backups' || s.id === 'scheduled-tasks') && !st.isAdmin) return null;
             // Build the label — append a count badge for Downloads when books are present.
             // This gives the user an at-a-glance view of how many books are stored offline.
             const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
@@ -111,6 +113,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
           {section === 'server'           && <ServerSection st={st} />}
           {section === 'notifications'    && <NotificationsSection st={st} />}
           {section === 'backups'          && <BackupSection st={st} />}
+          {section === 'scheduled-tasks'  && <ScheduledTasksSection st={st} />}
           {/* st is passed so the Sessions subtab can access serverUrl and user type */}
           {section === 'playback'   && <PlaybackSection st={st} />}
           {section === 'audio'      && <AudioSection />}

@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 use tauri::Emitter; // .emit() on AppHandle is a trait method — must be in scope
 use tokio_util::sync::CancellationToken;
 
-use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, NotificationSettings, NotificationsResponse, ServerSettings}, session::SessionManager, socket};
+use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, NotificationSettings, NotificationsResponse, ServerSettings, TasksResponse}, session::SessionManager, socket};
 
 // Close an async file handle and delete the file from disk.
 // On Windows, an open file handle prevents remove_file from succeeding, so the
@@ -223,6 +223,39 @@ pub async fn apply_backup(server_url: String, id: String) -> Result<(), String> 
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
     AbsClient::new(server_url).with_token(token).apply_backup(&id).await
+}
+
+// ── Scheduled tasks ──────────────────────────────────────────────────────────
+// Diagnostic logging retained for the whole scheduled-tasks roadmap per
+// CLAUDE.md, then stripped in a final cleanup pass once validated.
+
+/// GET /api/tasks — current + recently-finished background tasks.
+#[tauri::command]
+pub async fn get_tasks(server_url: String) -> Result<TasksResponse, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).get_tasks().await;
+    match &result {
+        Ok(r) => {
+            let running = r.tasks.iter().filter(|t| !t.is_finished).count();
+            println!("[Tasks] get_tasks OK — {} task(s), {} running", r.tasks.len(), running);
+        }
+        Err(e) => println!("[Tasks] get_tasks FAILED: {e}"),
+    }
+    result
+}
+
+/// POST /api/validate-cron — true if the cron expression is valid.
+#[tauri::command]
+pub async fn validate_cron(server_url: String, expression: String) -> Result<bool, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).validate_cron(&expression).await;
+    match &result {
+        Ok(valid) => println!("[Tasks] validate_cron '{expression}' → valid: {valid}"),
+        Err(e) => println!("[Tasks] validate_cron FAILED: {e}"),
+    }
+    result
 }
 
 #[tauri::command]

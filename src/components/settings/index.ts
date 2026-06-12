@@ -25,3 +25,5 @@ export { default as NotificationsSection } from './NotificationsSection';
 export type { NotificationsSectionProps } from './NotificationsSection';
 export { default as BackupSection } from './BackupSection';
 export type { BackupSectionProps } from './BackupSection';
+export { default as ScheduledTasksSection } from './ScheduledTasksSection';
+export type { ScheduledTasksSectionProps } from './ScheduledTasksSection';

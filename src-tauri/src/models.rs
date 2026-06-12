@@ -858,3 +858,46 @@ pub struct BackupsResponse {
     #[serde(default)]
     pub backup_path_env_set: bool,
 }
+
+// ── Tasks ────────────────────────────────────────────────────────────────────
+// GET /api/tasks returns all current + recently-finished background operations
+// (library scans, metadata embeds, m4b encodes, backups, …). Shapes verified
+// against server/objects/Task.js. Newer ABS uses i18n keys (titleKey/…); we keep
+// both the plain string and the key so the UI can fall back to whichever is set.
+
+/// One background task reported by the server.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Task {
+    pub id: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_key: Option<String>,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_key: Option<String>,
+    /// running = !is_finished.
+    #[serde(default)]
+    pub is_finished: bool,
+    #[serde(default)]
+    pub is_failed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<i64>,
+}
+
+/// Response shape of GET /api/tasks.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TasksResponse {
+    #[serde(default)]
+    pub tasks: Vec<Task>,
+}

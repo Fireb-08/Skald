@@ -1199,3 +1199,40 @@ export function applyBackup(serverUrl: string, id: string): Promise<void> {
   return invoke('apply_backup', { serverUrl, id });
 }
 
+// ── Scheduled tasks ─────────────────────────────────────────────────────────────
+// Mirrors the Task models in src-tauri/src/models.rs. GET /api/tasks lists current
+// and recently-finished background operations; POST /api/validate-cron validates a
+// cron expression. Gated to admins in the UI for consistency with the server panels.
+
+/** One background task. Newer ABS populates the *Key fields (i18n); fall back to
+ *  the plain string when the key is what's set. Running = !isFinished. */
+export interface Task {
+  id: string;
+  action: string;
+  title: string;
+  titleKey?: string | null;
+  description: string;
+  descriptionKey?: string | null;
+  error?: string | null;
+  errorKey?: string | null;
+  isFinished: boolean;
+  isFailed: boolean;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+}
+
+/** Response of GET /api/tasks. */
+export interface TasksResponse {
+  tasks: Task[];
+}
+
+/** GET /api/tasks — current + recently-finished background tasks. */
+export function getTasks(serverUrl: string): Promise<TasksResponse> {
+  return invoke('get_tasks', { serverUrl });
+}
+
+/** POST /api/validate-cron — resolves true if the cron expression is valid. */
+export function validateCron(serverUrl: string, expression: string): Promise<boolean> {
+  return invoke('validate_cron', { serverUrl, expression });
+}
+

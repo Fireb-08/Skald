@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -355,6 +355,46 @@ impl AbsClient {
             // The server commonly restarts mid-request; a dropped connection here
             // means the restore was accepted and ABS is restarting, not a failure.
             Err(_) => Ok(()),
+        }
+    }
+
+    // ── Tasks / scheduling ───────────────────────────────────────────────────
+
+    /// GET /api/tasks — current + recently-finished background tasks. ABS does
+    /// not require admin here, but Skald gates the UI to admins.
+    pub async fn get_tasks(&self) -> Result<TasksResponse, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/tasks", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_tasks failed: HTTP {}", resp.status()));
+        }
+
+        resp.json::<TasksResponse>().await.map_err(|e| e.to_string())
+    }
+
+    /// POST /api/validate-cron — validate a cron expression. ABS responds 200 for
+    /// a valid expression and 400 for an invalid one, so map those to Ok(true) /
+    /// Ok(false); any other status is a real error.
+    pub async fn validate_cron(&self, expression: &str) -> Result<bool, String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/validate-cron", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({ "expression": expression }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        match resp.status().as_u16() {
+            200 => Ok(true),
+            400 => Ok(false),
+            other => Err(format!("validate_cron failed: HTTP {other}")),
         }
     }
 
