@@ -21,9 +21,12 @@ type ConnectionStatus = 'off' | 'connected' | 'reconnecting';
 export interface SyncSectionProps {
   // OnyxState supplies serverUrl, authToken (for connect) and setToast (for errors).
   st: OnyxState;
+  /** When true, render only the live-sync row (no SectionHead) for embedding
+   *  under the Server panel. */
+  embedded?: boolean;
 }
 
-export default function SyncSection({ st }: SyncSectionProps) {
+export default function SyncSection({ st, embedded = false }: SyncSectionProps) {
   // Live-sync toggle preference — persisted to 'onyx.sync.live' in localStorage.
   // Read by App.tsx and AccountSection to restore the connection on startup.
   const [liveSync, setLiveSync] = useLocal<boolean>('onyx.sync.live', false);
@@ -171,50 +174,56 @@ export default function SyncSection({ st }: SyncSectionProps) {
                   : connectionStatus === 'reconnecting' ? 'Reconnecting…'
                   :                                       'Off';
 
+  // ── Live sync toggle row ── (shared by the standalone and embedded layouts)
+  const liveSyncRow = (
+    <Row
+      label="Live sync"
+      hint="Maintain a live connection to the server for real-time progress and library updates."
+    >
+      {/* Right-side slot: connection indicator + toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
+        {/* Live connection status — dot + label. Always rendered (not hidden
+            when liveSync is false) so the user can see 'Off' as a baseline. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+
+          {/* 6 px filled circle — colour encodes state at a glance */}
+          <div style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            background: dotColor,
+            flexShrink: 0,
+          }} />
+
+          {/* Mono 10 px label — compact, technical feel matching Onyx aesthetics */}
+          <span style={{
+            fontFamily: MONO,
+            fontSize: 10,
+            letterSpacing: '0.04em',
+            color: labelColor,
+          }}>
+            {labelText}
+          </span>
+        </div>
+
+        {/* Toggle — calls handleToggle which drives the Rust socket commands */}
+        <Toggle on={liveSync} onChange={handleToggle} />
+      </div>
+    </Row>
+  );
+
+  // Embedded under the Server panel: render just the row (the panel supplies the
+  // heading). Standalone: keep the section header for backward compatibility.
+  if (embedded) return liveSyncRow;
+
   return (
     <div>
-      {/* Section header */}
       <SectionHead
         title="Sync"
         subtitle="Control how Skald stays in sync with your server."
       />
-
-      {/* ── Live sync toggle row ── */}
-      <Row
-        label="Live sync"
-        hint="Maintain a live connection to the server for real-time progress and library updates."
-      >
-        {/* Right-side slot: connection indicator + toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-
-          {/* Live connection status — dot + label. Always rendered (not hidden
-              when liveSync is false) so the user can see 'Off' as a baseline. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-
-            {/* 6 px filled circle — colour encodes state at a glance */}
-            <div style={{
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              background: dotColor,
-              flexShrink: 0,
-            }} />
-
-            {/* Mono 10 px label — compact, technical feel matching Onyx aesthetics */}
-            <span style={{
-              fontFamily: MONO,
-              fontSize: 10,
-              letterSpacing: '0.04em',
-              color: labelColor,
-            }}>
-              {labelText}
-            </span>
-          </div>
-
-          {/* Toggle — calls handleToggle which drives the Rust socket commands */}
-          <Toggle on={liveSync} onChange={handleToggle} />
-        </div>
-      </Row>
+      {liveSyncRow}
     </div>
   );
 }

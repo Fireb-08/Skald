@@ -1,6 +1,7 @@
 import { SectionHead, Row, SERIF, MONO } from './shared';
 import type { OnyxState } from '../../state/onyx';
 import ServerSettingsSection from './ServerSettingsSection';
+import SyncSection from './SyncSection';
 
 export interface ServerSectionProps { st: OnyxState; }
 
@@ -46,6 +47,10 @@ export default function ServerSection({ st }: ServerSectionProps) {
           }}
         />
       </Row>
+
+      {/* Live sync toggle — connection-related, so it lives in the Server panel
+          (all users) rather than a separate Sync nav entry. */}
+      <SyncSection st={st} embedded />
 
       {/* Global server administration settings — admin only. Embedded here so
           there is a single "Server" panel rather than a confusing split between
