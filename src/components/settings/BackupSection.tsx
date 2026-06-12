@@ -122,14 +122,11 @@ export default function BackupSection({ st }: BackupSectionProps) {
     setLoading(true);
     setError(null);
     try {
-      console.log('[Backups] fetching list');
       const resp = await getBackups(st.serverUrl);
-      console.log('[Backups] loaded:', resp);
       setBackups(resp.backups);
       setLocation(resp.backupLocation);
       setPathEnvSet(resp.backupPathEnvSet);
     } catch (e) {
-      console.error('[Backups] load failed:', e);
       setError(String(e));
     } finally {
       setLoading(false);
@@ -141,7 +138,6 @@ export default function BackupSection({ st }: BackupSectionProps) {
   // ── Backup actions ────────────────────────────────────────────────────────
 
   async function doCreate() {
-    console.log('[Backups] create requested');
     setBusy(true);
     st.setToast({ message: 'Creating backup…', type: 'info' });
     try {
@@ -149,7 +145,6 @@ export default function BackupSection({ st }: BackupSectionProps) {
       setBackups(resp.backups);
       st.setToast({ message: 'Backup created.', type: 'success' });
     } catch (e) {
-      console.error('[Backups] create failed:', e);
       st.setToast({ message: `Backup failed: ${e}`, type: 'error' });
     } finally {
       setBusy(false);
@@ -157,14 +152,12 @@ export default function BackupSection({ st }: BackupSectionProps) {
   }
 
   async function doDelete(backup: Backup) {
-    console.log('[Backups] delete', backup.id);
     setBusy(true);
     try {
       const resp = await deleteBackup(st.serverUrl, backup.id);
       setBackups(resp.backups);
       st.setToast({ message: 'Backup deleted.', type: 'success' });
     } catch (e) {
-      console.error('[Backups] delete failed:', e);
       st.setToast({ message: `Failed to delete: ${e}`, type: 'error' });
     } finally {
       setBusy(false);
@@ -172,14 +165,12 @@ export default function BackupSection({ st }: BackupSectionProps) {
   }
 
   async function doRestore(backup: Backup) {
-    console.log('[Backups] restore (apply)', backup.id);
     setBusy(true);
     st.setToast({ message: 'Restoring backup — the server will restart…', type: 'info' });
     try {
       await applyBackup(st.serverUrl, backup.id);
       st.setToast({ message: 'Restore started. Audiobookshelf is restarting; reconnect shortly.', type: 'success' });
     } catch (e) {
-      console.error('[Backups] restore failed:', e);
       st.setToast({ message: `Restore failed: ${e}`, type: 'error' });
     } finally {
       setBusy(false);
@@ -189,13 +180,11 @@ export default function BackupSection({ st }: BackupSectionProps) {
   // ── Schedule / retention config (lives in ServerSettings) ───────────────────
 
   async function patchSettings(partial: Partial<ServerSettings>) {
-    console.log('[Backups] patchSettings →', partial);
     try {
       const updated = await updateServerSettings(st.serverUrl, partial);
       st.setServerSettings(updated);
       st.setToast({ message: 'Backup settings saved.', type: 'success' });
     } catch (e) {
-      console.error('[Backups] patchSettings failed:', e);
       st.setToast({ message: `Failed to save: ${e}`, type: 'error' });
     }
   }
@@ -289,7 +278,6 @@ export default function BackupSection({ st }: BackupSectionProps) {
         <Toggle
           on={scheduleEnabled}
           onChange={v => {
-            console.log('[Backups] automatic backups toggled →', v);
             // Enable → set a default cron; disable → false.
             void patchSettings({ backupSchedule: v ? DEFAULT_BACKUP_CRON : false });
           }}
@@ -300,10 +288,7 @@ export default function BackupSection({ st }: BackupSectionProps) {
         <Row label="Schedule (cron)" hint="Cron expression controlling when automatic backups run. Default: 01:30 daily.">
           <CronField
             value={cronValue}
-            onCommit={v => {
-              console.log('[Backups] schedule cron changed →', v);
-              void patchSettings({ backupSchedule: v });
-            }}
+            onCommit={v => void patchSettings({ backupSchedule: v })}
           />
         </Row>
       )}
@@ -312,10 +297,7 @@ export default function BackupSection({ st }: BackupSectionProps) {
         <NumField
           value={st.serverSettings?.backupsToKeep ?? 2}
           min={1} max={100}
-          onCommit={v => {
-            console.log('[Backups] backupsToKeep changed →', v);
-            void patchSettings({ backupsToKeep: v });
-          }}
+          onCommit={v => void patchSettings({ backupsToKeep: v })}
         />
       </Row>
 
@@ -323,10 +305,7 @@ export default function BackupSection({ st }: BackupSectionProps) {
         <NumField
           value={st.serverSettings?.maxBackupSize ?? 1}
           min={0} max={1024} step={0.5} suffix="GB"
-          onCommit={v => {
-            console.log('[Backups] maxBackupSize changed →', v);
-            void patchSettings({ maxBackupSize: v });
-          }}
+          onCommit={v => void patchSettings({ maxBackupSize: v })}
         />
       </Row>
 
