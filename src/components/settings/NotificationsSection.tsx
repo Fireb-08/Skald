@@ -92,8 +92,16 @@ function Field({
 
 // Tag-style editor for Apprise target URLs (same interaction as the sort-prefix
 // editor in ServerSettingsSection — click a chip to remove, Enter to add).
-function UrlEditor({ urls, onChange }: { urls: string[]; onChange: (u: string[]) => void }) {
-  const [input, setInput] = useState('');
+// The pending input is owned by the parent so a typed-but-not-yet-added URL can
+// be flushed when the user clicks Create without pressing Enter first.
+function UrlEditor({
+  urls, onChange, input, setInput,
+}: {
+  urls: string[];
+  onChange: (u: string[]) => void;
+  input: string;
+  setInput: (v: string) => void;
+}) {
   function add() {
     const v = input.trim();
     if (v && !urls.includes(v)) onChange([...urls, v]);
@@ -120,7 +128,8 @@ function UrlEditor({ urls, onChange }: { urls: string[]; onChange: (u: string[])
         value={input}
         onChange={e => setInput(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-        placeholder="+ apprise url (Enter)"
+        onBlur={add}
+        placeholder="ntfy://topic  (Enter to add)"
         style={{
           fontFamily: MONO, fontSize: 11, background: 'var(--onyx-panel2)',
           color: 'var(--onyx-text)', border: '1px solid var(--onyx-glass-edge)',
@@ -146,6 +155,10 @@ function RuleEditor({ initial, events, libraries, onCancel, onSave }: EditorProp
   const [eventName, setEventName] = useState(initial?.eventName || events[0]?.name || 'onTest');
   const [libraryId, setLibraryId] = useState(initial?.libraryId || '');
   const [urls, setUrls] = useState<string[]>(initial?.urls || []);
+  // Pending text in the URL input that hasn't been committed to `urls` yet.
+  // Owned here (not in UrlEditor) so save() can flush it if the user clicks
+  // Create without pressing Enter, and so the disabled check can see it.
+  const [urlInput, setUrlInput] = useState('');
   const [titleTemplate, setTitleTemplate] = useState(initial?.titleTemplate || '');
   const [bodyTemplate, setBodyTemplate] = useState(initial?.bodyTemplate || '');
   const [type, setType] = useState(initial?.type || 'info');
@@ -163,11 +176,18 @@ function RuleEditor({ initial, events, libraries, onCancel, onSave }: EditorProp
     }
   }, [eventName]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Flush any uncommitted text in the URL input into the list, so a user who
+  // typed a URL but didn't press Enter still gets it included.
+  function effectiveUrls(): string[] {
+    const pending = urlInput.trim();
+    return pending && !urls.includes(pending) ? [...urls, pending] : urls;
+  }
+
   function save() {
     const payload: Partial<Notification> = {
       eventName,
       libraryId: requiresLibrary ? (libraryId || null) : null,
-      urls,
+      urls: effectiveUrls(),
       titleTemplate,
       bodyTemplate,
       type,
@@ -215,7 +235,12 @@ function RuleEditor({ initial, events, libraries, onCancel, onSave }: EditorProp
       {/* Target URLs */}
       <div>
         <div style={labelStyle}>Apprise URLs</div>
-        <UrlEditor urls={urls} onChange={setUrls} />
+        <UrlEditor urls={urls} onChange={setUrls} input={urlInput} setInput={setUrlInput} />
+        <div style={{ fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 6 }}>
+          Use an Apprise URL scheme, e.g. <code style={{ fontFamily: MONO }}>ntfy://topic</code>,{' '}
+          <code style={{ fontFamily: MONO }}>discord://id/token</code>,{' '}
+          <code style={{ fontFamily: MONO }}>tgram://bottoken/chatid</code>.
+        </div>
       </div>
 
       {/* Templates */}
@@ -252,10 +277,15 @@ function RuleEditor({ initial, events, libraries, onCancel, onSave }: EditorProp
         </label>
       </div>
 
-      {/* Actions */}
+      {/* Actions — Create is gated on having at least one URL (committed OR
+          typed-but-not-yet-added) and, for library events, a chosen library. */}
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
-        <Btn variant="accent" onClick={save} disabled={urls.length === 0 || (requiresLibrary && !libraryId)}>
+        <Btn
+          variant="accent"
+          onClick={save}
+          disabled={(urls.length === 0 && !urlInput.trim()) || (requiresLibrary && !libraryId)}
+        >
           {initial ? 'Save changes' : 'Create'}
         </Btn>
       </div>
