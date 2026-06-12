@@ -205,11 +205,11 @@ Verification is typically `pnpm tauri dev` followed by a manual UI check and a r
 
 ## Feature status (high level)
 
-**Built and working:** password + API-key login, keyring token storage, library browsing (grid/list, Series/Authors/Narrators/Collections/Playlists tabs, 3D CoverFan/Mosaic layouts), Focus card + Pick-it-up, player (waveform, chapters, speed, sleep timer, bookmarks), live progress sync over Socket.IO with reconnect resync, offline downloads + local playback + offline progress queue, audio device selection, equalizer (bands + audiobook-focused presets), collections, playlists, library management (admin), server settings (admin), listening sessions, user management (admin), customizable keyboard shortcuts, Open Library review enrichment, theme/accent/scale switching.
+**Built and working:** password + API-key login, keyring token storage, library browsing (grid/list, Series/Authors/Narrators/Collections/Playlists tabs, 3D CoverFan/Mosaic layouts), Focus card + Pick-it-up, player (waveform, chapters, speed, sleep timer, bookmarks), live progress sync over Socket.IO with reconnect resync, offline downloads + local playback + offline progress queue, audio device selection, equalizer (bands + audiobook-focused presets), collections, playlists, library management (admin), server settings (admin), notification settings (Apprise — admin), listening sessions, user management (admin), customizable keyboard shortcuts, Open Library review enrichment, theme/accent/scale switching.
 
-**Settings sections** (`src/components/settings/`): Account, Server, ServerSettings (admin), Playback, Audio, Library, Libraries (admin), Downloads, Sync, ListeningSessions, Integrations, Appearance, Keyboard, About.
+**Settings sections** (`src/components/settings/`): Account, Server, ServerSettings (admin), Notifications (admin), Playback, Audio, Library, Libraries (admin), Downloads, Sync, ListeningSessions, Integrations, Appearance, Keyboard, About.
 
-**Known gaps / candidate next work** (vs. ABS web client): notification settings (Apprise), scheduled-tasks UI, backup management, server-logs viewer, podcast libraries, ebook reader, full metadata/chapter editor, cover finder, OIDC SSO, sharing/RSS feeds. The feature gap analysis is in `Vault/Skald/`.
+**Known gaps / candidate next work** (vs. ABS web client): scheduled-tasks UI, backup management, server-logs viewer, podcast libraries, ebook reader, full metadata/chapter editor, cover finder, OIDC SSO, sharing/RSS feeds. The feature gap analysis is in `Vault/Skald/`. Completed feature roadmaps (including Notification Settings) are archived in `Vault/Skald/` with their Troubleshooting sections.
 
 ---
 
@@ -231,6 +231,8 @@ Verification is typically `pnpm tauri dev` followed by a manual UI check and a r
 - **Ensure created code is appropriately commented.** Comments should explain *why*, matching the density and style of the surrounding code.
 - **Ensure that new features are accompanied by appropriate diagnostic code** (`println!` in Rust commands, `console.log` in the frontend) for ease of troubleshooting and validation.
 - **Diagnostic code should only be removed once the current roadmap has been completed** — not after a single phase. Keep it in place across the whole feature build so the user can validate end-to-end, then strip it in a final cleanup pass and commit.
+- **Diagnostic code potential outputs should be documented** — To ease troubleshooting, ensure that all diagnostic code has it's potential output logged at the bottom of a troubleshooting section that should be created whenever a roadmap is implemented. Ensure this section also contains what diagnostics were added to troubleshoot incase we need to return and troubleshoot in the future.
+
 
 ---
 
