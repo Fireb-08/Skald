@@ -11,7 +11,6 @@ import DownloadProgressToast from './components/downloads/DownloadProgressToast'
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
 import Login from './screens/Login';
-import Home from './screens/Home';
 import Library from './screens/Library';
 import Player from './screens/Player';
 import Settings from './screens/Settings';
@@ -189,7 +188,6 @@ export default function App() {
           </div>
         ) : (
           <>
-            {st.screen === 'home'     && <Home     st={st} />}
             {st.screen === 'library'  && <Library  st={st} />}
             {st.screen === 'player'   && <Player   st={st} />}
             {/* Settings receives onLogout which clears the token and shows Login again */}

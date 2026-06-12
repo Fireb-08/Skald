@@ -284,8 +284,6 @@ export interface OnyxState {
   setShowProgressOverlay: (show: boolean) => void;
   libraryView: string;
   setLibraryView: (view: string) => void;
-  showHome: boolean;
-  setShowHome: (show: boolean) => void;
   shelfTab: string;
   setShelfTab: (tab: string) => void;
   pickItUpCollapsed: boolean;
@@ -732,13 +730,6 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('onyx.shelfTab', v); setShelfTabRaw(v);
   }, []);
 
-  const [showHome, setShowHomeRaw] = useState(() => {
-    const v = localStorage.getItem('onyx.lib.showHome');
-    return v === null ? true : v === 'true';
-  });
-  const setShowHome = useCallback((v: boolean) => {
-    localStorage.setItem('onyx.lib.showHome', String(v)); setShowHomeRaw(v);
-  }, []);
 
   const [pickItUpCollapsed, setPickItUpCollapsedRaw] = useState(
     () => localStorage.getItem('onyx.pickItUp.collapsed') === 'true',
@@ -1078,7 +1069,6 @@ export function useOnyxState(): OnyxState {
     showFinished, setShowFinished,
     showProgressOverlay, setShowProgressOverlay,
     libraryView, setLibraryView,
-    showHome, setShowHome,
     shelfTab, setShelfTab,
     pickItUpCollapsed, setPickItUpCollapsed,
     scale, setScale,

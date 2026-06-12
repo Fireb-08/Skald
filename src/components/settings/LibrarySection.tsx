@@ -95,9 +95,6 @@ export default function LibrarySection({ st }: LibrarySectionProps) {
         <Row label="Show finished titles" hint="Include books at 100% in the main grid.">
           <Toggle on={st.showFinished} onChange={st.setShowFinished} />
         </Row>
-        <Row label="Show Home tab" hint="The dashboard-style landing view with continue listening, recent additions, and stats. Turn off to go straight to the Library.">
-          <Toggle on={st.showHome} onChange={st.setShowHome} />
-        </Row>
         <Row label="Show progress overlay" hint="The thin gold bar at the bottom of cover thumbnails.">
           <Toggle on={st.showProgressOverlay} onChange={st.setShowProgressOverlay} />
         </Row>

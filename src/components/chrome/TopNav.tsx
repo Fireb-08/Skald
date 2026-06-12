@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import Glass from './Glass';
 import Icon from '../Icon';
@@ -10,14 +9,9 @@ export interface TopNavProps {
 export default function TopNav({ st }: TopNavProps) {
   const mono = "'JetBrains Mono', ui-monospace, monospace";
 
-  const items = [
-    st.showHome && { id: 'home', label: 'Home' },
+  const items: { id: string; label: string }[] = [
     { id: 'library', label: 'Library' },
-  ].filter(Boolean) as { id: string; label: string }[];
-
-  useEffect(() => {
-    if (!st.showHome && st.screen === 'home') st.setScreen('library');
-  }, [st.showHome, st.screen]); // eslint-disable-line react-hooks/exhaustive-deps
+  ];
 
   return (
     <Glass translucent={st.translucent} style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 18, overflow: 'visible' }}>
