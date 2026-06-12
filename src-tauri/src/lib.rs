@@ -229,6 +229,10 @@ pub fn run() {
             // Scheduled tasks (admin-gated in the UI)
             commands::get_tasks,
             commands::validate_cron,
+            // Server logs (admin-gated in the UI)
+            commands::get_logger_data,
+            commands::start_log_stream,
+            commands::stop_log_stream,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -27,3 +27,5 @@ export { default as BackupSection } from './BackupSection';
 export type { BackupSectionProps } from './BackupSection';
 export { default as ScheduledTasksSection } from './ScheduledTasksSection';
 export type { ScheduledTasksSectionProps } from './ScheduledTasksSection';
+export { default as LogsSection } from './LogsSection';
+export type { LogsSectionProps } from './LogsSection';

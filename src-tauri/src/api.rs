@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -376,6 +376,23 @@ impl AbsClient {
         }
 
         resp.json::<TasksResponse>().await.map_err(|e| e.to_string())
+    }
+
+    /// GET /api/logger-data — the current day's recent log entries (admin only).
+    pub async fn get_logger_data(&self) -> Result<LoggerData, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/logger-data", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_logger_data failed: HTTP {}", resp.status()));
+        }
+
+        resp.json::<LoggerData>().await.map_err(|e| e.to_string())
     }
 
     /// POST /api/validate-cron — validate a cron expression. ABS responds 200 for

@@ -901,3 +901,36 @@ pub struct TasksResponse {
     #[serde(default)]
     pub tasks: Vec<Task>,
 }
+
+// ── Server logs ──────────────────────────────────────────────────────────────
+// GET /api/logger-data returns the current day's recent log entries; the same
+// LogEntry shape is also pushed live over the socket as 'log' events. Verified
+// against server/Logger.js. Admin-only. LogLevel numerics (utils/constants.js):
+// TRACE=0, DEBUG=1, INFO=2, WARN=3, ERROR=4, FATAL=5, NOTE=6.
+
+/// One server log line.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+    #[serde(default)]
+    pub timestamp: String,
+    /// File:line that emitted the log.
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub message: String,
+    /// TRACE / DEBUG / INFO / WARN / ERROR / FATAL / NOTE.
+    #[serde(default)]
+    pub level_name: String,
+    /// Numeric level (matches the LogLevel constants).
+    #[serde(default)]
+    pub level: i32,
+}
+
+/// Response shape of GET /api/logger-data — the current day's recent entries.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LoggerData {
+    #[serde(default)]
+    pub current_daily_logs: Vec<LogEntry>,
+}

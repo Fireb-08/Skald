@@ -208,6 +208,23 @@ pub async fn connect(
                 .boxed()
             }
         })
+        // "log" fires for each new server log line, but only after the client has
+        // registered as a log listener via set_log_listener (see below). Payload
+        // is a LogEntry. Forwarded so the Logs panel can tail the server live.
+        .on("log", {
+            let app = app.clone();
+            move |payload: Payload, _: Client| {
+                let app = app.clone();
+                async move {
+                    if let Payload::Text(values) = payload {
+                        if let Some(first) = values.first() {
+                            let _ = app.emit("server-log", first.to_string());
+                        }
+                    }
+                }
+                .boxed()
+            }
+        })
         // "reconnect" fires when the socket library re-establishes the transport
         // after a drop (network loss, sleep/wake, server restart). The server
         // assigns a new socket ID on each reconnect, so the auth event must be
@@ -302,5 +319,39 @@ pub async fn disconnect(state: SocketState) {
     if let Some(client) = guard.take() {
         // take() leaves None in the slot, preventing a double-close.
         let _ = client.disconnect().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Log listener registration
+// ---------------------------------------------------------------------------
+// ABS only streams 'log' socket events to clients that have registered via
+// set_log_listener (admin-enforced server-side). The Logs panel calls these
+// when it opens/closes so the server isn't streaming logs to nobody.
+
+/// Register the active socket as a log listener at `level` (LogLevel numeric:
+/// TRACE=0 … FATAL=5). Errors if no socket is connected (live sync off).
+pub async fn set_log_listener(state: SocketState, level: i32) -> Result<(), String> {
+    let guard = state.lock().await;
+    match guard.as_ref() {
+        Some(client) => client
+            .emit("set_log_listener", serde_json::json!(level))
+            .await
+            .map_err(|e| e.to_string()),
+        None => Err("No active socket connection — enable live sync to stream logs".to_string()),
+    }
+}
+
+/// Stop receiving 'log' events. No-op error if the socket is already gone.
+pub async fn remove_log_listener(state: SocketState) -> Result<(), String> {
+    let guard = state.lock().await;
+    match guard.as_ref() {
+        // ABS's remove_log_listener handler ignores its argument; send an empty
+        // string (Strings are known to serialize cleanly through rust_socketio).
+        Some(client) => client
+            .emit("remove_log_listener", String::new())
+            .await
+            .map_err(|e| e.to_string()),
+        None => Ok(()),
     }
 }

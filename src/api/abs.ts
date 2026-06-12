@@ -1236,3 +1236,51 @@ export function validateCron(serverUrl: string, expression: string): Promise<boo
   return invoke('validate_cron', { serverUrl, expression });
 }
 
+// ── Server logs ─────────────────────────────────────────────────────────────────
+// Mirrors the log models in src-tauri/src/models.rs. GET /api/logger-data seeds the
+// current day's recent entries; the live tail arrives via the 'server-log' Tauri
+// event after start_log_stream registers the socket as a log listener. Admin-only.
+
+/** One server log line. */
+export interface LogEntry {
+  timestamp: string;
+  source: string;
+  message: string;
+  /** TRACE / DEBUG / INFO / WARN / ERROR / FATAL / NOTE. */
+  levelName: string;
+  /** Numeric level (LogLevel constants). */
+  level: number;
+}
+
+/** Response of GET /api/logger-data. */
+export interface LoggerData {
+  currentDailyLogs: LogEntry[];
+}
+
+/** ABS LogLevel constants (server/utils/constants.js) + display colors. Used for
+ *  the level filter and row coloring. */
+export const LOGGER_LEVELS = [
+  { value: 0, label: 'Trace', color: 'var(--onyx-text-mute)' },
+  { value: 1, label: 'Debug', color: 'var(--onyx-text-dim)' },
+  { value: 2, label: 'Info',  color: 'var(--onyx-text)' },
+  { value: 3, label: 'Warn',  color: '#f59e0b' },
+  { value: 4, label: 'Error', color: '#e08a8a' },
+  { value: 5, label: 'Fatal', color: '#e05a5a' },
+] as const;
+
+/** GET /api/logger-data — current day's recent log entries. Admin only. */
+export function getLoggerData(serverUrl: string): Promise<LoggerData> {
+  return invoke('get_logger_data', { serverUrl });
+}
+
+/** Register the live-sync socket as a log listener at `level` (0=Trace … 5=Fatal).
+ *  New entries then arrive via the 'server-log' Tauri event. Admin only. */
+export function startLogStream(level: number): Promise<void> {
+  return invoke('start_log_stream', { level });
+}
+
+/** Stop the live log stream. */
+export function stopLogStream(): Promise<void> {
+  return invoke('stop_log_stream', {});
+}
+
