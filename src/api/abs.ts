@@ -1026,6 +1026,12 @@ export const LOG_LEVELS = [
   { value: 2, label: 'Warn' },
 ] as const;
 
+/** POST /api/authorize — refreshes serverSettings using the stored token.
+ *  Used on an already-logged-in app launch, when the login-time payload is gone. */
+export function fetchServerSettings(serverUrl: string): Promise<ServerSettings> {
+  return invoke('fetch_server_settings', { serverUrl });
+}
+
 /** PATCH /api/settings — updates one or more server settings fields. Admin only.
  *  `payload` is a sparse object; ABS merges it with the current values server-side. */
 export function updateServerSettings(serverUrl: string, payload: Partial<ServerSettings>): Promise<ServerSettings> {

@@ -205,8 +205,9 @@ function PrefixEditor({
 
 export default function ServerSettingsSection({ st }: ServerSettingsSectionProps) {
   // Local copy of settings — mutated optimistically on each toggle/change.
-  // Seeded from st.serverSettings which is captured during login (ABS returns
-  // serverSettings in the login payload; there is no standalone GET endpoint).
+  // Seeded from st.serverSettings, which is captured at login and refreshed on
+  // every app launch via POST /api/authorize (ABS has no standalone GET endpoint
+  // for server settings — they only ride along with the login/authorize payload).
   const [settings, setSettings] = useState<ServerSettings | null>(st.serverSettings);
 
   // Admin guard — non-admin users should never reach this section
@@ -257,7 +258,7 @@ export default function ServerSettingsSection({ st }: ServerSettingsSectionProps
           borderRadius: 8,
           border: '1px solid var(--onyx-glass-edge)',
         }}>
-          Server settings were not captured at login. Sign out and back in to load them.
+          Loading server settings… If this persists, check your server connection and try reopening this panel.
         </div>
       </div>
     );

@@ -61,6 +61,30 @@ impl AbsClient {
         Ok((body.user, body.server_settings))
     }
 
+    /// POST /api/authorize — re-validates the stored token and returns the login
+    /// payload, which includes serverSettings. ABS has no standalone GET endpoint
+    /// for server settings, so this is how we refresh them on an already-logged-in
+    /// app launch (the original login response is long gone by then).
+    pub async fn fetch_server_settings(&self) -> Result<ServerSettings, String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/authorize", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("fetch_server_settings failed: HTTP {}", resp.status()));
+        }
+
+        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let raw = json
+            .get("serverSettings")
+            .ok_or_else(|| "authorize response missing serverSettings".to_string())?;
+        serde_json::from_value::<ServerSettings>(raw.clone()).map_err(|e| e.to_string())
+    }
+
     /// PATCH /api/settings — update one or more server settings fields (admin only).
     /// Accepts a partial JSON object; ABS merges with current values server-side.
     pub async fn update_server_settings(&self, payload: serde_json::Value) -> Result<ServerSettings, String> {

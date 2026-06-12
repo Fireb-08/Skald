@@ -106,6 +106,17 @@ pub async fn update_sorting_prefixes(
     AbsClient::new(server_url).with_token(token).update_sorting_prefixes(prefixes).await
 }
 
+/// POST /api/authorize via the stored token to refresh serverSettings on an
+/// already-logged-in app launch (the login-time payload is no longer available).
+/// Admin only in practice — the Server Settings panel is the sole consumer — but
+/// ABS returns serverSettings to any authenticated user, so no role check here.
+#[tauri::command]
+pub async fn fetch_server_settings(server_url: String) -> Result<ServerSettings, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).fetch_server_settings().await
+}
+
 #[tauri::command]
 pub fn has_token() -> Result<bool, String> {
     Ok(auth::load_token()?.is_some())

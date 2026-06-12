@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings } from '../api/abs';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings } from '../api/abs';
 
 export type { ServerSettings };
 
@@ -585,6 +585,15 @@ export function useOnyxState(): OnyxState {
         const stats = await fetchListeningStats(serverUrl, resolvedId);
         if (cancelled) return;
         setListeningStats(stats);
+        // Refresh server settings on launch. On an already-logged-in start the
+        // login-time serverSettings payload is gone, so re-fetch via /api/authorize
+        // to keep the Server Settings panel populated and current.
+        try {
+          const ss = await fetchServerSettings(serverUrl);
+          if (!cancelled) setServerSettings(ss);
+        } catch (e) {
+          console.error('Server settings refresh failed', e);
+        }
       } catch (e) {
         console.error('Post-library fetch failed', e);
       }
