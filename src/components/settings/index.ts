@@ -19,3 +19,5 @@ export { default as SyncSection } from './SyncSection';
 export type { SyncSectionProps } from './SyncSection';
 export { default as LibrariesSection } from './LibrariesSection';
 export type { LibrariesSectionProps } from './LibrariesSection';
+export { default as ServerSettingsSection } from './ServerSettingsSection';
+export type { ServerSettingsSectionProps } from './ServerSettingsSection';

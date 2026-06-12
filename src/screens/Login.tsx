@@ -88,15 +88,17 @@ export default function Login({ st }: LoginProps) {
     setPending(true);
     try {
       // Call the Tauri login command; throws on authentication failure
-      const result = await login(serverUrl, user.trim(), pass);
+      const { user: loggedInUser, serverSettings } = await login(serverUrl, user.trim(), pass);
+      // Capture server settings returned with the login payload
+      if (serverSettings) st.setServerSettings(serverSettings);
       // Persist the token to the OS keyring via the Rust save_token command
-      await saveToken(result.token);
+      await saveToken(loggedInUser.token);
       // Write all auth/server state into global OnyxState so App.tsx gate opens
-      st.setAuthToken(result.token);
+      st.setAuthToken(loggedInUser.token);
       st.setServerUrl(serverUrl);
-      st.setUserId(result.id);
-      st.setUsername(result.username);
-      st.setUser(result);
+      st.setUserId(loggedInUser.id);
+      st.setUsername(loggedInUser.username);
+      st.setUser(loggedInUser);
       // Navigate into the library — the auth gate in App.tsx will also flip
       st.setScreen('library');
     } catch (err) {

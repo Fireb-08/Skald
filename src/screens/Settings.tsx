@@ -16,6 +16,7 @@ import {
   KeyboardSection,
   AboutSection,
   IntegrationsSection,
+  ServerSettingsSection,
 } from '../components/settings';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -23,14 +24,15 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace";
 export interface SettingsProps { st: OnyxState; onLogout: () => void; }
 
 type SectionId =
-  | 'account' | 'server' | 'playback' | 'sync' | 'audio'
+  | 'account' | 'server' | 'server-settings' | 'playback' | 'sync' | 'audio'
   | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about' | 'integrations';
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
 
 const NAV: NavSection[] = [
-  { id: 'account',    label: 'Account',    icon: 'home'       },
-  { id: 'server',     label: 'Server',     icon: 'monitor'    },
+  { id: 'account',         label: 'Account',         icon: 'home'       },
+  { id: 'server',          label: 'Server',          icon: 'monitor'    },
+  { id: 'server-settings', label: 'Server Settings', icon: 'monitor'    },
   { id: 'playback',   label: 'Playback',   icon: 'play'       },
   { id: 'sync',       label: 'Sync',       icon: 'airplay'    },
   { id: 'audio',      label: 'Audio',      icon: 'headphones' },
@@ -73,6 +75,8 @@ export default function Settings({ st, onLogout }: SettingsProps) {
         {/* Sidebar */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           {NAV.map(s => {
+            // Hide admin-only sections from non-admin users
+            if (s.id === 'server-settings' && !st.isAdmin) return null;
             // Build the label — append a count badge for Downloads when books are present.
             // This gives the user an at-a-glance view of how many books are stored offline.
             const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
@@ -103,8 +107,9 @@ export default function Settings({ st, onLogout }: SettingsProps) {
 
         {/* Content panel */}
         <Glass translucent={st.translucent} style={{ flex: 1, padding: '28px 36px', overflow: 'auto', minWidth: 0 }}>
-          {section === 'account'    && <AccountSection st={st} onSignOut={handleSignOut} />}
-          {section === 'server'     && <ServerSection st={st} />}
+          {section === 'account'          && <AccountSection st={st} onSignOut={handleSignOut} />}
+          {section === 'server'           && <ServerSection st={st} />}
+          {section === 'server-settings'  && <ServerSettingsSection st={st} />}
           {/* st is passed so the Sessions subtab can access serverUrl and user type */}
           {section === 'playback'   && <PlaybackSection st={st} />}
           {section === 'sync'       && <SyncSection st={st} />}
