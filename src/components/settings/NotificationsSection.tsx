@@ -314,14 +314,11 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
     setLoading(true);
     setError(null);
     try {
-      console.log('[Notifications] fetching settings + catalog');
       const resp = await getNotifications(st.serverUrl);
-      console.log('[Notifications] loaded:', resp);
       setSettings(resp.settings);
       setEvents(resp.data?.events ?? []);
       setAppriseDraft(resp.settings.appriseApiUrl ?? '');
     } catch (e) {
-      console.error('[Notifications] load failed:', e);
       setError(String(e));
     } finally {
       setLoading(false);
@@ -332,27 +329,22 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
 
   // Libraries are only needed for the rule editor's library picker; fetch once.
   useEffect(() => {
-    fetchLibraries(st.serverUrl)
-      .then(setLibraries)
-      .catch(e => console.error('[Notifications] fetchLibraries failed:', e));
+    fetchLibraries(st.serverUrl).then(setLibraries).catch(() => { /* picker stays empty */ });
   }, [st.serverUrl]);
 
-  // ── Mutations (each logs + toasts; setSettings keeps the UI in sync) ────────
+  // ── Mutations (each toasts; setSettings keeps the UI in sync) ────────────────
 
   async function patchSettings(partial: Partial<NotificationSettings>) {
-    console.log('[Notifications] patchSettings →', partial);
     try {
       const updated = await updateNotificationSettings(st.serverUrl, partial);
       setSettings(updated);
       st.setToast({ message: 'Notification settings saved.', type: 'success' });
     } catch (e) {
-      console.error('[Notifications] patchSettings failed:', e);
       st.setToast({ message: `Failed to save: ${e}`, type: 'error' });
     }
   }
 
   async function saveRule(payload: Partial<Notification>, id?: string) {
-    console.log('[Notifications] saveRule', id ? `(update ${id})` : '(create)', payload);
     try {
       const updated = id
         ? await updateNotification(st.serverUrl, id, payload)
@@ -361,43 +353,36 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
       setEditing(null);
       st.setToast({ message: id ? 'Notification updated.' : 'Notification created.', type: 'success' });
     } catch (e) {
-      console.error('[Notifications] saveRule failed:', e);
       st.setToast({ message: `Failed to save notification: ${e}`, type: 'error' });
     }
   }
 
   async function removeRule(id: string) {
-    console.log('[Notifications] removeRule', id);
     try {
       const updated = await deleteNotification(st.serverUrl, id);
       setSettings(updated);
       st.setToast({ message: 'Notification deleted.', type: 'success' });
     } catch (e) {
-      console.error('[Notifications] removeRule failed:', e);
       st.setToast({ message: `Failed to delete: ${e}`, type: 'error' });
     }
   }
 
   async function testRule(id: string) {
-    console.log('[Notifications] testRule', id);
     st.setToast({ message: 'Sending test notification…', type: 'info' });
     try {
       await testNotification(st.serverUrl, id);
       st.setToast({ message: 'Test notification sent.', type: 'success' });
     } catch (e) {
-      console.error('[Notifications] testRule failed:', e);
       st.setToast({ message: `Test failed: ${e}`, type: 'error' });
     }
   }
 
   async function fireTest() {
-    console.log('[Notifications] fireTest (synthetic onTest event)');
     st.setToast({ message: 'Firing test event…', type: 'info' });
     try {
       await fireTestNotificationEvent(st.serverUrl);
       st.setToast({ message: 'Test event fired.', type: 'success' });
     } catch (e) {
-      console.error('[Notifications] fireTest failed:', e);
       st.setToast({ message: `Test event failed: ${e}`, type: 'error' });
     }
   }

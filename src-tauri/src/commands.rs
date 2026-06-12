@@ -118,26 +118,15 @@ pub async fn fetch_server_settings(server_url: String) -> Result<ServerSettings,
 }
 
 // ── Notification settings (Apprise) — admin only ─────────────────────────────
-// Each command carries diagnostic logging (per CLAUDE.md) so the feature can be
-// validated during `pnpm tauri dev`. The logging stays until the notification
-// roadmap is fully complete and confirmed, then is removed in a cleanup pass.
+// ABS restricts these endpoints to admins (403 otherwise). Each command loads
+// the stored token and delegates to the matching AbsClient method.
 
 /// GET /api/notifications — fetch the current settings + event catalog.
 #[tauri::command]
 pub async fn get_notifications(server_url: String) -> Result<NotificationsResponse, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).get_notifications().await;
-    match &result {
-        Ok(r) => println!(
-            "[Notifications] get_notifications OK — {} rule(s), {} event(s) in catalog, appriseApiUrl set: {}",
-            r.settings.notifications.len(),
-            r.data.events.len(),
-            r.settings.apprise_api_url.is_some(),
-        ),
-        Err(e) => println!("[Notifications] get_notifications FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).get_notifications().await
 }
 
 /// PATCH /api/notifications — update global settings (appriseApiUrl, limits).
@@ -146,15 +135,9 @@ pub async fn update_notification_settings(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    println!("[Notifications] update_notification_settings payload: {payload}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).update_notification_settings(payload).await;
-    match &result {
-        Ok(s) => println!("[Notifications] update_notification_settings OK — appriseApiUrl={:?}", s.apprise_api_url),
-        Err(e) => println!("[Notifications] update_notification_settings FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).update_notification_settings(payload).await
 }
 
 /// POST /api/notifications — create a notification rule.
@@ -163,15 +146,9 @@ pub async fn create_notification(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    println!("[Notifications] create_notification payload: {payload}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).create_notification(payload).await;
-    match &result {
-        Ok(s) => println!("[Notifications] create_notification OK — now {} rule(s)", s.notifications.len()),
-        Err(e) => println!("[Notifications] create_notification FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).create_notification(payload).await
 }
 
 /// PATCH /api/notifications/:id — update one rule.
@@ -181,15 +158,9 @@ pub async fn update_notification(
     id: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    println!("[Notifications] update_notification id={id} payload: {payload}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).update_notification(&id, payload).await;
-    match &result {
-        Ok(_) => println!("[Notifications] update_notification OK — id={id}"),
-        Err(e) => println!("[Notifications] update_notification FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).update_notification(&id, payload).await
 }
 
 /// DELETE /api/notifications/:id — delete one rule.
@@ -198,43 +169,25 @@ pub async fn delete_notification(
     server_url: String,
     id: String,
 ) -> Result<NotificationSettings, String> {
-    println!("[Notifications] delete_notification id={id}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).delete_notification(&id).await;
-    match &result {
-        Ok(s) => println!("[Notifications] delete_notification OK — now {} rule(s)", s.notifications.len()),
-        Err(e) => println!("[Notifications] delete_notification FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).delete_notification(&id).await
 }
 
 /// GET /api/notifications/:id/test — send a real test to one rule's URLs.
 #[tauri::command]
 pub async fn test_notification(server_url: String, id: String) -> Result<(), String> {
-    println!("[Notifications] test_notification id={id}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).test_notification(&id).await;
-    match &result {
-        Ok(_) => println!("[Notifications] test_notification OK — id={id}"),
-        Err(e) => println!("[Notifications] test_notification FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).test_notification(&id).await
 }
 
 /// GET /api/notifications/test — fire a synthetic onTest event end-to-end.
 #[tauri::command]
 pub async fn fire_test_notification_event(server_url: String) -> Result<(), String> {
-    println!("[Notifications] fire_test_notification_event");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).fire_test_event().await;
-    match &result {
-        Ok(_) => println!("[Notifications] fire_test_notification_event OK"),
-        Err(e) => println!("[Notifications] fire_test_notification_event FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).fire_test_event().await
 }
 
 #[tauri::command]
