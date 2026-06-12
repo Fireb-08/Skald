@@ -226,23 +226,15 @@ pub async fn apply_backup(server_url: String, id: String) -> Result<(), String> 
 }
 
 // ── Scheduled tasks ──────────────────────────────────────────────────────────
-// Diagnostic logging retained for the whole scheduled-tasks roadmap per
-// CLAUDE.md, then stripped in a final cleanup pass once validated.
+// GET /api/tasks and POST /api/validate-cron have no server-side admin check;
+// the UI gates them to admins for consistency with the other server panels.
 
 /// GET /api/tasks — current + recently-finished background tasks.
 #[tauri::command]
 pub async fn get_tasks(server_url: String) -> Result<TasksResponse, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).get_tasks().await;
-    match &result {
-        Ok(r) => {
-            let running = r.tasks.iter().filter(|t| !t.is_finished).count();
-            println!("[Tasks] get_tasks OK — {} task(s), {} running", r.tasks.len(), running);
-        }
-        Err(e) => println!("[Tasks] get_tasks FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).get_tasks().await
 }
 
 /// POST /api/validate-cron — true if the cron expression is valid.
@@ -250,12 +242,7 @@ pub async fn get_tasks(server_url: String) -> Result<TasksResponse, String> {
 pub async fn validate_cron(server_url: String, expression: String) -> Result<bool, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).validate_cron(&expression).await;
-    match &result {
-        Ok(valid) => println!("[Tasks] validate_cron '{expression}' → valid: {valid}"),
-        Err(e) => println!("[Tasks] validate_cron FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).validate_cron(&expression).await
 }
 
 #[tauri::command]

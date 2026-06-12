@@ -1043,11 +1043,7 @@ export function useOnyxState(): OnyxState {
     });
 
     const handle = (raw: string) => {
-      try {
-        const t = JSON.parse(raw) as Task;
-        console.log('[tasks] socket event →', t.action, t.isFinished ? '(finished)' : '(started)');
-        upsert(t);
-      } catch (e) { console.error('[tasks] parse failed:', e); }
+      try { upsert(JSON.parse(raw) as Task); } catch { /* ignore malformed task payload */ }
     };
 
     listen<string>('task-started',  e => handle(e.payload)).then(fn => { unStart = fn; });

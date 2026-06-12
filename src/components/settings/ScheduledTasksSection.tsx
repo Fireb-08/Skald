@@ -84,7 +84,6 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
       st.setTasks(resp.tasks);
       setError(null);
     } catch (e) {
-      console.error('[Tasks] seed failed:', e);
       setError(String(e));
     } finally {
       if (!silent) setLoading(false);
@@ -95,7 +94,6 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
 
   // Seed on mount; poll as a fallback only when live sync (socket) is off.
   useEffect(() => {
-    console.log('[Tasks] panel mounted — seeding task list (liveSync:', liveSyncOn, ')');
     void seed(false);
     if (liveSyncOn) return;
     const iv = setInterval(() => void seed(true), POLL_MS);
@@ -105,13 +103,11 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
   async function checkCron() {
     const expr = cronInput.trim();
     if (!expr) { setCronValid(null); return; }
-    console.log('[Tasks] validate cron →', expr);
     setCronChecking(true);
     try {
       const ok = await validateCron(st.serverUrl, expr);
       setCronValid(ok);
-    } catch (e) {
-      console.error('[Tasks] validate cron failed:', e);
+    } catch {
       setCronValid(false);
     } finally {
       setCronChecking(false);
