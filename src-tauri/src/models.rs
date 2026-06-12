@@ -592,6 +592,48 @@ pub struct ListeningSessionsResponse {
     pub items_per_page: u32,
 }
 
+/// Global server settings — returned inside the login response under `serverSettings`
+/// and fetchable via GET /api/settings. All fields are Option so missing keys
+/// (e.g. on older ABS versions) deserialise as None without failing.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerSettings {
+    // ── Scanner ──────────────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_find_covers: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_cover_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_parse_subtitle: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_prefer_matched_metadata: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scanner_disable_watcher: Option<bool>,
+    // ── Metadata storage ─────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_cover_with_item: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store_metadata_with_item: Option<bool>,
+    // ── Sorting ──────────────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sorting_ignore_prefix: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sorting_prefixes: Option<Vec<String>>,
+    // ── Podcasts ─────────────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub podcast_episode_schedule: Option<String>,
+    // ── Chromecast ───────────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chromecast_enabled: Option<bool>,
+    // ── Logging ──────────────────────────────────────────────────────────────
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_level: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logger_daily_logs_to_keep: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logger_scanner_logs_to_keep: Option<i32>,
+}
+
 /// Minimal item reference used in create/update/batch playlist request bodies.
 /// `episode_id` is omitted from the JSON when None (book playlists have no episode).
 #[derive(Debug, Serialize, Deserialize, Clone)]

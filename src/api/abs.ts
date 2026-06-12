@@ -266,7 +266,12 @@ export interface LibraryStats {
 // Command names match the Rust #[tauri::command] function names (snake_case).
 // Argument keys are camelCase; Tauri converts them to Rust snake_case params.
 
-export function login(serverUrl: string, username: string, password: string): Promise<User> {
+export interface LoginResult {
+  user: User;
+  serverSettings: ServerSettings | null;
+}
+
+export function login(serverUrl: string, username: string, password: string): Promise<LoginResult> {
   return invoke('login', { serverUrl, username, password });
 }
 
@@ -980,5 +985,60 @@ export function deleteLibrary(serverUrl: string, libraryId: string): Promise<voi
  *  force=true requests a full rescan; force=false runs incremental. Fire-and-forget. */
 export function scanLibrary(serverUrl: string, libraryId: string, force: boolean): Promise<void> {
   return invoke('scan_library', { serverUrl, libraryId, force });
+}
+
+// ── Server settings ───────────────────────────────────────────────────────────
+// Mirrors models::ServerSettings in src-tauri/src/models.rs.
+// All fields are optional — older ABS versions may omit some.
+
+export interface ServerSettings {
+  // Scanner
+  scannerFindCovers?: boolean | null;
+  scannerCoverProvider?: string | null;
+  scannerParseSubtitle?: boolean | null;
+  scannerPreferMatchedMetadata?: boolean | null;
+  scannerDisableWatcher?: boolean | null;
+  // Metadata storage
+  storeCoverWithItem?: boolean | null;
+  storeMetadataWithItem?: boolean | null;
+  // Sorting
+  sortingIgnorePrefix?: boolean | null;
+  sortingPrefixes?: string[] | null;
+  // Podcasts
+  podcastEpisodeSchedule?: string | null;
+  // Chromecast
+  chromecastEnabled?: boolean | null;
+  // Logging
+  logLevel?: number | null;
+  loggerDailyLogsToKeep?: number | null;
+  loggerScannerLogsToKeep?: number | null;
+}
+
+// Valid cover providers for the scanner cover-finder feature.
+export const COVER_PROVIDERS = ['google', 'audible', 'apple', 'openlibrary', 'audiobookcovers'] as const;
+export type CoverProvider = typeof COVER_PROVIDERS[number];
+
+// ABS log levels: 0 = Debug, 1 = Info, 2 = Warn.
+export const LOG_LEVELS = [
+  { value: 0, label: 'Debug' },
+  { value: 1, label: 'Info' },
+  { value: 2, label: 'Warn' },
+] as const;
+
+/** GET /api/settings — fetches the current server settings. Admin only. */
+export function getServerSettings(serverUrl: string): Promise<ServerSettings> {
+  return invoke('get_server_settings', { serverUrl });
+}
+
+/** PATCH /api/settings — updates one or more server settings fields. Admin only.
+ *  `payload` is a sparse object; ABS merges it with the current values server-side. */
+export function updateServerSettings(serverUrl: string, payload: Partial<ServerSettings>): Promise<ServerSettings> {
+  return invoke('update_server_settings', { serverUrl, payload });
+}
+
+/** PATCH /api/sorting-prefixes — replaces the sorting prefix list. Admin only.
+ *  Triggers a full title re-index on the server; use sparingly. */
+export function updateSortingPrefixes(serverUrl: string, prefixes: string[]): Promise<ServerSettings> {
+  return invoke('update_sorting_prefixes', { serverUrl, prefixes });
 }
 

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, MeResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -35,10 +35,14 @@ impl AbsClient {
     }
 
     /// POST /login — at the server root, not under /api/ (see CLAUDE.md critical lesson 1).
-    pub async fn login(&self, username: &str, password: &str) -> Result<User, String> {
+    /// Returns (User, Option<ServerSettings>) — serverSettings may be absent on older ABS versions.
+    pub async fn login(&self, username: &str, password: &str) -> Result<(User, Option<ServerSettings>), String> {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct LoginResponse {
             user: User,
+            #[serde(default)]
+            server_settings: Option<ServerSettings>,
         }
 
         let resp = self
@@ -54,7 +58,84 @@ impl AbsClient {
         }
 
         let body: LoginResponse = resp.json().await.map_err(|e| e.to_string())?;
-        Ok(body.user)
+        Ok((body.user, body.server_settings))
+    }
+
+    /// GET /api/settings — fetch current server settings (admin only).
+    pub async fn get_server_settings(&self) -> Result<ServerSettings, String> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            server_settings: ServerSettings,
+        }
+
+        let resp = self
+            .http
+            .get(format!("{}/api/settings", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_server_settings failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.server_settings)
+    }
+
+    /// PATCH /api/settings — update one or more server settings fields (admin only).
+    /// Accepts a partial JSON object; ABS merges with current values server-side.
+    pub async fn update_server_settings(&self, payload: serde_json::Value) -> Result<ServerSettings, String> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            server_settings: ServerSettings,
+        }
+
+        let resp = self
+            .http
+            .patch(format!("{}/api/settings", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("update_server_settings failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.server_settings)
+    }
+
+    /// PATCH /api/sorting-prefixes — update the list of ignored sort prefixes (admin only).
+    /// Uses a dedicated endpoint separate from /api/settings because ABS triggers
+    /// a full title re-index across all library items when prefixes change.
+    pub async fn update_sorting_prefixes(&self, prefixes: Vec<String>) -> Result<ServerSettings, String> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapper {
+            server_settings: ServerSettings,
+        }
+
+        let resp = self
+            .http
+            .patch(format!("{}/api/sorting-prefixes", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({ "sortingPrefixes": prefixes }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("update_sorting_prefixes failed: HTTP {}", resp.status()));
+        }
+
+        let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.server_settings)
     }
 
     /// GET /api/me

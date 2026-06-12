@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 use tauri::Emitter; // .emit() on AppHandle is a trait method — must be in scope
 use tokio_util::sync::CancellationToken;
 
-use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models, session::SessionManager, socket};
+use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, ServerSettings}, session::SessionManager, socket};
 
 // Close an async file handle and delete the file from disk.
 // On Windows, an open file handle prevents remove_file from succeeding, so the
@@ -16,14 +16,23 @@ async fn delete_partial(file: tokio::fs::File, path: &std::path::Path) {
 }
 
 
+/// Return type bundles the authenticated User with the ServerSettings that ABS
+/// includes in the login response — capturing them here avoids a separate fetch.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginResult {
+    pub user: models::User,
+    pub server_settings: Option<ServerSettings>,
+}
+
 #[tauri::command]
 pub async fn login(
     server_url: String,
     username: String,
     password: String,
-) -> Result<models::User, String> {
+) -> Result<LoginResult, String> {
     let abs_client = AbsClient::new(server_url.clone());
-    let mut user = abs_client.login(&username, &password).await?;
+    let (mut user, server_settings) = abs_client.login(&username, &password).await?;
     let legacy_token = user.token.clone();
 
     // After /login, call GET /api/authorize with the legacy token to obtain a
@@ -57,12 +66,56 @@ pub async fn login(
 
     auth::save_token(&token)?;
     user.token = token;
-    Ok(user)
+    Ok(LoginResult { user, server_settings })
 }
 
 #[tauri::command]
 pub fn logout() -> Result<(), String> {
     auth::clear_token()
+}
+
+/// GET /api/settings — fetch current server settings. Admin only.
+#[tauri::command]
+pub async fn get_server_settings(server_url: String) -> Result<ServerSettings, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).get_server_settings().await
+}
+
+/// PATCH /api/settings — update one or more server settings fields. Admin only.
+/// `payload` is a sparse JSON object; ABS merges it with existing values.
+#[tauri::command]
+pub async fn update_server_settings(
+    server_url: String,
+    payload: serde_json::Value,
+) -> Result<ServerSettings, String> {
+    println!("[ServerSettings] update_server_settings called with payload: {payload}");
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).update_server_settings(payload).await;
+    match &result {
+        Ok(s) => println!("[ServerSettings] update_server_settings OK — scannerFindCovers={:?} chromecastEnabled={:?}", s.scanner_find_covers, s.chromecast_enabled),
+        Err(e) => println!("[ServerSettings] update_server_settings FAILED: {e}"),
+    }
+    result
+}
+
+/// PATCH /api/sorting-prefixes — replace the server's sorting prefix list. Admin only.
+/// Triggers a full title re-index on the server, so use sparingly.
+#[tauri::command]
+pub async fn update_sorting_prefixes(
+    server_url: String,
+    prefixes: Vec<String>,
+) -> Result<ServerSettings, String> {
+    println!("[ServerSettings] update_sorting_prefixes called with prefixes: {prefixes:?}");
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).update_sorting_prefixes(prefixes).await;
+    match &result {
+        Ok(s) => println!("[ServerSettings] update_sorting_prefixes OK — sortingPrefixes={:?}", s.sorting_prefixes),
+        Err(e) => println!("[ServerSettings] update_sorting_prefixes FAILED: {e}"),
+    }
+    result
 }
 
 #[tauri::command]

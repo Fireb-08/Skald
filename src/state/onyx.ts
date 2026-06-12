@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord } from '../api/abs';
+import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings } from '../api/abs';
 import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio } from '../api/abs';
+
+export type { ServerSettings };
 
 export type { User };
 import {
@@ -309,6 +311,10 @@ export interface OnyxState {
   // a server stream. When true, transport controls bypass session logic.
   isLocalPlayback: boolean;
   setIsLocalPlayback: (on: boolean) => void;
+  // Global server settings — captured from the login response and refreshable
+  // via Settings → Server Settings. Null until the first successful login.
+  serverSettings: ServerSettings | null;
+  setServerSettings: (s: ServerSettings) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -465,6 +471,7 @@ export function useOnyxState(): OnyxState {
   // Cleared whenever an online session is started so transport controls
   // revert to session-aware behaviour automatically.
   const [isLocalPlayback, setIsLocalPlayback] = useState<boolean>(false);
+  const [serverSettings, setServerSettings] = useState<ServerSettings | null>(null);
 
   useEffect(() => {
     // Initial load — reads the registry from disk; works before any server connection.
@@ -500,7 +507,10 @@ export function useOnyxState(): OnyxState {
       try {
         let token = authToken;
         if (!token && username && password) {
-          const loggedInUser = await login(serverUrl, username, password);
+          const result = await login(serverUrl, username, password);
+          const loggedInUser = result.user;
+          // Capture server settings returned with the login response
+          if (result.serverSettings) setServerSettings(result.serverSettings);
           token = loggedInUser.token;
           setAuthToken(loggedInUser.token);
           setUserId(loggedInUser.id);
@@ -1037,6 +1047,7 @@ export function useOnyxState(): OnyxState {
     library, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
+    serverSettings, setServerSettings,
     screen, setScreen,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
