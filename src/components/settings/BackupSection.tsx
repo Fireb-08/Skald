@@ -11,6 +11,7 @@ import {
 } from '../../api/abs';
 import { SectionHead, Row, Toggle, MONO } from './shared';
 import ConfirmDialog from '../ui/ConfirmDialog';
+import CronEditor from './CronEditor';
 
 export interface BackupSectionProps { st: OnyxState; }
 
@@ -285,10 +286,10 @@ export default function BackupSection({ st }: BackupSectionProps) {
       </Row>
 
       {scheduleEnabled && (
-        <Row label="Schedule (cron)" hint="Cron expression controlling when automatic backups run. Default: 01:30 daily.">
-          <CronField
+        <Row label="Schedule" hint="When automatic backups run." align="top">
+          <CronEditor
             value={cronValue}
-            onCommit={v => void patchSettings({ backupSchedule: v })}
+            onChange={v => void patchSettings({ backupSchedule: v })}
           />
         </Row>
       )}
@@ -331,24 +332,5 @@ export default function BackupSection({ st }: BackupSectionProps) {
         />
       )}
     </div>
-  );
-}
-
-// Cron text input committing on blur.
-function CronField({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
-  const [local, setLocal] = useState(value);
-  useEffect(() => setLocal(value), [value]);
-  return (
-    <input
-      value={local}
-      onChange={e => setLocal(e.target.value)}
-      onBlur={() => { const v = local.trim(); if (v && v !== value) onCommit(v); }}
-      placeholder="30 1 * * *"
-      style={{
-        fontFamily: MONO, fontSize: 12, background: 'var(--onyx-panel2)', color: 'var(--onyx-text)',
-        border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, padding: '6px 10px', width: 160,
-        textAlign: 'right' as const,
-      }}
-    />
   );
 }

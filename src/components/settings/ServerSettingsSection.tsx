@@ -7,6 +7,7 @@ import {
   COVER_PROVIDERS,
   LOG_LEVELS,
 } from '../../api/abs';
+import CronEditor from './CronEditor';
 
 export interface ServerSettingsSectionProps {
   st: OnyxState;
@@ -100,52 +101,6 @@ function NumInput({
       {suffix && <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)' }}>{suffix}</span>}
     </div>
   );
-}
-
-function CronInput({
-  value, onChange,
-}: {
-  value: string | null | undefined;
-  onChange: (v: string) => void;
-}) {
-  const [local, setLocal] = useState(value ?? '');
-  useEffect(() => setLocal(value ?? ''), [value]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column' as const, gap: 4 }}>
-      <input
-        type="text"
-        value={local}
-        onChange={e => setLocal(e.target.value)}
-        onBlur={() => onChange(local.trim())}
-        placeholder="e.g. 0 * * * *"
-        style={{
-          fontFamily: MONO, fontSize: 11,
-          background: 'var(--onyx-panel2)',
-          color: 'var(--onyx-text)',
-          border: '1px solid var(--onyx-glass-edge)',
-          borderRadius: 6, padding: '5px 10px', width: 180,
-        }}
-      />
-      {local && (
-        <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)' }}>
-          {describeCron(local)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/** Minimal human-readable cron description for the most common patterns. */
-function describeCron(expr: string): string {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) return 'custom schedule';
-  const [min, hr, dom, , dow] = parts;
-  if (expr === '0 * * * *') return 'every hour';
-  if (min !== '*' && hr === '*' && dom === '*' && dow === '*') return `every hour at :${min.padStart(2, '0')}`;
-  if (min !== '*' && hr !== '*' && dom === '*' && dow === '*') return `daily at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
-  if (dom === '*' && dow !== '*') return `weekly (day ${dow}) at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
-  return 'custom schedule';
 }
 
 // ── Prefix tag editor ─────────────────────────────────────────────────────────
@@ -422,10 +377,10 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
 
       <Row
         label="Episode check schedule"
-        hint="Cron expression controlling how often new episodes are checked. Default: every hour."
+        hint="How often new podcast episodes are checked. Default: every hour."
         align="top"
       >
-        <CronInput
+        <CronEditor
           value={s.podcastEpisodeSchedule ?? '0 * * * *'}
           onChange={v => {
             setSettings(prev => ({ ...prev, podcastEpisodeSchedule: v }));
