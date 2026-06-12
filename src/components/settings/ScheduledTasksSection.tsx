@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import { getTasks, validateCron, type Task } from '../../api/abs';
 import { SectionHead, Row, MONO } from './shared';
+import CronEditor from './CronEditor';
 
 export interface ScheduledTasksSectionProps { st: OnyxState; }
 
@@ -23,6 +24,9 @@ function relTime(ms: number | null | undefined): string {
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
 }
+
+/** Capitalize the first letter for display. */
+const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
 /** Minimal human-readable description for the most common cron patterns. */
 function describeCron(expr: string): string {
@@ -64,8 +68,9 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Cron validator state.
-  const [cronInput, setCronInput] = useState('');
+  // Cron builder/validator state — seeded with a valid default so the picker
+  // opens in a friendly mode rather than empty Custom.
+  const [cronInput, setCronInput] = useState('0 * * * *');
   const [cronValid, setCronValid] = useState<boolean | null>(null);
   const [cronChecking, setCronChecking] = useState(false);
 
@@ -202,33 +207,33 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
       <GroupHead label="Schedules" />
 
       <Row label="Automatic backups" hint="Edit in Settings → Backups.">
-        <span style={{ fontFamily: MONO, fontSize: 11, color: backupEnabled ? 'var(--onyx-text)' : 'var(--onyx-text-mute)' }}>
-          {backupEnabled ? `${backupSchedule as string} · ${describeCron(backupSchedule as string)}` : 'Disabled'}
+        <span style={{ fontSize: 12.5, color: backupEnabled ? 'var(--onyx-text)' : 'var(--onyx-text-mute)' }}>
+          {backupEnabled ? cap(describeCron(backupSchedule as string)) : 'Disabled'}
         </span>
       </Row>
 
       <Row label="Podcast episode check" hint="Edit in Settings → Server.">
-        <span style={{ fontFamily: MONO, fontSize: 11, color: podcastSchedule ? 'var(--onyx-text)' : 'var(--onyx-text-mute)' }}>
-          {podcastSchedule ? `${podcastSchedule} · ${describeCron(podcastSchedule)}` : '—'}
+        <span style={{ fontSize: 12.5, color: podcastSchedule ? 'var(--onyx-text)' : 'var(--onyx-text-mute)' }}>
+          {podcastSchedule ? cap(describeCron(podcastSchedule)) : '—'}
         </span>
       </Row>
 
-      {/* ── Cron validator ───────────────────────────────────────────────── */}
-      <GroupHead label="Cron Validator" />
+      {/* ── Cron builder & validator ─────────────────────────────────────── */}
+      <GroupHead label="Cron Builder" />
 
-      <Row label="Validate a cron expression" hint="Check an expression against the server before using it in a schedule." align="top">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              value={cronInput}
-              onChange={e => { setCronInput(e.target.value); setCronValid(null); }}
-              onKeyDown={e => { if (e.key === 'Enter') void checkCron(); }}
-              placeholder="0 * * * *"
-              style={{
-                fontFamily: MONO, fontSize: 12, background: 'var(--onyx-panel2)', color: 'var(--onyx-text)',
-                border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, padding: '6px 10px', width: 160,
-              }}
-            />
+      <Row
+        label="Build a schedule"
+        hint="Construct a cron expression with the picker. Custom mode accepts raw cron, which you can check against the server."
+        align="top"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-end' }}>
+          <CronEditor value={cronInput} onChange={v => { setCronInput(v); setCronValid(null); }} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            {cronValid !== null && (
+              <span style={{ fontFamily: MONO, fontSize: 11, color: cronValid ? '#4caf50' : '#e08a8a' }}>
+                {cronValid ? '✓ valid' : '✕ invalid expression'}
+              </span>
+            )}
             <button
               onClick={() => void checkCron()}
               disabled={cronChecking || !cronInput.trim()}
@@ -242,11 +247,6 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
               Validate
             </button>
           </div>
-          {cronValid !== null && (
-            <span style={{ fontFamily: MONO, fontSize: 11, color: cronValid ? '#4caf50' : '#e08a8a' }}>
-              {cronValid ? `✓ valid — ${describeCron(cronInput.trim())}` : '✕ invalid expression'}
-            </span>
-          )}
         </div>
       </Row>
     </div>
