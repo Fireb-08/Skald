@@ -103,16 +103,24 @@ export default function Player({ st }: PlayerProps) {
     return () => { cancelled = true; };
   }, [st.focusedBookId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Podcast episodes carry their own optional chapters (same {start,end,title}
+  // shape as books) on the episode object, not on the item. Map them into the
+  // onyx Chapter shape so the existing chapter machinery (list, waveform,
+  // timer, scrub, prev/next) works for episodes that provide chapters.
+  const episodeChapters = (isPodcast && ep?.chapters)
+    ? ep.chapters.map((c, i) => ({ n: i + 1, t: c.title, dur: (c.end ?? 0) - (c.start ?? 0) }))
+    : [];
   // Chapters for the chapter list come from the focused book (fetched on demand).
-  // For the waveform scrubber we still use currentBookChapters so position maps correctly.
+  // For the waveform scrubber we use the playing item's chapters (episode chapters
+  // for podcasts, currentBookChapters for books) so position maps correctly.
+  const chapters = isPodcast ? episodeChapters : st.currentBookChapters; // waveform/position only
   const displayChapters = isFocusedDifferent
     ? fetchedFocusedChapters
-    : st.currentBookChapters;
-  const chapters = st.currentBookChapters; // waveform/position only
+    : chapters;
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
-  // Chapterless items (podcast episodes) have no chapter timeline, so the
-  // transport works in absolute time: position within the whole episode rather
-  // than within a chapter. dispLocal/dispTotal feed the timer, waveform, scrub.
+  // Items without a chapter timeline (podcast episodes that ship no chapters)
+  // drive the transport in absolute time: position within the whole episode
+  // rather than within a chapter. dispLocal/dispTotal feed timer/waveform/scrub.
   const hasChapters = chapters.length > 0;
   const dispLocal = hasChapters ? chLocal : st.position;
   const dispTotal = hasChapters ? curCh.dur : st.bookSecs;
