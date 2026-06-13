@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task } from '../api/abs';
+import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
 import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings } from '../api/abs';
 
@@ -16,7 +16,7 @@ import {
 
 // ─── Re-exported API types ────────────────────────────────────────────────────
 
-export type { LibraryItem, MediaProgress, ListeningStats };
+export type { LibraryItem, MediaProgress, ListeningStats, Library };
 export type { AbsBookmark };
 export type { DownloadRecord };
 
@@ -231,6 +231,14 @@ export interface OnyxState {
   isAdmin: boolean;
   // Library
   library: LibraryItem[];
+  // All libraries on the server (book + podcast), for the switcher. Populated
+  // alongside the first item fetch and kept fresh by refreshLibrary().
+  libraries: Library[];
+  // The currently-active library object (derived from libraries + currentLibraryId).
+  // Components read activeLibrary.mediaType to branch book vs podcast rendering.
+  activeLibrary: Library | undefined;
+  // Switch the active library and load its items. Resets the shelf view context.
+  setActiveLibrary: (id: string) => Promise<void>;
   libraryLoading: boolean;
   // True when the library was loaded from the disk cache because the server was unreachable.
   // Used by the titlebar to display a persistent OFFLINE indicator.
@@ -452,24 +460,66 @@ export function useOnyxState(): OnyxState {
 
   // ── Library ─────────────────────────────────────────────────────────────────
   const [library, setLibraryRaw] = useState<LibraryItem[]>([]);
+  // Full library list for the switcher (book + podcast).
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  // Tracks the active library's ID so live sync handlers can filter events
+  // that belong to a different library (e.g., a podcast library vs. books).
+  // Declared here (above refreshLibrary) because refreshLibrary now reads it.
+  const [currentLibraryId, setCurrentLibraryId] = useState('');
   const updateLibraryItem = useCallback((item: LibraryItem) => {
     setLibraryRaw(prev => prev.map(x => x.id === item.id ? item : x));
   }, []);
   const removeLibraryItem = useCallback((id: string) => {
     setLibraryRaw(prev => prev.filter(x => x.id !== id));
   }, []);
+
+  // Choose which library to make active from a freshly-fetched list. Preference
+  // order: the user's last explicit selection (persisted) if it still exists,
+  // then the previously-active id, then the first book library, then anything.
+  // Keeping book-first preserves the original single-book-library behavior for
+  // users who never touch the switcher.
+  const pickActiveLibrary = useCallback((libs: Library[]): Library | undefined => {
+    const saved = localStorage.getItem('skald.activeLibraryId');
+    return libs.find(l => l.id === saved)
+      ?? libs.find(l => l.mediaType === 'book')
+      ?? libs[0];
+  }, []);
+
   const refreshLibrary = useCallback(async () => {
     if (!serverUrl) return;
     try {
       const libs = await fetchLibraries(serverUrl);
-      const audiobookLib = libs.find(l => l.mediaType === 'book') ?? libs[0];
-      if (!audiobookLib) return;
-      // Keep currentLibraryId in sync whenever the library is refreshed.
-      setCurrentLibraryId(audiobookLib.id);
-      const items = await fetchLibraryItems(serverUrl, audiobookLib.id);
+      setLibraries(libs);
+      // Reload whichever library is currently active; fall back to the picker if
+      // the active one vanished (deleted) or was never set.
+      const target = libs.find(l => l.id === currentLibraryId) ?? pickActiveLibrary(libs);
+      if (!target) return;
+      setCurrentLibraryId(target.id);
+      const items = await fetchLibraryItems(serverUrl, target.id);
       setLibraryRaw(patchLibraryItems(items));
     } catch (e) {
       console.error('[refreshLibrary] failed:', e);
+    }
+  }, [serverUrl, currentLibraryId, pickActiveLibrary]);
+
+  // Switch the active library and load its items. View-context resets (search,
+  // contextFilter, shelfTab, focus) are done by the caller (TopNav) since those
+  // setters live further down the hook.
+  const setActiveLibrary = useCallback(async (id: string) => {
+    if (!serverUrl) return;
+    console.log('[library] switching active library →', id);
+    localStorage.setItem('skald.activeLibraryId', id);
+    setCurrentLibraryId(id);
+    setLibraryLoadingRaw(true);
+    try {
+      const items = await fetchLibraryItems(serverUrl, id);
+      setLibraryRaw(patchLibraryItems(items));
+      setIsOffline(false);
+      saveLibraryCache(items).catch(e => console.error('[library] cache save failed:', e));
+    } catch (e) {
+      console.error('[setActiveLibrary] failed:', e);
+    } finally {
+      setLibraryLoadingRaw(false);
     }
   }, [serverUrl]);
   const [libraryLoading, setLibraryLoadingRaw] = useState(
@@ -514,10 +564,6 @@ export function useOnyxState(): OnyxState {
     return () => { unlisten?.(); };
   }, []); // runs once on mount; callers use setDownloads for immediate optimistic updates
 
-  // Tracks the active library's ID so live sync handlers can filter events
-  // that belong to a different library (e.g., a podcast library vs. books).
-  const [currentLibraryId, setCurrentLibraryId] = useState('');
-
   useEffect(() => {
     if (!serverUrl || (!authToken && !(username && password))) {
       setLibraryLoadingRaw(false);
@@ -542,11 +588,13 @@ export function useOnyxState(): OnyxState {
         }
         const libs = await fetchLibraries(serverUrl);
         if (cancelled) return;
-        const audiobookLib = libs.find(l => l.mediaType === 'book') ?? libs[0];
-        if (!audiobookLib) { setLibraryLoadingRaw(false); return; }
+        setLibraries(libs);
+        // Pick the active library (last selection → first book → first of any).
+        const activeLib = pickActiveLibrary(libs);
+        if (!activeLib) { setLibraryLoadingRaw(false); return; }
         // Record the library ID so live sync event handlers can filter by it.
-        setCurrentLibraryId(audiobookLib.id);
-        const items = await fetchLibraryItems(serverUrl, audiobookLib.id);
+        setCurrentLibraryId(activeLib.id);
+        const items = await fetchLibraryItems(serverUrl, activeLib.id);
         if (cancelled) return;
         setLibraryRaw(patchLibraryItems(items));
         // Server responded successfully — we are online; clear any offline indicator.
@@ -859,6 +907,8 @@ export function useOnyxState(): OnyxState {
   const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
   const focusedBook  = library.find(b => b.id === (focusedBookId ?? currentBookId)) ?? currentBook;
   const bookSecs = currentBook?.media.duration ?? 0;
+  // The active library object, derived from the list + the active id.
+  const activeLibrary = libraries.find(l => l.id === currentLibraryId);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -1119,7 +1169,7 @@ export function useOnyxState(): OnyxState {
     authToken, setAuthToken,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
-    library, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
+    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
     serverSettings, setServerSettings,
