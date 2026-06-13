@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import ReactDOM from 'react-dom';
 import type { LibraryItem } from '../state/onyx';
+import { bookAuthor, bookNarrator } from '../state/onyx';
 import { updateMedia, updateChapters, fetchItem } from '../api/abs';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -130,12 +131,17 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
         setTitle((m.title as string) ?? '');
         setSubtitle((m.subtitle as string) ?? '');
         // The single-item fetch returns authors/narrators as object arrays with
-        // authorName/narratorName often null — read the arrays first, and never
-        // use the "Unknown Author" display sentinel as an editable value.
-        const authorArr = Array.isArray(m.authors) ? (m.authors as { name: string }[]).map(a => a.name) : null;
-        setAuthors(authorArr ? authorArr.join(', ') : ((m.authorName as string) ?? ''));
-        const narratorArr = Array.isArray(m.narrators) ? (m.narrators as string[]) : null;
-        setNarrators(narratorArr ? narratorArr.join(', ') : ((m.narratorName as string) ?? ''));
+        // authorName/narratorName often null. Read the arrays first, then the flat
+        // name, then fall back to the (normalized) shelf prop — never seed with the
+        // "Unknown Author" display sentinel.
+        const authorArr = Array.isArray(m.authors) ? (m.authors as { name: string }[]).map(a => a.name).filter(Boolean) : [];
+        let authorStr = authorArr.length ? authorArr.join(', ') : (typeof m.authorName === 'string' ? m.authorName : '');
+        if (!authorStr) { const pa = bookAuthor(item); if (pa && pa !== 'Unknown Author') authorStr = pa; }
+        setAuthors(authorStr);
+        const narratorArr = Array.isArray(m.narrators) ? (m.narrators as string[]).filter(Boolean) : [];
+        let narratorStr = narratorArr.length ? narratorArr.join(', ') : (typeof m.narratorName === 'string' ? m.narratorName : '');
+        if (!narratorStr) narratorStr = bookNarrator(item);
+        setNarrators(narratorStr);
         setSeries(seriesDisplay(full));
         setPublisher((m.publisher as string) ?? '');
         setYear((m.publishedYear as string) ?? '');

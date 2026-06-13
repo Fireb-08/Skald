@@ -303,6 +303,14 @@ pub struct BookMetadata {
     pub subtitle: Option<String>,
     pub author_name: Option<AuthorField>,
     pub narrator_name: Option<String>,
+    // The expanded single-item response (GET /api/items/:id) carries authors and
+    // narrators as arrays with authorName/narratorName often null. Pass them
+    // through as raw JSON so the metadata editor can seed from them. (Without
+    // these fields, serde drops them and the editor's author field comes up blank.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authors: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narrators: Option<Value>,
     pub series_name: Option<String>,
     #[serde(default)]
     pub genres: Vec<String>,
