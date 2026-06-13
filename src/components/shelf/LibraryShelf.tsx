@@ -23,7 +23,7 @@ import FilesModal from './FilesModal';
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
-const COVER_SIZES: Record<string, number> = { S: 80, M: 96, L: 116, XL: 148, XXL: 180, XXXL: 220 };
+export const COVER_SIZES: Record<string, number> = { S: 80, M: 96, L: 116, XL: 148, XXL: 180, XXXL: 220 };
 
 // Virtualization layout constants.
 const GRID_GAP = 14;     // px gap between grid tiles (matches the original auto-fill layout)

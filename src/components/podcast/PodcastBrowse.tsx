@@ -12,6 +12,7 @@ import { resolvePodcastImage, cachedPodcastImage } from '../../lib/podcastCover'
 import { playEpisode, togglePlayback } from '../../api/playbook';
 import Cover from '../Cover';
 import Icon from '../Icon';
+import { COVER_SIZES } from '../shelf/LibraryShelf';
 import PodcastSubscribeModal from './PodcastSubscribeModal';
 
 export interface PodcastBrowseProps {
@@ -43,6 +44,8 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [genre, setGenre] = useState<string | null>(null);
   const [genreOpen, setGenreOpen] = useState(false);
+  // Carousel cover size follows the global cover-size preference (Settings → Library).
+  const coverPx = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
 
   // Backfill cover art from the live feed for any podcast lacking a stored image.
   useEffect(() => {
@@ -182,7 +185,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
           onClick={() => setSelectedId(null)}
           title="All podcasts"
           style={{
-            flexShrink: 0, width: 96, height: 96, borderRadius: 8, cursor: 'pointer',
+            flexShrink: 0, width: coverPx, height: coverPx, borderRadius: 8, cursor: 'pointer',
             border: `2px solid ${selectedId === null ? 'var(--onyx-accent)' : 'var(--onyx-glass-edge)'}`,
             background: 'rgba(0,0,0,0.25)', color: 'var(--onyx-text-dim)',
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
@@ -201,7 +204,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               title={`${asPodcastItem(it).media?.metadata?.title ?? ''} — click to filter, double-click to open`}
               className="onyx-poster"
               style={{
-                flexShrink: 0, width: 96, height: 96, borderRadius: 8, cursor: 'pointer', padding: 0, overflow: 'hidden',
+                flexShrink: 0, width: coverPx, height: coverPx, borderRadius: 8, cursor: 'pointer', padding: 0, overflow: 'hidden',
                 border: `2px solid ${selected ? 'var(--onyx-accent)' : 'transparent'}`, background: 'none',
               }}
             >
