@@ -94,7 +94,9 @@ export default function TopNav({ st }: TopNavProps) {
             }}>
               {st.libraries.map(l => {
                 const active = l.id === st.currentLibraryId;
-                const hot = hoverLib === l.id || active;
+                const hover = hoverLib === l.id;
+                // Hover = solid accent fill ("about to pick"); current = accent
+                // text + check mark ("already selected"). Distinct states.
                 return (
                   <button
                     key={l.id}
@@ -102,15 +104,16 @@ export default function TopNav({ st }: TopNavProps) {
                     onMouseEnter={() => setHoverLib(l.id)}
                     onMouseLeave={() => setHoverLib(prev => (prev === l.id ? null : prev))}
                     style={{
-                      display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 6,
-                      background: hot ? 'var(--onyx-accent)' : 'transparent',
-                      color: hot ? 'var(--onyx-bg)' : 'var(--onyx-text)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                      width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 6,
+                      background: hover ? 'var(--onyx-accent)' : 'transparent',
+                      color: hover ? 'var(--onyx-bg)' : (active ? 'var(--onyx-accent)' : 'var(--onyx-text)'),
                       border: 'none', cursor: 'pointer', fontFamily: mono, fontSize: 11, letterSpacing: '0.04em',
                       fontWeight: active ? 600 : 400,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}
                   >
-                    {libraryLabel(l)}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{libraryLabel(l)}</span>
+                    {active && <Icon name="check" size={12} />}
                   </button>
                 );
               })}
