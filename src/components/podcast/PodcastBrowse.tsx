@@ -234,6 +234,21 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)', letterSpacing: '0.06em' }}>
           {st.library.length} PODCAST{st.library.length === 1 ? '' : 'S'}
         </div>
+        {/* All filter — small pill (replaces the old full-size carousel tile) so
+            the covers lead. Active when no single podcast is selected. */}
+        <button
+          onClick={() => setSelectedId(null)}
+          title="Show all podcasts"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+            background: selectedId === null ? 'var(--onyx-accent-dim)' : 'rgba(0,0,0,0.3)',
+            color: selectedId === null ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
+            border: `1px solid ${selectedId === null ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+            fontFamily: MONO, fontSize: 10.5, letterSpacing: '0.04em',
+          }}
+        >
+          <Icon name="grid" size={12} /> All
+        </button>
         {/* Genre filter for the carousel */}
         {genres.length > 0 && (
           <div style={{ position: 'relative' }}>
@@ -273,20 +288,6 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         className="pickitup-scroll"
         style={{ flexShrink: 0, display: 'flex', gap: 12, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 6, cursor: isDragging ? 'grabbing' : 'grab', userSelect: isDragging ? 'none' : undefined, WebkitOverflowScrolling: 'touch' }}
       >
-        {/* All chip */}
-        <button
-          onClick={() => setSelectedId(null)}
-          title="All podcasts"
-          style={{
-            flexShrink: 0, width: coverPx, height: coverPx, borderRadius: 8, cursor: 'pointer',
-            border: `2px solid ${selectedId === null ? 'var(--onyx-accent)' : 'var(--onyx-glass-edge)'}`,
-            background: 'rgba(0,0,0,0.25)', color: 'var(--onyx-text-dim)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
-            fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em',
-          }}
-        >
-          <Icon name="grid" size={18} /> ALL
-        </button>
         {visiblePodcasts.map(it => {
           const selected = it.id === selectedId;
           return (
