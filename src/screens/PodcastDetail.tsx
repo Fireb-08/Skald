@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 import type { OnyxState, LibraryItem } from '../state/onyx';
 import { fmtRemaining, fmtTime } from '../state/onyx';
 import { asPodcastItem, fetchItem, type PodcastEpisode } from '../api/abs';
-import { playEpisode } from '../api/playbook';
+import { playEpisode, togglePlayback } from '../api/playbook';
 import Cover from '../components/Cover';
 import Icon from '../components/Icon';
 import PodcastFindEpisodesModal from '../components/podcast/PodcastFindEpisodesModal';
@@ -84,6 +84,23 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     st.setScreen('player');
   };
 
+  // Clicking anywhere on an episode row opens the player: if it is already the
+  // loaded episode, just navigate (don't restart the session); otherwise start it.
+  const openEpisode = (ep: PodcastEpisode) => {
+    if (!ep.id) return;
+    const isCurrent = st.currentEpisodeId === ep.id && st.currentBookId === item.id;
+    if (isCurrent) { st.setScreen('player'); return; }
+    play(ep);
+  };
+
+  // The round button toggles pause/resume for the loaded episode (no restart);
+  // for any other episode it starts playback and opens the player.
+  const onPlayButton = (e: React.MouseEvent, ep: PodcastEpisode, isCurrent: boolean) => {
+    e.stopPropagation();
+    if (isCurrent) { togglePlayback(st).catch(console.error); return; }
+    play(ep);
+  };
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 24px 24px', minHeight: 0, width: '100%', overflow: 'hidden' }}>
       {/* Back */}
@@ -156,14 +173,15 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
             <div
               key={ep.id ?? ep.title}
               className="onyx-row"
+              onClick={() => openEpisode(ep)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 12, padding: '10px 10px',
-                borderRadius: 8, borderBottom: '1px solid var(--onyx-line)',
+                borderRadius: 8, borderBottom: '1px solid var(--onyx-line)', cursor: 'pointer',
               }}
             >
               <button
-                onClick={() => play(ep)}
-                title={nowPlaying && st.playing ? 'Playing' : 'Play episode'}
+                onClick={(e) => onPlayButton(e, ep, nowPlaying)}
+                title={nowPlaying && st.playing ? 'Pause' : 'Play episode'}
                 style={{
                   width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
                   background: nowPlaying ? 'var(--onyx-accent)' : 'rgba(255,255,255,0.06)',
