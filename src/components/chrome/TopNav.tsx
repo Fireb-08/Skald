@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import type { SearchScope } from '../../lib/shelfFilters';
 import Glass from './Glass';
@@ -7,8 +8,26 @@ export interface TopNavProps {
   st: OnyxState;
 }
 
+// Display label for a library in the switcher (podcast libraries are prefixed).
+function libraryLabel(l: { name: string; mediaType: string }): string {
+  return l.mediaType === 'podcast' ? `Podcasts: ${l.name}` : l.name;
+}
+
 export default function TopNav({ st }: TopNavProps) {
   const mono = "'JetBrains Mono', ui-monospace, monospace";
+  // Custom library dropdown (a native <select> can't be themed to match Onyx).
+  const [libMenuOpen, setLibMenuOpen] = useState(false);
+  const [hoverLib, setHoverLib] = useState<string | null>(null);
+  const libRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!libMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (libRef.current && !libRef.current.contains(e.target as Node)) setLibMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [libMenuOpen]);
 
   const items: { id: string; label: string }[] = [
     { id: 'library', label: 'Library' },
@@ -45,25 +64,59 @@ export default function TopNav({ st }: TopNavProps) {
       })}
 
       {/* Library switcher — only shown when the server has more than one library.
-          Lets the user move between book and podcast libraries. */}
+          Custom dropdown (black surface; accent highlight on hover/selection) so
+          it matches the Onyx UI, which a native <select> cannot. */}
       {st.libraries.length > 1 && (
-        <select
-          value={st.currentLibraryId}
-          onChange={(e) => switchLibrary(e.target.value)}
-          title="Switch library"
-          style={{
-            fontFamily: mono, fontSize: 11, letterSpacing: '0.04em',
-            background: 'rgba(0,0,0,0.3)', color: 'var(--onyx-text-dim)',
-            border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, padding: '4px 8px', cursor: 'pointer',
-            maxWidth: 220,
-          }}
-        >
-          {st.libraries.map(l => (
-            <option key={l.id} value={l.id}>
-              {l.mediaType === 'podcast' ? 'Podcasts: ' : ''}{l.name}
-            </option>
-          ))}
-        </select>
+        <div ref={libRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setLibMenuOpen(o => !o)}
+            title="Switch library"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              fontFamily: mono, fontSize: 11, letterSpacing: '0.04em',
+              background: '#000', color: 'var(--onyx-text)',
+              border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
+              maxWidth: 240,
+            }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {(() => { const a = st.libraries.find(l => l.id === st.currentLibraryId); return a ? libraryLabel(a) : 'Library'; })()}
+            </span>
+            <span style={{ display: 'inline-flex', color: 'var(--onyx-text-mute)', transform: libMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+              <Icon name="chevron-down" size={12} />
+            </span>
+          </button>
+          {libMenuOpen && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 100, minWidth: 200,
+              background: '#000', border: '1px solid var(--onyx-glass-edge)', borderRadius: 8,
+              boxShadow: '0 12px 32px rgba(0,0,0,0.6)', padding: 4, overflow: 'hidden',
+            }}>
+              {st.libraries.map(l => {
+                const active = l.id === st.currentLibraryId;
+                const hot = hoverLib === l.id || active;
+                return (
+                  <button
+                    key={l.id}
+                    onClick={() => { switchLibrary(l.id); setLibMenuOpen(false); }}
+                    onMouseEnter={() => setHoverLib(l.id)}
+                    onMouseLeave={() => setHoverLib(prev => (prev === l.id ? null : prev))}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 6,
+                      background: hot ? 'var(--onyx-accent)' : 'transparent',
+                      color: hot ? 'var(--onyx-bg)' : 'var(--onyx-text)',
+                      border: 'none', cursor: 'pointer', fontFamily: mono, fontSize: 11, letterSpacing: '0.04em',
+                      fontWeight: active ? 600 : 400,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {libraryLabel(l)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
       <div style={{ flex: 1, marginLeft: 24, position: 'relative' }}>
         <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--onyx-text-mute)', display: 'flex', pointerEvents: 'none' }}>
