@@ -32,7 +32,7 @@ export default function CoverPicker({ item, st, onClose }: CoverPickerProps) {
   // Load (and reload) the current cover preview.
   useEffect(() => {
     let cancelled = false;
-    getCover(st.serverUrl, item.id, 400)
+    getCover(st.serverUrl, item.id, 400, previewBust)
       .then(path => { if (!cancelled) setPreviewSrc(path); })
       .catch(() => { if (!cancelled) setPreviewSrc(null); });
     return () => { cancelled = true; };
@@ -121,7 +121,7 @@ export default function CoverPicker({ item, st, onClose }: CoverPickerProps) {
           {/* Current cover + actions */}
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
             <div style={{ width: 96, height: 96, borderRadius: 6, background: 'var(--onyx-glass)', flexShrink: 0, overflow: 'hidden' }}>
-              {previewSrc && <img src={`${convertFileSrc(previewSrc)}?v=${previewBust}`} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+              {previewSrc && <img src={convertFileSrc(previewSrc)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={label}>Current cover</div>

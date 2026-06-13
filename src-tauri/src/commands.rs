@@ -586,14 +586,18 @@ pub async fn get_cover(
     server_url: String,
     item_id: String,
     width: Option<u32>,
+    // Cache-bust version — bumped by the frontend after a cover change so the
+    // returned path (and asset:// URL) differs and the WebView reloads the image.
+    bust: Option<u32>,
 ) -> Result<String, String> {
+    let version = bust.unwrap_or(0);
     // Returns the absolute path of the cached cover file on disk rather than its
     // bytes. The frontend converts this path to an asset:// URL via Tauri's
     // convertFileSrc so WebView2 can fetch the image straight from disk through
     // the asset protocol — no base64 round-trip over the IPC bridge.
     // `width` is threaded into the cache key so covers fetched at different
     // widths are stored separately and never collide.
-    if !cover_cache::is_cached(&item_id, width) {
+    if !cover_cache::is_cached(&item_id, width, version) {
         // Not yet cached: fetch from ABS (resized when width is Some) and write to disk.
         let token = auth::load_token()?
             .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
@@ -601,10 +605,10 @@ pub async fn get_cover(
             .with_token(token)
             .fetch_cover(&item_id, width)
             .await?;
-        cover_cache::save_cover(&item_id, width, &bytes)?;
+        cover_cache::save_cover(&item_id, width, version, &bytes)?;
     }
     // The file is now guaranteed to exist in the cache — return its path.
-    Ok(cover_cache::cache_path(&item_id, width).to_string_lossy().into_owned())
+    Ok(cover_cache::cache_path(&item_id, width, version).to_string_lossy().into_owned())
 }
 
 #[tauri::command]
