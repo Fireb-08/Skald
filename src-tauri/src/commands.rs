@@ -642,7 +642,7 @@ pub async fn update_chapters(
 
 // ── Cover management (admin/canUpload) ───────────────────────────────────────
 // set/upload/remove clear the on-disk cover cache after success so the next
-// fetch re-downloads the new art. Diagnostics ([Cover]) retained until validated.
+// fetch re-downloads the new art.
 
 /// GET /api/search/covers — find cover candidates (array of image URLs).
 #[tauri::command]
@@ -653,44 +653,33 @@ pub async fn find_covers(
     provider: String,
 ) -> Result<Vec<String>, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).find_covers(&title, &author, &provider).await;
-    match &result {
-        Ok(urls) => println!("[Cover] find_covers '{title}' ({provider}) → {} results", urls.len()),
-        Err(e) => println!("[Cover] find_covers FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).find_covers(&title, &author, &provider).await
 }
 
 /// POST /api/items/:id/cover { url } — set the cover from a remote URL.
 #[tauri::command]
 pub async fn set_cover_url(server_url: String, item_id: String, url: String) -> Result<(), String> {
-    println!("[Cover] set_cover_url item={item_id}");
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
     let result = AbsClient::new(server_url).with_token(token).set_cover_url(&item_id, &url).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
-    if let Err(e) = &result { println!("[Cover] set_cover_url FAILED: {e}"); }
     result
 }
 
 /// POST /api/items/:id/cover (multipart) — upload a local image as the cover.
 #[tauri::command]
 pub async fn upload_cover(server_url: String, item_id: String, file_path: String) -> Result<(), String> {
-    println!("[Cover] upload_cover item={item_id} path={file_path}");
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
     let result = AbsClient::new(server_url).with_token(token).upload_cover(&item_id, &file_path).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
-    if let Err(e) = &result { println!("[Cover] upload_cover FAILED: {e}"); }
     result
 }
 
 /// DELETE /api/items/:id/cover — remove the cover.
 #[tauri::command]
 pub async fn remove_cover(server_url: String, item_id: String) -> Result<(), String> {
-    println!("[Cover] remove_cover item={item_id}");
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
     let result = AbsClient::new(server_url).with_token(token).remove_cover(&item_id).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
-    if let Err(e) = &result { println!("[Cover] remove_cover FAILED: {e}"); }
     result
 }
 
