@@ -8,7 +8,7 @@ import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { fmtRemaining, fmtTime } from '../../state/onyx';
 import { asPodcastItem, getRecentEpisodes, type RecentEpisode } from '../../api/abs';
-import { resolvePodcastImage, cachedPodcastImage } from '../../lib/podcastCover';
+import { resolvePodcastFeed, cachedPodcastImage, episodeKey } from '../../lib/podcastCover';
 import { playEpisode, togglePlayback } from '../../api/playbook';
 import Cover from '../Cover';
 import Icon from '../Icon';
@@ -37,10 +37,21 @@ function episodeDate(ep: RecentEpisode): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// Sort key — milliseconds since epoch from publishedAt or the RSS pubDate.
+function episodeTime(ep: RecentEpisode): number {
+  if (ep.publishedAt) return ep.publishedAt;
+  if (ep.pubDate) { const t = Date.parse(ep.pubDate); return isNaN(t) ? 0 : t; }
+  return 0;
+}
+
 export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [showSubscribe, setShowSubscribe] = useState(false);
   const [feedImages, setFeedImages] = useState<Record<string, string>>({});
-  const [episodes, setEpisodes] = useState<RecentEpisode[]>([]);
+  // Published episodes resolved from each podcast's live feed (keyed by podcast).
+  const [feedEpisodes, setFeedEpisodes] = useState<Record<string, RecentEpisode[]>>({});
+  // Downloaded episodes (from recent-episodes), indexed by stable episode key, so
+  // a feed episode can be matched to its downloaded (playable) counterpart.
+  const [downloadedMap, setDownloadedMap] = useState<Map<string, RecentEpisode>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [genre, setGenre] = useState<string | null>(null);
   const [genreOpen, setGenreOpen] = useState(false);
@@ -81,27 +92,36 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
     }
   };
 
-  // Backfill cover art from the live feed for any podcast lacking a stored image.
+  // Resolve each podcast's live feed once (cached): backfills cover art AND the
+  // published episode list, so the feed below shows the latest *published*
+  // episodes rather than only the downloaded ones.
   useEffect(() => {
     st.library.forEach(it => {
-      if (directImage(it) || cachedPodcastImage(it.id) || feedImages[it.id]) return;
       const meta = (it.media?.metadata ?? {}) as unknown as Record<string, unknown>;
       const feedUrl = meta.feedUrl as string | undefined;
       if (!feedUrl) return;
-      resolvePodcastImage(st.serverUrl, it.id, feedUrl).then(url => {
-        if (url) setFeedImages(prev => (prev[it.id] ? prev : { ...prev, [it.id]: url }));
+      resolvePodcastFeed(st.serverUrl, it.id, feedUrl).then(data => {
+        if (!data) return;
+        if (data.image) setFeedImages(prev => (prev[it.id] ? prev : { ...prev, [it.id]: data.image! }));
+        if (data.episodes.length) setFeedEpisodes(prev => ({ ...prev, [it.id]: data.episodes }));
       });
     });
   }, [st.library, st.serverUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Chronological episode feed across all podcasts. Re-fetched when the library
-  // changes (e.g. after a download lands) so new episodes appear automatically.
+  // Map of downloaded episodes (keyed by stable episode key) so feed episodes can
+  // be matched to a playable downloaded counterpart. Re-fetched when the library
+  // changes (e.g. after a download lands).
   useEffect(() => {
     if (!st.currentLibraryId || !st.serverUrl) return;
     let cancelled = false;
-    console.log('[Podcast] loading recent episodes for', st.currentLibraryId);
-    getRecentEpisodes(st.serverUrl, st.currentLibraryId, 100)
-      .then(res => { if (!cancelled) setEpisodes(res.episodes ?? []); })
+    console.log('[Podcast] loading downloaded episodes for', st.currentLibraryId);
+    getRecentEpisodes(st.serverUrl, st.currentLibraryId, 200)
+      .then(res => {
+        if (cancelled) return;
+        const m = new Map<string, RecentEpisode>();
+        (res.episodes ?? []).forEach(e => m.set(episodeKey(e), e));
+        setDownloadedMap(m);
+      })
       .catch(e => console.error('[Podcast] recent-episodes failed:', e));
     return () => { cancelled = true; };
   }, [st.currentLibraryId, st.serverUrl, st.library]);
@@ -120,18 +140,36 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
     ? st.library.filter(it => podcastGenres(it).includes(genre))
     : st.library;
 
-  // Episode feed: a selected podcast wins; otherwise honour the genre filter.
-  const visibleEpisodes = episodes.filter(ep => {
-    if (selectedId) return ep.libraryItemId === selectedId;
-    if (!genre) return true;
-    const it = st.library.find(i => i.id === ep.libraryItemId);
-    return it ? podcastGenres(it).includes(genre) : false;
-  });
+  // Unified feed: published feed episodes (each matched to its downloaded
+  // counterpart when present) plus any downloaded episode no longer in the feed.
+  // Filtered by the selected podcast / genre, newest first.
+  const mergedEpisodes = (() => {
+    const byKey = new Map<string, { ep: RecentEpisode; downloaded: boolean }>();
+    for (const list of Object.values(feedEpisodes)) {
+      for (const ep of list) {
+        const k = episodeKey(ep);
+        const dl = downloadedMap.get(k);
+        byKey.set(k, { ep: dl ?? ep, downloaded: !!dl });
+      }
+    }
+    // Downloaded episodes that have aged out of the feed should still appear.
+    downloadedMap.forEach((ep, k) => { if (!byKey.has(k)) byKey.set(k, { ep, downloaded: true }); });
+    return [...byKey.values()]
+      .filter(({ ep }) => {
+        if (selectedId) return ep.libraryItemId === selectedId;
+        if (!genre) return true;
+        const it = st.library.find(i => i.id === ep.libraryItemId);
+        return it ? podcastGenres(it).includes(genre) : false;
+      })
+      .sort((a, b) => episodeTime(b.ep) - episodeTime(a.ep))
+      .slice(0, 60);
+  })();
 
   const selectedPodcast = selectedId ? st.library.find(i => i.id === selectedId) : undefined;
 
   const openDetail = (id: string) => { st.setPodcastDetailId(id); st.setScreen('podcast'); };
 
+  // Downloaded episode → play directly (open the player on it).
   const playEp = (ep: RecentEpisode) => {
     const pid = ep.libraryItemId;
     if (!pid || !ep.id) return;
@@ -141,6 +179,19 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
       console.error('[Podcast] playEpisode failed:', e);
       st.setToast({ message: 'Could not start episode', type: 'error' });
     });
+    st.setScreen('player');
+  };
+
+  // Undownloaded episode → open the player in its pending-download state (no
+  // episode id yet); the player offers Download → auto-play on completion.
+  const openUndownloaded = (ep: RecentEpisode) => {
+    const pid = ep.libraryItemId;
+    if (!pid) return;
+    console.log('[Podcast] open undownloaded episode → player', ep.title);
+    st.setCurrentEpisode(ep);
+    st.setCurrentEpisodeId(null);
+    st.setCurrentBookId(pid);
+    st.setFocusedBookId(pid);
     st.setScreen('player');
   };
 
@@ -261,7 +312,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
           {selectedPodcast ? (asPodcastItem(selectedPodcast).media?.metadata?.title ?? 'Episodes') : 'Latest Episodes'}
         </div>
-        <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)' }}>{visibleEpisodes.length}</div>
+        <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)' }}>{mergedEpisodes.length}</div>
         {selectedPodcast && (
           <button onClick={() => openDetail(selectedPodcast.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--onyx-accent)', fontFamily: MONO, fontSize: 10.5, letterSpacing: '0.04em' }}>
             open podcast →
@@ -271,55 +322,57 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
 
       {/* Episode feed */}
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 4 }}>
-        {visibleEpisodes.length === 0 && (
+        {mergedEpisodes.length === 0 && (
           <div style={{ color: 'var(--onyx-text-mute)', fontFamily: MONO, fontSize: 12, padding: '16px 2px' }}>
-            No episodes yet. Open a podcast and use Find Episodes to download some.
+            No episodes found. Subscribe to a podcast to see its latest episodes.
           </div>
         )}
-        {visibleEpisodes.map(ep => {
+        {mergedEpisodes.map(({ ep, downloaded }) => {
           const pid = ep.libraryItemId;
           const podItem = pid ? st.library.find(i => i.id === pid) : undefined;
-          const mp = st.mediaProgress.find(x => x.libraryItemId === pid && x.episodeId === ep.id);
+          const mp = downloaded ? st.mediaProgress.find(x => x.libraryItemId === pid && x.episodeId === ep.id) : undefined;
           const dur = ep.duration ?? mp?.duration ?? 0;
           const pct = mp ? Math.min(100, Math.round((mp.progress ?? 0) * 100)) : 0;
           const finished = mp?.isFinished ?? false;
-          const nowPlaying = st.currentEpisodeId === ep.id && st.currentBookId === pid;
+          const nowPlaying = downloaded && st.currentEpisodeId === ep.id && st.currentBookId === pid;
           const podTitle = ep.podcast?.metadata?.title
             ?? (podItem ? asPodcastItem(podItem).media?.metadata?.title : '')
             ?? '';
           const date = episodeDate(ep);
+          const onRow = () => (downloaded ? playEp(ep) : openUndownloaded(ep));
           return (
             <div
-              key={(pid ?? '') + (ep.id ?? ep.title)}
+              key={(pid ?? '') + episodeKey(ep)}
               className="onyx-row"
-              onClick={() => playEp(ep)}
+              onClick={onRow}
               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 8px', borderRadius: 8, borderBottom: '1px solid var(--onyx-line)', cursor: 'pointer' }}
             >
               {/* Podcast cover thumb */}
               <div style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(0,0,0,0.25)' }}>
                 {podItem && <Cover item={podItem} fill serverUrl={st.serverUrl} fallbackImageUrl={coverForId(pid)} />}
               </div>
-              {/* Play/pause */}
+              {/* Play (downloaded) / Download (not yet downloaded) */}
               <button
-                onClick={(e) => { e.stopPropagation(); if (nowPlaying) togglePlayback(st).catch(console.error); else playEp(ep); }}
-                title={nowPlaying && st.playing ? 'Pause' : 'Play'}
+                onClick={(e) => { e.stopPropagation(); if (!downloaded) { openUndownloaded(ep); return; } if (nowPlaying) togglePlayback(st).catch(console.error); else playEp(ep); }}
+                title={!downloaded ? 'Download episode' : (nowPlaying && st.playing ? 'Pause' : 'Play')}
                 style={{
                   width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
                   background: nowPlaying ? 'var(--onyx-accent)' : 'rgba(255,255,255,0.06)',
-                  color: nowPlaying ? 'var(--onyx-bg)' : 'var(--onyx-text)',
+                  color: nowPlaying ? 'var(--onyx-bg)' : (downloaded ? 'var(--onyx-text)' : 'var(--onyx-text-mute)'),
                   border: '1px solid var(--onyx-glass-edge)', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}
               >
-                <Icon name={nowPlaying && st.playing ? 'pause' : 'play'} size={13} />
+                <Icon name={!downloaded ? 'plus' : (nowPlaying && st.playing ? 'pause' : 'play')} size={13} />
               </button>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: 'var(--onyx-text)', fontWeight: nowPlaying ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ep.title}</div>
+                <div style={{ fontSize: 13, color: downloaded ? 'var(--onyx-text)' : 'var(--onyx-text-dim)', fontWeight: nowPlaying ? 600 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ep.title}</div>
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.03em', marginTop: 2, display: 'flex', gap: 10, overflow: 'hidden' }}>
                   {!selectedId && podTitle && <span style={{ color: 'var(--onyx-text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{podTitle}</span>}
                   {date && <span>{date}</span>}
                   {dur > 0 && <span>{fmtRemaining(dur)}</span>}
-                  {finished ? <span style={{ color: 'var(--onyx-accent)' }}>finished</span>
+                  {!downloaded ? <span style={{ color: 'var(--onyx-text-mute)' }}>not downloaded</span>
+                    : finished ? <span style={{ color: 'var(--onyx-accent)' }}>finished</span>
                     : pct > 0 ? <span>{fmtTime(mp?.currentTime ?? 0)} · {pct}%</span> : null}
                 </div>
                 {pct > 0 && !finished && (

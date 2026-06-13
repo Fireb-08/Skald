@@ -5,7 +5,7 @@ import {
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
   recordStopPoint, getStopPoints,
-  asPodcastItem,
+  asPodcastItem, downloadEpisodes,
 } from '../api/abs';
 import type { LocalStopPoint } from '../api/abs';
 import type { CSSProperties } from 'react';
@@ -21,14 +21,14 @@ import Waveform from '../components/Waveform';
 import VolumeControl from '../components/chrome/VolumeControl';
 import DeviceSelector from '../components/chrome/DeviceSelector';
 import { getCachedReview, setCachedReview } from '../api/reviewCache';
-import { resolvePodcastImage, cachedPodcastImage } from '../lib/podcastCover';
+import { resolvePodcastImage, cachedPodcastImage, episodeKey } from '../lib/podcastCover';
 import type { OLRatings, OLShelves } from '../api/reviewCache';
 import MiniPlayer from '../components/player/MiniPlayer';
 // Canonical play function — all "start this book" paths route through here
 // for consistent resume-from-saved-position and UI-sync behaviour.
 // togglePlayback is used by the local playback branch to pause/resume
 // without touching session state.
-import { playBook, togglePlayback } from '../api/playbook';
+import { playBook, playEpisode, togglePlayback } from '../api/playbook';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -81,6 +81,9 @@ export default function Player({ st }: PlayerProps) {
   const podcastImageUrl = isPodcast
     ? ((podcastMeta?.imageUrl as string) || (podcastMeta?.image as string) || undefined)
     : undefined;
+  // A podcast episode selected from the feed that isn't downloaded yet: it has no
+  // ABS episode id, so there's no session to play — the player offers Download.
+  const episodePending = isPodcast && !!st.currentEpisode && !st.currentEpisodeId;
   const detailLabel = isPodcast ? 'Description' : 'Synopsis';
   const descriptionHtml = isPodcast
     ? (ep?.description || b.media?.metadata?.description || '')
@@ -225,6 +228,41 @@ export default function Player({ st }: PlayerProps) {
     if (!feedUrl) return;
     resolvePodcastImage(st.serverUrl, b.id, feedUrl).then(u => { if (u) setPodcastFeedImg(u); });
   }, [isPodcast, b.id, podcastImageUrl, podcastMeta, st.serverUrl]);
+
+  // Download-then-play for a pending (undownloaded) episode: queue the download,
+  // poll the item until the episode lands with an id, then start playback.
+  const [dlState, setDlState] = useState<'idle' | 'downloading'>('idle');
+  const downloadAndPlay = async () => {
+    const ep = st.currentEpisode;
+    const pid = st.currentBookId;
+    if (!ep || !pid) return;
+    setDlState('downloading');
+    console.log('[Podcast] download-and-play', ep.title);
+    try {
+      await downloadEpisodes(st.serverUrl, pid, [ep]);
+    } catch (e) {
+      console.error('[Podcast] download failed:', e);
+      st.setToast({ message: 'Download failed', type: 'error' });
+      setDlState('idle');
+      return;
+    }
+    const key = episodeKey(ep);
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const item = await fetchItem(st.serverUrl, pid);
+        const eps = asPodcastItem(item).media.episodes ?? [];
+        const match = eps.find(e => episodeKey(e) === key) ?? eps.find(e => e.title === ep.title);
+        if (match?.id) {
+          setDlState('idle');
+          playEpisode(st, pid, match).catch(err => console.error('[Podcast] play after download failed:', err));
+          return;
+        }
+      } catch { /* keep polling */ }
+    }
+    setDlState('idle');
+    st.setToast({ message: 'Download is taking a while — it will appear once finished', type: 'info' });
+  };
 
   useEffect(() => {
     setOlWorkKey(undefined);
@@ -725,8 +763,36 @@ export default function Player({ st }: PlayerProps) {
             flexDirection: 'column',
             justifyContent: (isFocusedDifferent && !showTransport) ? 'center' : 'flex-start',
           }}>
+            {/* Pending podcast episode — offer download, then auto-play. */}
+            {episodePending && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, minHeight: 160, textAlign: 'center' }}>
+                <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>
+                  Episode not downloaded
+                </div>
+                <button
+                  onClick={downloadAndPlay}
+                  disabled={dlState === 'downloading'}
+                  style={{
+                    minWidth: 220, padding: '11px 18px', borderRadius: 8, border: 'none',
+                    cursor: dlState === 'downloading' ? 'default' : 'pointer',
+                    background: dlState === 'downloading' ? 'var(--onyx-line)' : 'var(--onyx-accent)',
+                    color: dlState === 'downloading' ? 'var(--onyx-text-mute)' : 'var(--onyx-bg)',
+                    fontFamily: MONO, fontSize: 12, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' as const,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  }}
+                >
+                  <Icon name={dlState === 'downloading' ? 'dot' : 'play'} size={13} />
+                  {dlState === 'downloading' ? 'Downloading…' : 'Download episode'}
+                </button>
+                {dlState === 'downloading' && (
+                  <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
+                    Fetching from the feed — playback starts automatically.
+                  </div>
+                )}
+              </div>
+            )}
             {/* Preview: Play this book button */}
-            {isFocusedDifferent && btnMounted && (
+            {!episodePending && isFocusedDifferent && btnMounted && (
               <div style={{
                 display: 'flex', justifyContent: 'center', alignItems: 'center',
                 transform: btnOut ? 'translateY(40px)' : 'translateY(0)',
@@ -749,7 +815,7 @@ export default function Player({ st }: PlayerProps) {
               </div>
             )}
             {/* Full transport: live or post-expansion */}
-            {(!isFocusedDifferent || showTransport) && (
+            {!episodePending && (!isFocusedDifferent || showTransport) && (
               <div style={{
                 opacity: (isFocusedDifferent && showTransport) ? (contentVisible ? 1 : 0) : 1,
                 transition: 'opacity 250ms ease-in',
