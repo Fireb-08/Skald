@@ -114,7 +114,6 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   useEffect(() => {
     if (!st.currentLibraryId || !st.serverUrl) return;
     let cancelled = false;
-    console.log('[Podcast] loading downloaded episodes for', st.currentLibraryId);
     getRecentEpisodes(st.serverUrl, st.currentLibraryId, 200)
       .then(res => {
         if (cancelled) return;
@@ -187,7 +186,6 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const openUndownloaded = (ep: RecentEpisode) => {
     const pid = ep.libraryItemId;
     if (!pid) return;
-    console.log('[Podcast] open undownloaded episode → player', ep.title);
     st.setCurrentEpisode(ep);
     st.setCurrentEpisodeId(null);
     st.setCurrentBookId(pid);

@@ -519,7 +519,6 @@ export function useOnyxState(): OnyxState {
   // setters live further down the hook.
   const setActiveLibrary = useCallback(async (id: string) => {
     if (!serverUrl) return;
-    console.log('[library] switching active library →', id);
     localStorage.setItem('skald.activeLibraryId', id);
     setCurrentLibraryId(id);
     setLibraryLoadingRaw(true);

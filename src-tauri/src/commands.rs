@@ -303,11 +303,6 @@ pub async fn open_playback_session(
 ) -> Result<OpenSessionResult, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    // [Podcast] diagnostic — distinguishes episode sessions from book sessions
-    // while validating cluster E playback.
-    if episode_id.is_some() {
-        println!("[Podcast] open_playback_session item={item_id} episode={episode_id:?} start={start_time:?}");
-    }
     // Scope the SessionManager lock so it is released before this command
     // returns — play_audio acquires the same lock and must not see it held.
     let result = {
@@ -2077,7 +2072,6 @@ pub async fn delete_custom_metadata_provider(server_url: String, id: String) -> 
 #[tauri::command]
 pub async fn get_podcast_feed(server_url: String, rss_feed: String) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] get_podcast_feed rss={rss_feed}");
     AbsClient::new(server_url).with_token(token).get_podcast_feed(&rss_feed).await
 }
 
@@ -2085,7 +2079,6 @@ pub async fn get_podcast_feed(server_url: String, rss_feed: String) -> Result<se
 #[tauri::command]
 pub async fn create_podcast(server_url: String, payload: serde_json::Value) -> Result<models::LibraryItem, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] create_podcast payload_keys={:?}", payload.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     AbsClient::new(server_url).with_token(token).create_podcast(payload).await
 }
 
@@ -2093,7 +2086,6 @@ pub async fn create_podcast(server_url: String, payload: serde_json::Value) -> R
 #[tauri::command]
 pub async fn parse_opml(server_url: String, opml_text: String) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] parse_opml len={}", opml_text.len());
     AbsClient::new(server_url).with_token(token).parse_opml(&opml_text).await
 }
 
@@ -2101,7 +2093,6 @@ pub async fn parse_opml(server_url: String, opml_text: String) -> Result<serde_j
 #[tauri::command]
 pub async fn create_podcasts_from_opml(server_url: String, payload: serde_json::Value) -> Result<(), String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] create_podcasts_from_opml payload_keys={:?}", payload.as_object().map(|o| o.keys().collect::<Vec<_>>()));
     AbsClient::new(server_url).with_token(token).create_from_opml(payload).await
 }
 
@@ -2109,7 +2100,6 @@ pub async fn create_podcasts_from_opml(server_url: String, payload: serde_json::
 #[tauri::command]
 pub async fn check_new_episodes(server_url: String, item_id: String, limit: Option<u32>) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] check_new_episodes item={item_id} limit={limit:?}");
     AbsClient::new(server_url).with_token(token).check_new_episodes(&item_id, limit).await
 }
 
@@ -2117,7 +2107,6 @@ pub async fn check_new_episodes(server_url: String, item_id: String, limit: Opti
 #[tauri::command]
 pub async fn get_episode_downloads(server_url: String, item_id: String) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] get_episode_downloads item={item_id}");
     AbsClient::new(server_url).with_token(token).get_episode_downloads(&item_id).await
 }
 
@@ -2125,7 +2114,6 @@ pub async fn get_episode_downloads(server_url: String, item_id: String) -> Resul
 #[tauri::command]
 pub async fn clear_episode_download_queue(server_url: String, item_id: String) -> Result<(), String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] clear_episode_download_queue item={item_id}");
     AbsClient::new(server_url).with_token(token).clear_download_queue(&item_id).await
 }
 
@@ -2133,7 +2121,6 @@ pub async fn clear_episode_download_queue(server_url: String, item_id: String) -
 #[tauri::command]
 pub async fn download_episodes(server_url: String, item_id: String, episodes: serde_json::Value) -> Result<(), String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] download_episodes item={item_id} count={}", episodes.as_array().map(|a| a.len()).unwrap_or(0));
     AbsClient::new(server_url).with_token(token).download_episodes(&item_id, episodes).await
 }
 
@@ -2141,7 +2128,6 @@ pub async fn download_episodes(server_url: String, item_id: String, episodes: se
 #[tauri::command]
 pub async fn find_episode(server_url: String, item_id: String, title: String) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] find_episode item={item_id} title={title}");
     AbsClient::new(server_url).with_token(token).find_episode(&item_id, &title).await
 }
 
@@ -2149,7 +2135,6 @@ pub async fn find_episode(server_url: String, item_id: String, title: String) ->
 #[tauri::command]
 pub async fn match_episodes(server_url: String, item_id: String, override_existing: bool) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] match_episodes item={item_id} override={override_existing}");
     AbsClient::new(server_url).with_token(token).match_episodes(&item_id, override_existing).await
 }
 
@@ -2157,7 +2142,6 @@ pub async fn match_episodes(server_url: String, item_id: String, override_existi
 #[tauri::command]
 pub async fn get_episode(server_url: String, item_id: String, episode_id: String) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] get_episode item={item_id} episode={episode_id}");
     AbsClient::new(server_url).with_token(token).get_episode(&item_id, &episode_id).await
 }
 
@@ -2165,7 +2149,6 @@ pub async fn get_episode(server_url: String, item_id: String, episode_id: String
 #[tauri::command]
 pub async fn update_episode(server_url: String, item_id: String, episode_id: String, payload: serde_json::Value) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] update_episode item={item_id} episode={episode_id}");
     AbsClient::new(server_url).with_token(token).update_episode(&item_id, &episode_id, payload).await
 }
 
@@ -2173,7 +2156,6 @@ pub async fn update_episode(server_url: String, item_id: String, episode_id: Str
 #[tauri::command]
 pub async fn delete_episode(server_url: String, item_id: String, episode_id: String, hard: bool) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] delete_episode item={item_id} episode={episode_id} hard={hard}");
     AbsClient::new(server_url).with_token(token).delete_episode(&item_id, &episode_id, hard).await
 }
 
@@ -2181,7 +2163,6 @@ pub async fn delete_episode(server_url: String, item_id: String, episode_id: Str
 #[tauri::command]
 pub async fn get_recent_episodes(server_url: String, library_id: String, limit: Option<u32>, page: Option<u32>) -> Result<serde_json::Value, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] get_recent_episodes library={library_id} limit={limit:?} page={page:?}");
     AbsClient::new(server_url).with_token(token).get_recent_episodes(&library_id, limit, page).await
 }
 
@@ -2189,7 +2170,6 @@ pub async fn get_recent_episodes(server_url: String, library_id: String, limit: 
 #[tauri::command]
 pub async fn export_opml(server_url: String, library_id: String) -> Result<String, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    println!("[Podcast] export_opml library={library_id}");
     AbsClient::new(server_url).with_token(token).export_opml(&library_id).await
 }
 

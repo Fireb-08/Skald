@@ -1,8 +1,8 @@
 // Podcast detail screen (cluster E). Shows a podcast's header and the full list
 // of PUBLISHED episodes (resolved from the live feed on open, merged with the
 // downloaded ones). Downloaded episodes play; undownloaded ones open the player
-// in its download-then-play flow. A "Download all" action queues every
-// not-yet-downloaded episode. Reached from PodcastBrowse via setScreen('podcast').
+// in its download-then-play flow. A "Download…" picker queues selected
+// not-yet-downloaded episodes. Reached from PodcastBrowse via setScreen('podcast').
 import { useState, useEffect } from 'react';
 import type { OnyxState, LibraryItem } from '../state/onyx';
 import { fmtRemaining, fmtTime } from '../state/onyx';
@@ -56,7 +56,6 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   useEffect(() => {
     if (!st.podcastDetailId || !st.serverUrl) { setFull(null); return; }
     let cancelled = false;
-    console.log('[Podcast] fetch expanded item', st.podcastDetailId);
     fetchItem(st.serverUrl, st.podcastDetailId)
       .then(it => { if (!cancelled) setFull(it); })
       .catch(e => console.error('[Podcast] fetchItem detail failed:', e));
@@ -70,7 +69,6 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     const id = st.podcastDetailId;
     if (!id || !metaFeedUrl) return;
     let cancelled = false;
-    console.log('[Podcast] resolve feed for detail', id);
     resolvePodcastFeed(st.serverUrl, id, metaFeedUrl).then(d => {
       if (cancelled || !d) return;
       if (d.episodes.length) setFeedEps(d.episodes);

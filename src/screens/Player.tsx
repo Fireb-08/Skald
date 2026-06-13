@@ -237,7 +237,6 @@ export default function Player({ st }: PlayerProps) {
     const pid = st.currentBookId;
     if (!ep || !pid) return;
     setDlState('downloading');
-    console.log('[Podcast] download-and-play', ep.title);
     try {
       await downloadEpisodes(st.serverUrl, pid, [ep]);
     } catch (e) {

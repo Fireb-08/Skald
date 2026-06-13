@@ -148,7 +148,6 @@ export async function playEpisode(
   }
   playBookInFlight = true;
   try {
-    console.log('[playEpisode] item=%s episode=%s', podcastItemId, episodeId);
     st.setIsLocalPlayback(false);
     await closeActiveSession().catch(e =>
       console.error('[playbook] closeActiveSession failed:', e)
