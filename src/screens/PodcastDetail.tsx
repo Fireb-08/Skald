@@ -1,0 +1,162 @@
+// Podcast detail screen (cluster E). Shows a podcast's header (cover, title,
+// author, feed URL) and its downloaded episodes with per-episode progress and
+// a play action. Reached from PodcastBrowse via st.setScreen('podcast').
+import type { OnyxState } from '../state/onyx';
+import { fmtRemaining, fmtTime } from '../state/onyx';
+import { asPodcastItem, type PodcastEpisode } from '../api/abs';
+import { playEpisode } from '../api/playbook';
+import Cover from '../components/Cover';
+import Icon from '../components/Icon';
+
+export interface PodcastDetailProps {
+  st: OnyxState;
+}
+
+// Resolve an episode's publish date to a display string, tolerating both the
+// numeric publishedAt (ms) and the raw RSS pubDate string.
+function episodeDate(ep: PodcastEpisode): string {
+  const d = ep.publishedAt
+    ? new Date(ep.publishedAt)
+    : ep.pubDate
+      ? new Date(ep.pubDate)
+      : null;
+  if (!d || isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+export default function PodcastDetail({ st }: PodcastDetailProps) {
+  const mono = "'JetBrains Mono', ui-monospace, monospace";
+  const item = st.library.find(i => i.id === st.podcastDetailId);
+
+  if (!item) {
+    return (
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontFamily: mono, fontSize: 13 }}>
+        Podcast not found.
+      </div>
+    );
+  }
+
+  const p = asPodcastItem(item);
+  const meta = p.media.metadata;
+  const episodes = [...(p.media.episodes ?? [])].sort((a, b) => {
+    const ax = a.publishedAt ?? a.index ?? 0;
+    const bx = b.publishedAt ?? b.index ?? 0;
+    return bx - ax; // newest first
+  });
+
+  const back = () => { st.setScreen('library'); st.setPodcastDetailId(null); };
+
+  const play = (ep: PodcastEpisode) => {
+    if (!ep.id) return;
+    playEpisode(st, item.id, ep.id).catch(e => {
+      console.error('[Podcast] playEpisode failed:', e);
+      st.setToast({ message: 'Could not start episode', type: 'error' });
+    });
+    st.setScreen('player');
+  };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 24px 24px', minHeight: 0, width: '100%', overflow: 'hidden' }}>
+      {/* Back */}
+      <button
+        onClick={back}
+        style={{
+          alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6,
+          background: 'none', border: 'none', cursor: 'pointer', fontFamily: mono,
+          fontSize: 11, letterSpacing: '0.06em', color: 'var(--onyx-text-dim)', padding: 0,
+        }}
+      >
+        <Icon name="chevron-left" size={14} /> LIBRARY
+      </button>
+
+      {/* Header */}
+      <div style={{ display: 'flex', gap: 20, flexShrink: 0 }}>
+        <div style={{ width: 160, height: 160, flexShrink: 0 }}>
+          <Cover item={item} fill serverUrl={st.serverUrl} />
+        </div>
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--onyx-text)', lineHeight: 1.15 }}>
+            {meta.title ?? item.id}
+          </div>
+          {meta.author && <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)' }}>{meta.author}</div>}
+          <div style={{ fontFamily: mono, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
+            {episodes.length} episode{episodes.length === 1 ? '' : 's'}
+            {meta.explicit ? ' · explicit' : ''}
+          </div>
+          {meta.feedUrl && (
+            <div style={{
+              fontFamily: mono, fontSize: 10.5, color: 'var(--onyx-text-mute)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 460, opacity: 0.8,
+            }} title={meta.feedUrl}>{meta.feedUrl}</div>
+          )}
+          {meta.description && (
+            <div style={{
+              fontSize: 12, color: 'var(--onyx-text-dim)', lineHeight: 1.45, marginTop: 4, maxWidth: 560,
+              overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+            }}>{meta.description}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Episode list */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 4 }}>
+        {episodes.length === 0 && (
+          <div style={{ color: 'var(--onyx-text-mute)', fontFamily: mono, fontSize: 12, padding: '16px 0' }}>
+            No downloaded episodes yet.
+          </div>
+        )}
+        {episodes.map(ep => {
+          const mp = st.mediaProgress.find(x => x.libraryItemId === item.id && x.episodeId === ep.id);
+          const dur = ep.duration ?? mp?.duration ?? 0;
+          const pct = mp ? Math.min(100, Math.round((mp.progress ?? 0) * 100)) : 0;
+          const finished = mp?.isFinished ?? false;
+          const nowPlaying = st.currentEpisodeId === ep.id && st.currentBookId === item.id;
+          const date = episodeDate(ep);
+          return (
+            <div
+              key={ep.id ?? ep.title}
+              className="onyx-row"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 10px',
+                borderRadius: 8, borderBottom: '1px solid var(--onyx-line)',
+              }}
+            >
+              <button
+                onClick={() => play(ep)}
+                title={nowPlaying && st.playing ? 'Playing' : 'Play episode'}
+                style={{
+                  width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                  background: nowPlaying ? 'var(--onyx-accent)' : 'rgba(255,255,255,0.06)',
+                  color: nowPlaying ? 'var(--onyx-bg)' : 'var(--onyx-text)',
+                  border: '1px solid var(--onyx-glass-edge)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Icon name={nowPlaying && st.playing ? 'pause' : 'play'} size={14} />
+              </button>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 13, color: 'var(--onyx-text)', fontWeight: nowPlaying ? 600 : 400,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{ep.title}</div>
+                <div style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.03em', marginTop: 2, display: 'flex', gap: 10 }}>
+                  {date && <span>{date}</span>}
+                  {dur > 0 && <span>{fmtRemaining(dur)}</span>}
+                  {finished ? <span style={{ color: 'var(--onyx-accent)' }}>finished</span>
+                    : pct > 0 ? <span>{fmtTime((mp?.currentTime ?? 0))} · {pct}%</span> : null}
+                </div>
+                {/* Progress bar */}
+                {pct > 0 && !finished && (
+                  <div style={{ height: 2, background: 'var(--onyx-line)', borderRadius: 1, marginTop: 6, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--onyx-accent)' }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

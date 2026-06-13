@@ -23,6 +23,10 @@ export async function playBook(
   }
   playBookInFlight = true;
   try {
+    // A book is starting — clear any episode context from a prior podcast play
+    // (covers both the offline and online paths below).
+    st.setCurrentEpisodeId(null);
+
     // ── Offline path: play from local file when the book is downloaded ──────────
     // If the book is downloaded locally, play from disk rather than opening a
     // server session — this enables offline playback without network access.
@@ -120,6 +124,56 @@ export async function playBook(
     st.setPlaying(true);
   } finally {
     // Always clear the flag, even if playBook throws
+    playBookInFlight = false;
+  }
+}
+
+// Canonical entry point for starting playback of a podcast episode (cluster E).
+// Mirrors playBook's online path but opens the session on the episode so the
+// server tracks per-episode progress. Podcast episodes are not part of the
+// offline download registry, so there is no local-file branch here.
+export async function playEpisode(
+  st: OnyxState,
+  podcastItemId: string,
+  episodeId: string,
+  startTimeOverride?: number,
+): Promise<void> {
+  if (playBookInFlight) {
+    console.log('[playEpisode] already in flight — ignoring duplicate call');
+    return;
+  }
+  playBookInFlight = true;
+  try {
+    console.log('[playEpisode] item=%s episode=%s', podcastItemId, episodeId);
+    st.setIsLocalPlayback(false);
+    await closeActiveSession().catch(e =>
+      console.error('[playbook] closeActiveSession failed:', e)
+    );
+    st.setSessionReady(false);
+    st.setSessionId('');
+    st.setPlaying(false);
+
+    // Resolve start position: explicit override > saved episode progress > 0.
+    // Episode progress records carry both libraryItemId and episodeId.
+    let startTime = startTimeOverride;
+    if (startTime === undefined) {
+      const saved = st.mediaProgress.find(
+        p => p.libraryItemId === podcastItemId && p.episodeId === episodeId,
+      );
+      startTime = saved ? saved.currentTime : 0;
+    }
+
+    const result = await openPlaybackSession(st.serverUrl, podcastItemId, startTime, episodeId);
+    st.setSessionId(result.sessionId);
+    st.setSessionReady(true);
+    st.setCurrentEpisodeId(episodeId);
+    st.setCurrentBookId(podcastItemId);
+    st.setFocusedBookId(podcastItemId);
+    st.setPosition(result.currentTime);
+
+    await playAudio().catch(console.error);
+    st.setPlaying(true);
+  } finally {
     playBookInFlight = false;
   }
 }

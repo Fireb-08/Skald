@@ -14,6 +14,7 @@ import Login from './screens/Login';
 import Library from './screens/Library';
 import Player from './screens/Player';
 import Settings from './screens/Settings';
+import PodcastDetail from './screens/PodcastDetail';
 
 // Guard against React StrictMode double-mounting which would open two
 // simultaneous socket connections, causing one to fail with EngineIO error.
@@ -189,6 +190,7 @@ export default function App() {
         ) : (
           <>
             {st.screen === 'library'  && <Library  st={st} />}
+            {st.screen === 'podcast'  && <PodcastDetail st={st} />}
             {st.screen === 'player'   && <Player   st={st} />}
             {/* Settings receives onLogout which clears the token and shows Login again */}
             {st.screen === 'settings' && <Settings st={st} onLogout={() => st.setAuthToken('')} />}

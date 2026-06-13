@@ -14,6 +14,7 @@ import { CollectionsView } from '../components/shelf/tabs';
 import { PlaylistsView } from '../components/shelf/tabs';
 import { GenresView } from '../components/shelf/tabs';
 import { PublishersView } from '../components/shelf/tabs';
+import PodcastBrowse from '../components/podcast/PodcastBrowse';
 import { prefetchReviews } from '../api/reviewCache';
 
 export interface LibraryProps {
@@ -21,11 +22,26 @@ export interface LibraryProps {
 }
 
 export default function Library({ st }: LibraryProps) {
+  const isPodcast = st.activeLibrary?.mediaType === 'podcast';
+
   useEffect(() => {
-    if (!st.library.length || !st.serverUrl) return;
+    // Open Library review enrichment is book-specific — skip it for podcasts.
+    if (isPodcast || !st.library.length || !st.serverUrl) return;
     const cancel = prefetchReviews(st.library, st.serverUrl, st.enableOpenLibrary);
     return cancel;
-  }, [st.library, st.serverUrl, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.library, st.serverUrl, st.enableOpenLibrary, isPodcast]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Podcast libraries use a dedicated full-width browse grid instead of the
+  // book-centric Focus/Greeting + shelf-tabs layout (those components assume
+  // book media). The library switcher in TopNav toggles between the two.
+  if (isPodcast) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>
+        <TopNav st={st} />
+        <PodcastBrowse st={st} />
+      </div>
+    );
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>

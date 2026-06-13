@@ -253,6 +253,14 @@ export interface OnyxState {
   // Playback
   screen: string;
   setScreen: (screen: string) => void;
+  // Podcast detail navigation: the podcast item shown on the 'podcast' screen.
+  podcastDetailId: string | null;
+  setPodcastDetailId: (id: string | null) => void;
+  // The episode currently loaded for playback (null when a book is playing).
+  // Lets the player/detail reflect what is playing; progress itself is tracked
+  // server-side via the episode-scoped session, so this is presentation-only.
+  currentEpisodeId: string | null;
+  setCurrentEpisodeId: (id: string | null) => void;
   currentBook: LibraryItem | undefined;
   focusedBook: LibraryItem | undefined;
   focusedBookId: string | null;
@@ -674,6 +682,9 @@ export function useOnyxState(): OnyxState {
   // ── Playback ─────────────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('library');
   const [currentBookId, setCurrentBookId] = useState('');
+  // Podcast detail navigation + currently-playing episode (cluster E).
+  const [podcastDetailId, setPodcastDetailId] = useState<string | null>(null);
+  const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   // focusedBookId intentionally starts null — seeded from library on load by the
   // effect below. No localStorage read: we want a clean state each session so
   // the GreetingPane is the true default until the user starts playback.
@@ -732,6 +743,9 @@ export function useOnyxState(): OnyxState {
 
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
+  // Duration last reported by LibVLC via playback-tick. Used only as the total
+  // for media that lacks an authoritative media.duration (podcast episodes).
+  const [tickDuration, setTickDuration] = useState(0);
   const [volume, setVolume] = useState(0.68);
   const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState('1.0');
@@ -906,7 +920,13 @@ export function useOnyxState(): OnyxState {
 
   const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
   const focusedBook  = library.find(b => b.id === (focusedBookId ?? currentBookId)) ?? currentBook;
-  const bookSecs = currentBook?.media.duration ?? 0;
+  // Total duration for the transport. Books carry an authoritative media.duration;
+  // podcast items do not (duration is per-episode), so fall back to the duration
+  // LibVLC reports via playback-tick once an episode is loaded. Books never hit
+  // the fallback because their media.duration is always > 0.
+  const bookSecs = (currentBook?.media.duration && currentBook.media.duration > 0)
+    ? currentBook.media.duration
+    : tickDuration;
   // The active library object, derived from the list + the active id.
   const activeLibrary = libraries.find(l => l.id === currentLibraryId);
 
@@ -917,6 +937,7 @@ export function useOnyxState(): OnyxState {
       ({ payload }) => {
         setPosition(payload.currentTime);
         setPlaying(payload.isPlaying);
+        if (payload.duration > 0) setTickDuration(payload.duration);
       },
     ).then(fn => { unlisten = fn; });
     return () => { unlisten?.(); };
@@ -1175,6 +1196,8 @@ export function useOnyxState(): OnyxState {
     serverSettings, setServerSettings,
     tasks, setTasks,
     screen, setScreen,
+    podcastDetailId, setPodcastDetailId,
+    currentEpisodeId, setCurrentEpisodeId,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
     playing, setPlaying,
