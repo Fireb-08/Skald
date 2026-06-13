@@ -2014,12 +2014,7 @@ pub async fn scan_library(
 #[tauri::command]
 pub async fn get_custom_metadata_providers(server_url: String) -> Result<Vec<CustomMetadataProvider>, String> {
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).get_custom_metadata_providers().await;
-    match &result {
-        Ok(p) => println!("[Providers] get_custom_metadata_providers OK — {} provider(s)", p.len()),
-        Err(e) => println!("[Providers] get_custom_metadata_providers FAILED: {e}"),
-    }
-    result
+    AbsClient::new(server_url).with_token(token).get_custom_metadata_providers().await
 }
 
 /// POST /api/custom-metadata-providers — register a custom provider.
@@ -2028,20 +2023,14 @@ pub async fn create_custom_metadata_provider(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<CustomMetadataProvider, String> {
-    println!("[Providers] create_custom_metadata_provider payload: {payload}");
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).create_custom_metadata_provider(payload).await;
-    if let Err(e) = &result { println!("[Providers] create_custom_metadata_provider FAILED: {e}"); }
-    result
+    AbsClient::new(server_url).with_token(token).create_custom_metadata_provider(payload).await
 }
 
 /// DELETE /api/custom-metadata-providers/:id — remove a custom provider.
 #[tauri::command]
 pub async fn delete_custom_metadata_provider(server_url: String, id: String) -> Result<(), String> {
-    println!("[Providers] delete_custom_metadata_provider id={id}");
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).delete_custom_metadata_provider(&id).await;
-    if let Err(e) = &result { println!("[Providers] delete_custom_metadata_provider FAILED: {e}"); }
-    result
+    AbsClient::new(server_url).with_token(token).delete_custom_metadata_provider(&id).await
 }
 
