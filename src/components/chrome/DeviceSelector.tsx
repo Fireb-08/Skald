@@ -117,7 +117,7 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
             background: 'var(--onyx-panel2)',
             border: '1px solid var(--onyx-line)',
             borderRadius: 10,
-            boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,166,74,0.08)',
+            boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.08)',
             padding: 6,
             zIndex: 9999,
           }}

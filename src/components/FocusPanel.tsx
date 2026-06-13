@@ -96,7 +96,7 @@ function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; ch
           position: 'absolute', bottom: 'calc(100% + 8px)', left: 0,
           width: 280, maxWidth: '100%', maxHeight: 320,
           background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)', borderRadius: 10,
-          boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,166,74,0.08)',
+          boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.08)',
           padding: 6, zIndex: 100, display: 'flex', flexDirection: 'column',
         }}>
           <div style={{ padding: '6px 8px 4px', fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
@@ -183,7 +183,7 @@ function SpeedStat({ st }: { st: OnyxState }) {
         <div style={{
           position: 'absolute', bottom: 'calc(100% + 8px)', left: -4,
           background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)', borderRadius: 10,
-          boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(212,166,74,0.08)',
+          boxShadow: '0 16px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.08)',
           padding: 6, zIndex: 100, minWidth: 130,
         }}>
           <div style={{ fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)', letterSpacing: '0.12em', padding: '6px 8px 4px', textTransform: 'uppercase' }}>
@@ -232,7 +232,7 @@ function CollapseHandle({ collapsed, onToggle }: { collapsed: boolean; onToggle:
     >
       <div style={{
         width: 4, height: '100%', borderRadius: 2,
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(212,166,74,0.22) 30%, rgba(212,166,74,0.22) 70%, rgba(255,255,255,0.04))',
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22) 30%, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22) 70%, rgba(255,255,255,0.04))',
         border: '1px solid var(--onyx-glass-edge)',
         position: 'relative',
       }}>

@@ -52,9 +52,9 @@ function TypeBadge({ type }: { type: string }) {
       textTransform: 'uppercase' as const,
       padding: '2px 7px',
       borderRadius: 4,
-      background: brass ? 'rgba(212,166,74,0.14)' : 'rgba(255,255,255,0.06)',
-      color: brass ? '#d4a64a' : 'var(--onyx-text-mute)',
-      border: `1px solid ${brass ? 'rgba(212,166,74,0.24)' : 'rgba(255,255,255,0.08)'}`,
+      background: brass ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.14)' : 'rgba(255,255,255,0.06)',
+      color: brass ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+      border: `1px solid ${brass ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.24)' : 'rgba(255,255,255,0.08)'}`,
       whiteSpace: 'nowrap' as const,
     }}>
       {type}
@@ -310,7 +310,7 @@ function UserModal({
               padding: '8px 18px',
               // Brass gradient matches the primary "Enter" button on the login screen.
               background: 'linear-gradient(180deg, #e9bb5e, #d4a64a 55%, #a37d2e)',
-              border: '1px solid rgba(212,166,74,0.35)',
+              border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
               borderRadius: 7,
               color: '#1a1306',
               fontFamily: MONO,
@@ -624,10 +624,10 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
                 padding: '7px 14px',
                 // Subtle brass fill matches the Onyx accent without being as prominent
                 // as the primary CTA; still clearly interactive against the dark panel.
-                background: 'linear-gradient(180deg, rgba(212,166,74,0.18), rgba(212,166,74,0.10))',
-                border: '1px solid rgba(212,166,74,0.3)',
+                background: 'linear-gradient(180deg, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.18), rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.10))',
+                border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.3)',
                 borderRadius: 7,
-                color: '#d4a64a',
+                color: 'var(--onyx-accent)',
                 fontFamily: MONO,
                 fontSize: 10.5,
                 letterSpacing: '0.07em',
@@ -683,10 +683,10 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
                       borderRadius: 8,
                       // Own row gets a subtle brass tint to make it identifiable at a glance.
                       background: isSelf
-                        ? 'rgba(212,166,74,0.06)'
+                        ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06)'
                         : 'rgba(255,255,255,0.03)',
                       border: isSelf
-                        ? '1px solid rgba(212,166,74,0.15)'
+                        ? '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.15)'
                         : '1px solid rgba(255,255,255,0.05)',
                     }}
                   >

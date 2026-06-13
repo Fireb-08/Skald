@@ -44,8 +44,8 @@
   --onyx-accent-g: 166;
   --onyx-accent-b: 74;
   --onyx-accent-bright: #e9bb5e;
-  --onyx-accent-dim:    rgba(212, 166, 74, 0.18);
-  --onyx-accent-edge:   rgba(212, 166, 74, 0.35);
+  --onyx-accent-dim:    rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b), 0.18);
+  --onyx-accent-edge:   rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b), 0.35);
 
   /* Backgrounds */
   --onyx-bg:      #0b0b0e;
@@ -183,7 +183,7 @@ input:focus-visible {
 .saga-cta:not(:disabled):hover {
   transform: translateY(-1px);
   filter: brightness(1.04);
-  box-shadow: 0 14px 36px rgba(212,166,74,0.32), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+  box-shadow: 0 14px 36px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.32), inset 0 1px 0 rgba(255,255,255,0.2) !important;
 }
 .saga-cta:not(:disabled):hover .saga-arrow {
   transform: translateX(4px);
@@ -237,5 +237,5 @@ input:focus-visible {
   background: var(--onyx-accent);
   border: none;
   cursor: pointer;
-  box-shadow: 0 0 6px rgba(212, 166, 74, 0.4);
+  box-shadow: 0 0 6px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b), 0.4);
 }

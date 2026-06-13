@@ -317,7 +317,7 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
                     overflow: 'hidden',
                     borderRadius: 4,
                     transform: b.id === selectedId ? 'translateY(-4px)' : 'none',
-                    filter: b.id === selectedId ? 'drop-shadow(0 12px 24px rgba(212,166,74,0.35))' : 'none',
+                    filter: b.id === selectedId ? 'drop-shadow(0 12px 24px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35))' : 'none',
                     transition: 'transform 0.15s, filter 0.15s',
                   }}>
                     <Cover item={b} size={coverW} serverUrl={st.serverUrl} />

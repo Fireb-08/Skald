@@ -147,7 +147,7 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
             background: 'var(--onyx-panel2)',
             border: '1px solid var(--onyx-line)',
             borderRadius: 8,
-            boxShadow: '0 16px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,166,74,0.06)',
+            boxShadow: '0 16px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06)',
             padding: 6,
             // Cap height and scroll if there are many devices.
             maxHeight: 360,

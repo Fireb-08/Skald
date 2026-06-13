@@ -15,7 +15,7 @@ export default function CoverFan({ books, serverUrl }: CoverFanProps) {
     <div style={{
       position: 'relative', height: 280, padding: '32px 16px 0',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      background: 'linear-gradient(180deg, rgba(212,166,74,0.06), rgba(0,0,0,0.12))',
+      background: 'linear-gradient(180deg, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), rgba(0,0,0,0.12))',
       borderBottom: '1px solid var(--onyx-line)', overflow: 'hidden',
     }}>
       <div style={{
