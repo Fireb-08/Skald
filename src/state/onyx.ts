@@ -43,7 +43,7 @@ export interface AudioDevice {
 }
 
 export interface ContextFilter {
-  kind: 'series' | 'author' | 'narrator' | 'collection' | 'playlist';
+  kind: 'series' | 'author' | 'narrator' | 'collection' | 'playlist' | 'genre' | 'publisher';
   value: string;
   bookIds?: string[];
   // For series filters: the ABS series ID used for exact book matching.
@@ -100,6 +100,14 @@ export function bookNarrator(b: LibraryItem): string {
 
 export function bookGenre(b: LibraryItem): string {
   return b.media.metadata.genres[0] ?? '';
+}
+
+export function bookGenres(b: LibraryItem): string[] {
+  return b.media.metadata.genres ?? [];
+}
+
+export function bookPublisher(b: LibraryItem): string {
+  return b.media.metadata.publisher ?? '';
 }
 
 export function bookDurSecs(b: LibraryItem): number {

@@ -4,7 +4,7 @@ import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { getSeriesItems } from '../../api/abs';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookGenre,
-  bookDur, bookDurSecs, bookProgress,
+  bookGenres, bookPublisher, bookDur, bookDurSecs, bookProgress,
 } from '../../state/onyx';
 import Glass from '../chrome/Glass';
 import Cover from '../Cover';
@@ -416,6 +416,8 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
       // Series filtering is handled by sourceBooks selection above — do not re-filter here.
       if (kind === 'author'     && bookAuthor(b)   !== value)                return false;
       if (kind === 'narrator'   && bookNarrator(b) !== value)                return false;
+      if (kind === 'genre'      && !bookGenres(b).includes(value))           return false;
+      if (kind === 'publisher'  && bookPublisher(b) !== value)               return false;
       if ((kind === 'collection' || kind === 'playlist') && !(bookIds ?? []).includes(b.id)) return false;
     }
     const prog = bookProgress(b, st.mediaProgress);

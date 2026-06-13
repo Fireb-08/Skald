@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import {
-  bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress,
+  bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress, bookGenres, bookPublisher,
 } from '../../state/onyx';
 import type { SeriesObject } from '../../api/abs';
 import { getLibrarySeries } from '../../api/abs';
@@ -15,6 +15,8 @@ const TABS = [
   { id: 'series',      label: 'Series'      },
   { id: 'authors',     label: 'Authors'     },
   { id: 'narrators',   label: 'Narrators'   },
+  { id: 'genres',      label: 'Genres'      },
+  { id: 'publishers',  label: 'Publishers'  },
   { id: 'collections', label: 'Collections' },
   { id: 'playlists',   label: 'Playlists'   },
 ];
@@ -108,6 +110,8 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
       }
       if (kind === 'author'     && bookAuthor(b)   !== value)                    return false;
       if (kind === 'narrator'   && bookNarrator(b) !== value)                    return false;
+      if (kind === 'genre'      && !bookGenres(b).includes(value))               return false;
+      if (kind === 'publisher'  && bookPublisher(b) !== value)                   return false;
       if ((kind === 'collection' || kind === 'playlist') && !(bookIds ?? []).includes(b.id)) return false;
     }
     const prog = bookProgress(b, st.mediaProgress);
@@ -153,6 +157,15 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
       case 'narrators': {
         const n = new Set(st.library.map(b => bookNarrator(b)).filter(Boolean)).size;
         return `${n} narrators`;
+      }
+      case 'genres': {
+        const set = new Set<string>();
+        st.library.forEach(b => bookGenres(b).forEach(g => { if (g) set.add(g); }));
+        return `${set.size} genres`;
+      }
+      case 'publishers': {
+        const n = new Set(st.library.map(b => bookPublisher(b)).filter(Boolean)).size;
+        return `${n} publishers`;
       }
       case 'collections':
         return 'collections';
