@@ -110,6 +110,20 @@ input:focus-visible {
   background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35);
 }
 
+/* Desktop-app selection policy: the UI chrome is NOT selectable, so clicking a
+   row/tile can't start a stray text selection (which rendered as an accent
+   "bar" via ::selection and only cleared on a new click or window blur).
+   Real text opts back in via .onyx-selectable; form fields stay selectable. */
+html, body, #root {
+  user-select: none;
+  -webkit-user-select: none;
+}
+input, textarea, [contenteditable="true"],
+.onyx-selectable, .onyx-selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }

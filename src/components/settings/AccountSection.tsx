@@ -520,7 +520,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
           <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500 }}>
             {displayName}
           </div>
-          <div style={{
+          <div className="onyx-selectable" style={{
             fontFamily: MONO,
             fontSize: 10,
             color: 'var(--onyx-text-mute)',
