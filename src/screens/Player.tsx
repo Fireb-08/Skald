@@ -110,6 +110,12 @@ export default function Player({ st }: PlayerProps) {
     : st.currentBookChapters;
   const chapters = st.currentBookChapters; // waveform/position only
   const { idx: chIdx, local: chLocal, chapter: curCh } = chapterAt(chapters, st.position);
+  // Chapterless items (podcast episodes) have no chapter timeline, so the
+  // transport works in absolute time: position within the whole episode rather
+  // than within a chapter. dispLocal/dispTotal feed the timer, waveform, scrub.
+  const hasChapters = chapters.length > 0;
+  const dispLocal = hasChapters ? chLocal : st.position;
+  const dispTotal = hasChapters ? curCh.dur : st.bookSecs;
 
   // When viewing a non-playing book, use saved media progress to determine
   // which chapters have been completed and which is the current position.
@@ -447,6 +453,12 @@ export default function Player({ st }: PlayerProps) {
   const onScrub = (e: React.MouseEvent<HTMLDivElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    // Chapterless items scrub across the whole episode; chaptered items scrub
+    // within the current chapter (the waveform represents one chapter).
+    if (!hasChapters) {
+      seekAudio(frac * st.bookSecs).catch(console.error);
+      return;
+    }
     const chStart = chapterStart(chapters, chIdx);
     seekAudio(chStart + frac * curCh.dur).catch(console.error);
   };
@@ -724,14 +736,14 @@ export default function Player({ st }: PlayerProps) {
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-dim)' }}>
-                  <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(chLocal)}</span>
+                  <span style={{ fontSize: 14, color: 'var(--onyx-text)', fontWeight: 500 }}>{fmtTime(dispLocal)}</span>
                   <span style={{ color: 'var(--onyx-text-mute)' }}>/</span>
-                  <span>{fmtTime(curCh.dur)}</span>
+                  <span>{fmtTime(dispTotal)}</span>
                 </div>
               </div>
 
               <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
-                <Waveform width={waveWidth} height={isCompact ? 36 : 72} progress={chLocal / curCh.dur} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
+                <Waveform width={waveWidth} height={isCompact ? 36 : 72} progress={dispTotal > 0 ? dispLocal / dispTotal : 0} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
               </div>
 
               <div ref={transportRef} style={{ marginTop: isCompact ? 6 : 22, display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 0, overflow: 'visible' }}>
@@ -1024,8 +1036,16 @@ export default function Player({ st }: PlayerProps) {
             <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: !isCompact || activePane === 'chapters' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
                 <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Chapters</div>
-                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{displayChapters.length} · {bookDur(b)} total</div>
+                {/* Use bookSecs (not bookDur(b)) so chapterless podcast episodes
+                    show the episode duration instead of NaNm. */}
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>{displayChapters.length} · {fmtRemaining(st.bookSecs)} total</div>
               </div>
+              {/* Podcast episodes carry no chapter markers in this model. */}
+              {isPodcast && displayChapters.length === 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginBottom: 8 }}>
+                  No chapters for this episode
+                </div>
+              )}
               {/* Contextual hint above the list — message varies by lock reason */}
               {isFocusedDifferent && (
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginBottom: 8 }}>

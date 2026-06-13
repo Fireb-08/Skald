@@ -925,12 +925,14 @@ export function useOnyxState(): OnyxState {
 
   const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
   const focusedBook  = library.find(b => b.id === (focusedBookId ?? currentBookId)) ?? currentBook;
-  // Total duration for the transport. Books carry an authoritative media.duration;
-  // podcast items do not (duration is per-episode), so fall back to the duration
-  // LibVLC reports via playback-tick once an episode is loaded. Books never hit
-  // the fallback because their media.duration is always > 0.
+  // Total duration for the transport. Books carry an authoritative media.duration.
+  // Podcast items do not (duration is per-episode), so use the playing episode's
+  // duration, falling back to the duration LibVLC reports via playback-tick once
+  // the stream is loaded. Books never hit the fallbacks (media.duration > 0).
   const bookSecs = (currentBook?.media.duration && currentBook.media.duration > 0)
     ? currentBook.media.duration
+    : (currentEpisode?.duration && currentEpisode.duration > 0)
+    ? currentEpisode.duration
     : tickDuration;
   // The active library object, derived from the list + the active id.
   const activeLibrary = libraries.find(l => l.id === currentLibraryId);
