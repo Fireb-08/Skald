@@ -11,7 +11,7 @@ export default function CoverMosaic({ books, serverUrl }: CoverMosaicProps) {
   return (
     <div style={{
       position: 'relative', height: 280,
-      background: 'linear-gradient(180deg, rgba(212,166,74,0.06), rgba(0,0,0,0.12))',
+      background: 'linear-gradient(180deg, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), rgba(0,0,0,0.12))',
       borderBottom: '1px solid var(--onyx-line)', overflow: 'hidden',
       display: 'grid',
       gridTemplateColumns: slots.length === 1 ? '1fr' : '1fr 1fr',

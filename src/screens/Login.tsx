@@ -150,35 +150,35 @@ export default function Login({ st }: LoginProps) {
           flexShrink: 0,
           overflow: 'hidden',
           // Gold rule separating the two columns
-          borderRight: '1px solid rgba(212,166,74,0.35)',
+          borderRight: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
         }}>
           {/* Wash background at 1.4× intensity (inline because OnyxWash has no intensity prop).
               Values: standard glow ×1.4 — 0.14→0.196, 0.08→0.112. */}
           <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: '#0b0b0e', pointerEvents: 'none' }}>
-            <div style={{ position: 'absolute', left: '-15%', top: '-25%', width: '70%', height: '120%', background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.196), transparent 65%)', filter: 'blur(90px)' }} />
-            <div style={{ position: 'absolute', right: '-10%', top: '20%', width: '60%', height: '80%', background: 'radial-gradient(50% 50% at 50% 50%, rgba(212,166,74,0.112), transparent 60%)', filter: 'blur(110px)' }} />
+            <div style={{ position: 'absolute', left: '-15%', top: '-25%', width: '70%', height: '120%', background: 'radial-gradient(50% 50% at 50% 50%, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.196), transparent 65%)', filter: 'blur(90px)' }} />
+            <div style={{ position: 'absolute', right: '-10%', top: '20%', width: '60%', height: '80%', background: 'radial-gradient(50% 50% at 50% 50%, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.112), transparent 60%)', filter: 'blur(110px)' }} />
             <div style={{ position: 'absolute', left: '20%', bottom: '-30%', width: '70%', height: '90%', background: 'radial-gradient(50% 50% at 50% 50%, rgba(60,40,20,0.6), transparent 65%)', filter: 'blur(120px)' }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.15), rgba(0,0,0,0.55))' }} />
             {/* Subtle grain overlay */}
             <div style={{ position: 'absolute', inset: 0, opacity: 0.05, mixBlendMode: 'overlay', backgroundImage: 'repeating-radial-gradient(circle at 13% 27%, rgba(255,255,255,0.6) 0 0.5px, transparent 0.5px 3px), repeating-radial-gradient(circle at 73% 67%, rgba(255,255,255,0.5) 0 0.5px, transparent 0.5px 3px)' }} />
           </div>
           {/* Extra gold radial overlay from top-left corner (soft-light blend) */}
-          <div style={{ position: 'absolute', inset: 0, opacity: 0.5, mixBlendMode: 'soft-light', pointerEvents: 'none', background: 'radial-gradient(120% 80% at 0% 0%, rgba(212,166,74,0.35), transparent 55%)' }} />
+          <div style={{ position: 'absolute', inset: 0, opacity: 0.5, mixBlendMode: 'soft-light', pointerEvents: 'none', background: 'radial-gradient(120% 80% at 0% 0%, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35), transparent 55%)' }} />
 
           {/* Panel content: top block pinned to top, quote pinned to bottom */}
           <div style={{ position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '54px 30px 30px' }}>
             {/* Top block: eyebrow → gold rule → display heading */}
             <div>
               {/* "Skald" eyebrow in mono */}
-              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: '#d4a64a' }}>
+              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.28em', textTransform: 'uppercase', color: 'var(--onyx-accent)' }}>
                 Skald
               </div>
               {/* 26×1px gold rule */}
-              <div style={{ width: 26, height: 1, background: 'rgba(212,166,74,0.35)', margin: '16px 0 18px' }} />
+              <div style={{ width: 26, height: 1, background: 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)', margin: '16px 0 18px' }} />
               {/* Display heading — 33px/600 serif, "hall" in italic accent gold */}
               <div style={{ fontFamily: SERIF, fontSize: 33, lineHeight: 1.14, fontWeight: 600, letterSpacing: '-0.015em', color: '#ebe7df' }}>
                 The teller<br />returns to<br />the{' '}
-                <span style={{ fontStyle: 'italic', color: '#d4a64a' }}>hall</span>.
+                <span style={{ fontStyle: 'italic', color: 'var(--onyx-accent)' }}>hall</span>.
               </div>
             </div>
 
@@ -243,7 +243,7 @@ export default function Login({ st }: LoginProps) {
             <div style={{
               display: 'flex',
               borderRadius: 999,
-              border: '1px solid rgba(212,166,74,0.25)',
+              border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.25)',
               overflow: 'hidden',
             }}>
               {/* API Key tab rendered first (left), Password second (right) */}
@@ -254,9 +254,9 @@ export default function Login({ st }: LoginProps) {
                   onClick={() => { setMethod(m); setError(''); }}
                   style={{
                     // Active tab: subtle gold fill; inactive: transparent
-                    background: method === m ? 'rgba(212,166,74,0.15)' : 'transparent',
+                    background: method === m ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.15)' : 'transparent',
                     border: 'none',
-                    color: method === m ? '#d4a64a' : 'rgba(235,231,223,0.38)',
+                    color: method === m ? 'var(--onyx-accent)' : 'rgba(235,231,223,0.38)',
                     fontFamily: MONO,
                     fontSize: 10,
                     letterSpacing: '0.14em',
@@ -294,7 +294,7 @@ export default function Login({ st }: LoginProps) {
                       background: 'transparent',
                       border: 'none',
                       borderBottom: '1px solid rgba(255,255,255,0.12)',
-                      color: '#d4a64a', // accent gold for the scheme text
+                      color: 'var(--onyx-accent)', // accent gold for the scheme text
                       fontFamily: SERIF,
                       fontSize: 16,
                       padding: '0 4px 9px 0',
@@ -343,14 +343,14 @@ export default function Login({ st }: LoginProps) {
                             width: '100%',
                             textAlign: 'left',
                             // Highlight the currently-selected scheme
-                            background: s === scheme ? 'rgba(212,166,74,0.18)' : 'transparent',
+                            background: s === scheme ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.18)' : 'transparent',
                             border: 'none',
                             borderRadius: 5,
                             padding: '8px 10px',
                             cursor: 'pointer',
                             fontFamily: SERIF,
                             fontSize: 14,
-                            color: s === scheme ? '#d4a64a' : '#ebe7df',
+                            color: s === scheme ? 'var(--onyx-accent)' : '#ebe7df',
                           }}
                         >
                           {s}://
@@ -462,7 +462,7 @@ export default function Login({ st }: LoginProps) {
                 gap: 12,
                 // Three-stop gold gradient matching the spec
                 background: 'linear-gradient(180deg, #e9bb5e, #d4a64a 55%, #a37d2e)',
-                border: '1px solid rgba(212,166,74,0.35)',
+                border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
                 borderRadius: 999, // pill shape
                 color: '#1a1306', // near-black text on gold
                 fontFamily: SERIF,
@@ -471,7 +471,7 @@ export default function Login({ st }: LoginProps) {
                 padding: '11px 28px',
                 cursor: pending ? 'wait' : 'pointer',
                 letterSpacing: '0.01em',
-                boxShadow: '0 8px 24px rgba(212,166,74,0.22), inset 0 1px 0 rgba(255,255,255,0.2)',
+                boxShadow: '0 8px 24px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22), inset 0 1px 0 rgba(255,255,255,0.2)',
                 transition: 'transform 0.12s, box-shadow 0.18s, filter 0.12s',
               }}
             >

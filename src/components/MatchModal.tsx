@@ -17,8 +17,8 @@ const MATCH_ONYX = {
   bg: '#0b0b0e', bgDeep: '#08080b', panel: '#131319', panel2: '#1a1a22',
   line: 'rgba(255,255,255,0.06)', lineStrong: 'rgba(255,255,255,0.12)',
   text: '#ebe7df', textDim: 'rgba(235,231,223,0.62)', textMute: 'rgba(235,231,223,0.38)',
-  accent: '#d4a64a', accentBright: '#e9bb5e', accentDeep: '#a37d2e',
-  accentDim: 'rgba(212,166,74,0.18)', accentEdge: 'rgba(212,166,74,0.35)',
+  accent: 'var(--onyx-accent)', accentBright: '#e9bb5e', accentDeep: '#a37d2e',
+  accentDim: 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.18)', accentEdge: 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
   glass: 'rgba(255,255,255,0.04)', glassStrong: 'rgba(255,255,255,0.07)', glassEdge: 'rgba(255,255,255,0.09)',
   add: '#5ac88a', addDim: 'rgba(90,200,138,0.14)', addEdge: 'rgba(90,200,138,0.32)',
   sans: '"Inter", -apple-system, system-ui, sans-serif',
@@ -44,9 +44,9 @@ const MX = {
   text:        '#ebe7df',
   textDim:     'rgba(235,231,223,0.62)',
   textMute:    'rgba(235,231,223,0.38)',
-  accent:      '#d4a64a',
-  accentDim:   'rgba(212,166,74,0.18)',
-  accentEdge:  'rgba(212,166,74,0.35)',
+  accent:      'var(--onyx-accent)',
+  accentDim:   'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.18)',
+  accentEdge:  'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
   glass:       'rgba(255,255,255,0.04)',
   glassStrong: 'rgba(255,255,255,0.07)',
   glassEdge:   'rgba(255,255,255,0.09)',
@@ -296,7 +296,7 @@ function CompareRow({ field, base, resolved, edited, applied, editing,
   const accent = field.status === 'added' ? MATCH_ONYX.add : MATCH_ONYX.accent;
   const tintBg = !applied ? 'transparent'
     : edited ? 'rgba(255,255,255,0.05)'
-    : field.status === 'added' ? MATCH_ONYX.addDim : 'rgba(212,166,74,0.07)';
+    : field.status === 'added' ? MATCH_ONYX.addDim : 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.07)';
   const tintBar = edited ? MATCH_ONYX.textDim : accent;
   const canEdit = field.type !== 'cover';
 

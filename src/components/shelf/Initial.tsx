@@ -15,7 +15,7 @@ export default function Initial({ name, icon = null, small = false }: InitialPro
   return (
     <div style={{
       width: size, height: size, borderRadius: size / 2, flexShrink: 0,
-      background: 'linear-gradient(135deg, rgba(212,166,74,0.25), rgba(212,166,74,0.08))',
+      background: 'linear-gradient(135deg, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.25), rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.08))',
       border: '1px solid var(--onyx-glass-edge)',
       color: 'var(--onyx-accent)', fontFamily: SERIF, fontSize: small ? 13 : 18, fontWeight: 500,
       display: 'flex', alignItems: 'center', justifyContent: 'center',

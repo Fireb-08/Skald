@@ -127,12 +127,12 @@ function SmallBtn({
   title?: string;
   children: ReactNode;
 }) {
-  const col = danger ? '#e8716a' : muted ? 'var(--onyx-text-dim)' : '#d4a64a';
+  const col = danger ? '#e8716a' : muted ? 'var(--onyx-text-dim)' : 'var(--onyx-accent)';
   const bdr = danger
     ? 'rgba(232,113,106,0.35)'
     : muted
     ? 'var(--onyx-glass-edge)'
-    : 'rgba(212,166,74,0.3)';
+    : 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.3)';
   return (
     <button
       onClick={onClick}
@@ -578,7 +578,7 @@ function LibraryForm({ initial, lockMediaType = false, onSubmit, onCancel, submi
           <button
             onClick={addFolder}
             style={{
-              fontFamily: MONO, fontSize: 10, color: '#d4a64a',
+              fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)',
               background: 'transparent', border: 'none', cursor: 'pointer', letterSpacing: '0.06em',
             }}
           >
@@ -916,7 +916,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
       {createMode && (
         <div style={{
           marginBottom: 16,
-          border: '1px solid rgba(212,166,74,0.2)',
+          border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.2)',
           borderRadius: 8,
           overflow: 'hidden',
         }}>
@@ -971,8 +971,8 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
                 <div style={{
                   padding: '14px 16px',
                   borderRadius: isEditing ? '8px 8px 0 0' : 8,
-                  background: isEditing ? 'rgba(212,166,74,0.05)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${isEditing ? 'rgba(212,166,74,0.22)' : 'rgba(255,255,255,0.06)'}`,
+                  background: isEditing ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.05)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${isEditing ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22)' : 'rgba(255,255,255,0.06)'}`,
                   borderBottom: isEditing ? 'none' : undefined,
                 }}>
                   {/* Top row: icon · name+meta · action buttons */}
@@ -1068,7 +1068,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
                 {/* Inline edit form — expands below the card with flush top border */}
                 {isEditing && (
                   <div style={{
-                    border: '1px solid rgba(212,166,74,0.22)',
+                    border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22)',
                     borderTop: 'none',
                     borderRadius: '0 0 8px 8px',
                     overflow: 'hidden',

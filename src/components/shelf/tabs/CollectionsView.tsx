@@ -114,7 +114,7 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
                 {books.length > 0 ? (
                   <CoverMosaic books={books} serverUrl={st.serverUrl} />
                 ) : (
-                  <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontStyle: 'italic', fontSize: 14, background: 'linear-gradient(180deg, rgba(212,166,74,0.06), rgba(0,0,0,0.12))', borderBottom: '1px solid var(--onyx-line)' }}>
+                  <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontStyle: 'italic', fontSize: 14, background: 'linear-gradient(180deg, rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), rgba(0,0,0,0.12))', borderBottom: '1px solid var(--onyx-line)' }}>
                     Empty collection
                   </div>
                 )}
