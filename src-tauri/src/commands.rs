@@ -784,12 +784,9 @@ pub async fn update_collection(
     collection_id: String,
     payload: serde_json::Value,
 ) -> Result<models::Collection, String> {
-    println!("[Collection] update_collection id={collection_id}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).update_collection(&collection_id, payload).await;
-    if let Err(e) = &result { println!("[Collection] update_collection FAILED: {e}"); }
-    result
+    AbsClient::new(server_url).with_token(token).update_collection(&collection_id, payload).await
 }
 
 /// DELETE /api/collections/:id/book/:bookId — remove a book from a collection.
@@ -799,12 +796,9 @@ pub async fn remove_book_from_collection(
     collection_id: String,
     book_id: String,
 ) -> Result<models::Collection, String> {
-    println!("[Collection] remove_book_from_collection id={collection_id} book={book_id}");
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).remove_book_from_collection(&collection_id, &book_id).await;
-    if let Err(e) = &result { println!("[Collection] remove_book_from_collection FAILED: {e}"); }
-    result
+    AbsClient::new(server_url).with_token(token).remove_book_from_collection(&collection_id, &book_id).await
 }
 
 /// Closes all open listening sessions for the current user. Called once on
