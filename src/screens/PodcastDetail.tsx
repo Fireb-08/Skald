@@ -118,7 +118,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
       {/* Header */}
       <div style={{ display: 'flex', gap: 20, flexShrink: 0 }}>
         <div style={{ width: 160, height: 160, flexShrink: 0 }}>
-          <Cover item={item} fill serverUrl={st.serverUrl} />
+          <Cover item={item} fill serverUrl={st.serverUrl} fallbackImageUrl={meta?.imageUrl ?? undefined} />
         </div>
         <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--onyx-text)', lineHeight: 1.15 }}>

@@ -99,7 +99,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               }}
             >
               <div style={{ position: 'relative', width: '100%', aspectRatio: '1 / 1' }}>
-                <Cover item={it} fill serverUrl={st.serverUrl} />
+                <Cover item={it} fill serverUrl={st.serverUrl} fallbackImageUrl={p.media?.metadata?.imageUrl ?? undefined} />
                 {/* Episode-count badge */}
                 <div style={{
                   position: 'absolute', right: 6, bottom: 6,
