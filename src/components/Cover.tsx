@@ -16,9 +16,13 @@ export interface CoverProps {
   style?: CSSProperties;
   onClick?: () => void;
   serverUrl?: string;
+  // Remote image URL to use when the ABS server cover is unavailable, before
+  // falling back to the generated template. Podcasts pass their feed artwork
+  // (media.metadata.imageUrl) here so tiles show real cover art.
+  fallbackImageUrl?: string;
 }
 
-export default function Cover({ item, size = 180, scale = 1, fill = false, className, style, onClick, serverUrl }: CoverProps) {
+export default function Cover({ item, size = 180, scale = 1, fill = false, className, style, onClick, serverUrl, fallbackImageUrl }: CoverProps) {
   const [coverSrc, setCoverSrc] = useState<string | null>(null);
   // Bumped when this item's cover changes (via the coverBust registry) to force
   // a re-fetch of the cleared cache and a fresh ?v token on the <img> src.
@@ -71,6 +75,16 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
         {/* convertFileSrc turns the absolute disk path into an asset:// URL WebView2 can load. */}
         {/* loading="lazy" defers offscreen cover fetches until they scroll into view. */}
         <img src={convertFileSrc(coverSrc)} loading="lazy" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
+      </div>
+    );
+  }
+
+  // No server cover — use the remote feed artwork (podcasts) before the
+  // generated template. Loaded directly over HTTPS, not via the asset protocol.
+  if (fallbackImageUrl) {
+    return (
+      <div style={base} className={className} onClick={onClick}>
+        <img src={fallbackImageUrl} loading="lazy" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
       </div>
     );
   }
