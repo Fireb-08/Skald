@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task } from '../api/abs';
-import { type AdvFilter, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
+import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
 import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings } from '../api/abs';
 
 export type { ServerSettings };
@@ -278,6 +278,8 @@ export interface OnyxState {
   setAdvFilter: (f: AdvFilter) => void;
   search: string;
   setSearch: (search: string) => void;
+  searchScope: SearchScope;
+  setSearchScope: (s: SearchScope) => void;
   accentColor: string;
   setAccentColor: (hex: string) => void;
   theme: string;
@@ -693,6 +695,12 @@ export function useOnyxState(): OnyxState {
   const [contextFilter, setContextFilter] = useState<ContextFilter | null>(null);
   const [advFilter, setAdvFilter] = useState<AdvFilter>(EMPTY_ADV_FILTER);
   const [search, setSearch] = useState('');
+  const [searchScope, setSearchScopeRaw] = useState<SearchScope>(
+    () => (localStorage.getItem('onyx.searchScope') as SearchScope) || 'all',
+  );
+  const setSearchScope = useCallback((s: SearchScope) => {
+    localStorage.setItem('onyx.searchScope', s); setSearchScopeRaw(s);
+  }, []);
 
   const [accentColor, setAccentColorRaw] = useState(
     () => localStorage.getItem('onyx.accent') ?? DEFAULT_ACCENT,
@@ -1129,6 +1137,7 @@ export function useOnyxState(): OnyxState {
     contextFilter, setContextFilter,
     advFilter, setAdvFilter,
     search, setSearch,
+    searchScope, setSearchScope,
     accentColor, setAccentColor,
     theme, setTheme,
     translucent, setTranslucent,

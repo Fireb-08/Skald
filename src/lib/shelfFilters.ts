@@ -88,3 +88,17 @@ export function naturalTitleCompare(a: string, b: string, prefixes: string[]): n
     stripSortPrefix(b, prefixes), undefined, { numeric: true, sensitivity: 'base' },
   );
 }
+
+// ── Scoped search ───────────────────────────────────────────────────────────────
+
+export type SearchScope = 'all' | 'title' | 'author' | 'series';
+
+/** Whether a book matches `query` within the chosen field scope. Pure (takes the
+ *  already-resolved field strings) to avoid a circular import on the book helpers. */
+export function searchScopeMatch(query: string, scope: SearchScope, title: string, author: string, series: string): boolean {
+  const q = query.toLowerCase();
+  const t = title.toLowerCase().includes(q);
+  const a = author.toLowerCase().includes(q);
+  const s = series.toLowerCase().includes(q);
+  return scope === 'title' ? t : scope === 'author' ? a : scope === 'series' ? s : (t || a || s);
+}

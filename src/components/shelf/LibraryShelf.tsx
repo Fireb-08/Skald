@@ -12,7 +12,7 @@ import Icon from '../Icon';
 import SortIndicator from './SortIndicator';
 import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
-import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare } from '../../lib/shelfFilters';
+import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare, searchScopeMatch } from '../../lib/shelfFilters';
 import MatchModal from '../MatchModal';
 import MetadataEditor from '../MetadataEditor';
 import CoverPicker from '../CoverPicker';
@@ -427,14 +427,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     if (st.filter === 'reading'  && !prog)      return false;
     if (st.filter === 'unread'   &&  prog)      return false;
     if (st.filter === 'finished' &&  prog < 0.98) return false;
-    if (st.search) {
-      const q = st.search.toLowerCase();
-      if (
-        !bookTitle(b).toLowerCase().includes(q) &&
-        !bookAuthor(b).toLowerCase().includes(q) &&
-        !(bookSeries(b) || '').toLowerCase().includes(q)
-      ) return false;
-    }
+    if (st.search && !searchScopeMatch(st.search, st.searchScope, bookTitle(b), bookAuthor(b), bookSeries(b) || '')) return false;
     return true;
   });
 

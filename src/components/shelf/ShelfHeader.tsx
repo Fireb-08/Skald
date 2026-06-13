@@ -3,7 +3,7 @@ import type { OnyxState, LibraryItem } from '../../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress, bookGenres, bookPublisher,
 } from '../../state/onyx';
-import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare } from '../../lib/shelfFilters';
+import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare, searchScopeMatch } from '../../lib/shelfFilters';
 import type { SeriesObject } from '../../api/abs';
 import { getLibrarySeries } from '../../api/abs';
 import ViewModeToggle from './ViewModeToggle';
@@ -135,14 +135,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
     if (st.filter === 'reading'  && !prog)      return false;
     if (st.filter === 'unread'   &&  prog)      return false;
     if (st.filter === 'finished' &&  prog < 0.98) return false;
-    if (st.search) {
-      const q = st.search.toLowerCase();
-      if (
-        !bookTitle(b).toLowerCase().includes(q) &&
-        !bookAuthor(b).toLowerCase().includes(q) &&
-        !(bookSeries(b) || '').toLowerCase().includes(q)
-      ) return false;
-    }
+    if (st.search && !searchScopeMatch(st.search, st.searchScope, bookTitle(b), bookAuthor(b), bookSeries(b) || '')) return false;
     return true;
   });
 

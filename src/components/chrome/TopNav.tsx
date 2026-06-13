@@ -1,4 +1,5 @@
 import type { OnyxState } from '../../state/onyx';
+import type { SearchScope } from '../../lib/shelfFilters';
 import Glass from './Glass';
 import Icon from '../Icon';
 
@@ -42,13 +43,29 @@ export default function TopNav({ st }: TopNavProps) {
           onChange={(e) => st.setSearch(e.target.value)}
           style={{
             width: '100%', boxSizing: 'border-box',
-            padding: '8px 38px 8px 34px',
+            padding: '8px 92px 8px 34px',
             background: 'rgba(0,0,0,0.3)', borderRadius: 8,
             fontSize: 12, color: 'var(--onyx-text)',
             border: '1px solid var(--onyx-line)', outline: 'none', fontFamily: 'inherit',
           }}
         />
-        <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontFamily: mono, fontSize: 10, padding: '1px 5px', border: '1px solid var(--onyx-glass-edge)', borderRadius: 4, color: 'var(--onyx-text-mute)', pointerEvents: 'none' }}>Ctrl+K</div>
+        {/* Search scope — narrows the query to a single field (Ctrl+K still focuses). */}
+        <select
+          value={st.searchScope}
+          onChange={(e) => st.setSearchScope(e.target.value as SearchScope)}
+          title="Search field scope"
+          style={{
+            position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+            fontFamily: mono, fontSize: 10, letterSpacing: '0.04em',
+            background: 'rgba(0,0,0,0.3)', color: 'var(--onyx-text-dim)',
+            border: '1px solid var(--onyx-glass-edge)', borderRadius: 4, padding: '2px 4px', cursor: 'pointer',
+          }}
+        >
+          <option value="all">All</option>
+          <option value="title">Title</option>
+          <option value="author">Author</option>
+          <option value="series">Series</option>
+        </select>
       </div>
       {/* User avatar — initial derived from logged-in username, not hardcoded */}
       <button
