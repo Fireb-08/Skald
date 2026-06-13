@@ -154,7 +154,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
             }} title={meta.feedUrl}>{meta.feedUrl}</div>
           )}
           {meta.description && (
-            <div style={{
+            <div className="onyx-selectable" style={{
               fontSize: 12, color: 'var(--onyx-text-dim)', lineHeight: 1.45, marginTop: 4, maxWidth: 560,
               overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
             }}>{meta.description}</div>

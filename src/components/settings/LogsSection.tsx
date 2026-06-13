@@ -133,6 +133,7 @@ export default function LogsSection({ st }: LogsSectionProps) {
       {!loading && !error && (
         <div
           ref={scrollRef}
+          className="onyx-selectable"
           style={{
             maxHeight: '58vh', overflowY: 'auto',
             background: 'var(--onyx-bg-deep)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 8,

@@ -719,7 +719,7 @@ export default function Player({ st }: PlayerProps) {
                         boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                       }}>
                       {descriptionHtml ? (
-                        <div dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
+                        <div className="onyx-selectable" dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
                       ) : (
                         <span style={{ fontStyle: 'italic', color: 'var(--onyx-text-mute)' }}>{noDescText}</span>
                       )}
@@ -737,6 +737,7 @@ export default function Player({ st }: PlayerProps) {
                 <div style={{ flex: 1, overflowY: 'auto' }}>
                   {descriptionHtml ? (
                     <div
+                      className="onyx-selectable"
                       style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
                       dangerouslySetInnerHTML={{ __html: descriptionHtml }}
                     />
