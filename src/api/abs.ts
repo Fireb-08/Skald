@@ -205,6 +205,14 @@ export interface PodcastEpisode {
   guid?: string;
 }
 
+/** An episode as returned by the recent-episodes feed: the expanded episode
+ *  plus a reference back to its parent podcast (id + metadata) for display. */
+export interface RecentEpisode extends PodcastEpisode {
+  libraryItemId?: string;
+  libraryId?: string;
+  podcast?: { metadata?: PodcastMetadata };
+}
+
 /** Podcast-level metadata (parallels BookMetadata). */
 export interface PodcastMetadata {
   title: string | null;
@@ -1537,8 +1545,9 @@ export function deleteEpisode(serverUrl: string, itemId: string, episodeId: stri
   return invoke('delete_episode', { serverUrl, itemId, episodeId, hard });
 }
 
-/** GET /api/libraries/:id/recent-episodes — recent-episodes shelf. */
-export function getRecentEpisodes(serverUrl: string, libraryId: string, limit?: number, page?: number): Promise<{ episodes: PodcastEpisode[] }> {
+/** GET /api/libraries/:id/recent-episodes — episodes across all podcasts in the
+ *  library, newest first (publishedAt DESC). Each carries its parent podcast. */
+export function getRecentEpisodes(serverUrl: string, libraryId: string, limit?: number, page?: number): Promise<{ episodes: RecentEpisode[] }> {
   return invoke('get_recent_episodes', { serverUrl, libraryId, limit: limit ?? null, page: page ?? null });
 }
 
