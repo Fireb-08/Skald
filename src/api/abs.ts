@@ -514,6 +514,17 @@ export function addBookToCollection(serverUrl: string, collectionId: string, boo
   return invoke('add_book_to_collection', { serverUrl, collectionId, bookId });
 }
 
+/** PATCH /api/collections/:id — update a collection. Pass { books: [ids] } to
+ *  reorder, or { name, description } to edit. Returns the updated collection. */
+export function updateCollection(serverUrl: string, collectionId: string, payload: { books?: string[]; name?: string; description?: string }): Promise<Collection> {
+  return invoke('update_collection', { serverUrl, collectionId, payload });
+}
+
+/** DELETE /api/collections/:id/book/:bookId — remove a book; returns the collection. */
+export function removeBookFromCollection(serverUrl: string, collectionId: string, bookId: string): Promise<Collection> {
+  return invoke('remove_book_from_collection', { serverUrl, collectionId, bookId });
+}
+
 // Closes all open listening sessions on the server, returning the count closed.
 // Called once on app startup to clear ghost sessions from previous runs.
 export function closeAllOpenSessions(serverUrl: string): Promise<number> {
