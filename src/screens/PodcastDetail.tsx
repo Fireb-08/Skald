@@ -1,12 +1,15 @@
 // Podcast detail screen (cluster E). Shows a podcast's header (cover, title,
 // author, feed URL) and its downloaded episodes with per-episode progress and
 // a play action. Reached from PodcastBrowse via st.setScreen('podcast').
+import { useState } from 'react';
 import type { OnyxState } from '../state/onyx';
 import { fmtRemaining, fmtTime } from '../state/onyx';
 import { asPodcastItem, type PodcastEpisode } from '../api/abs';
 import { playEpisode } from '../api/playbook';
 import Cover from '../components/Cover';
 import Icon from '../components/Icon';
+import PodcastFindEpisodesModal from '../components/podcast/PodcastFindEpisodesModal';
+import PodcastSettingsModal from '../components/podcast/PodcastSettingsModal';
 
 export interface PodcastDetailProps {
   st: OnyxState;
@@ -26,6 +29,8 @@ function episodeDate(ep: PodcastEpisode): string {
 
 export default function PodcastDetail({ st }: PodcastDetailProps) {
   const mono = "'JetBrains Mono', ui-monospace, monospace";
+  const [showFind, setShowFind] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const item = st.library.find(i => i.id === st.podcastDetailId);
 
   if (!item) {
@@ -95,6 +100,17 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
               overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
             }}>{meta.description}</div>
           )}
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+            <button
+              onClick={() => setShowFind(true)}
+              style={{ padding: '7px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', fontWeight: 600 }}
+            >Find Episodes</button>
+            <button
+              onClick={() => setShowSettings(true)}
+              style={{ padding: '7px 14px', borderRadius: 8, border: '1px solid var(--onyx-glass-edge)', cursor: 'pointer', background: 'transparent', color: 'var(--onyx-text-dim)', fontFamily: mono, fontSize: 11, letterSpacing: '0.06em' }}
+            >Auto-download</button>
+          </div>
         </div>
       </div>
 
@@ -157,6 +173,23 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
           );
         })}
       </div>
+
+      {showFind && (
+        <PodcastFindEpisodesModal
+          st={st}
+          item={item}
+          onClose={() => setShowFind(false)}
+          onQueued={() => { st.refreshLibrary().catch(e => console.error('[Podcast] refresh after queue failed:', e)); }}
+        />
+      )}
+      {showSettings && (
+        <PodcastSettingsModal
+          st={st}
+          item={item}
+          onClose={() => setShowSettings(false)}
+          onSaved={() => { st.refreshLibrary().catch(e => console.error('[Podcast] refresh after settings save failed:', e)); }}
+        />
+      )}
     </div>
   );
 }
