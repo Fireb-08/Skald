@@ -368,8 +368,8 @@ export function syncSession(
 // as an <img src> so WebView2 loads it via Tauri's asset protocol.
 // `width` (when provided) asks ABS to resize the cover server-side and is
 // folded into the cache key so different widths don't collide.
-export function getCover(serverUrl: string, itemId: string, width?: number): Promise<string> {
-  return invoke('get_cover', { serverUrl, itemId, width: width ?? null });
+export function getCover(serverUrl: string, itemId: string, width?: number, bust?: number): Promise<string> {
+  return invoke('get_cover', { serverUrl, itemId, width: width ?? null, bust: bust ?? null });
 }
 
 export function getAudioDevices(): Promise<AudioDevice[]> {

@@ -34,7 +34,7 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
     // Request a 400px-wide cover: the shelf maxes at 148px and the Focus panel
     // and Player stay within 400px on a 1280px window, so 400px gives ~2×
     // headroom for high-DPI rendering without over-fetching full-size art.
-    getCover(serverUrl, item.id, 400)
+    getCover(serverUrl, item.id, 400, bust)
       .then(path => {
         if (cancelled) return;
         setCoverSrc(path);
@@ -70,7 +70,7 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
       <div style={base} className={className} onClick={onClick}>
         {/* convertFileSrc turns the absolute disk path into an asset:// URL WebView2 can load. */}
         {/* loading="lazy" defers offscreen cover fetches until they scroll into view. */}
-        <img src={`${convertFileSrc(coverSrc)}?v=${bust}`} loading="lazy" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
+        <img src={convertFileSrc(coverSrc)} loading="lazy" draggable={false} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} alt={title} />
       </div>
     );
   }
