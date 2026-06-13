@@ -4,7 +4,7 @@
 //   • Bottom: a chronological episode feed (newest first) across all podcasts via
 //     the recent-episodes endpoint, re-fetched when the library changes so newly
 //     downloaded episodes appear automatically.
-import { useState, useEffect, type CSSProperties } from 'react';
+import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { fmtRemaining, fmtTime } from '../../state/onyx';
 import { asPodcastItem, getRecentEpisodes, type RecentEpisode } from '../../api/abs';
@@ -46,6 +46,40 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [genreOpen, setGenreOpen] = useState(false);
   // Carousel cover size follows the global cover-size preference (Settings → Library).
   const coverPx = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
+
+  // Click-drag-to-swipe for the carousel (mirrors the Pick it up shelf). A drag
+  // of >5px is flagged so the trailing click doesn't select/open a podcast.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const onCarouselMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    dragRef.current = { startX: e.clientX, startScrollLeft: el.scrollLeft, didDrag: false };
+    setIsDragging(true);
+    const onMove = (me: MouseEvent) => {
+      if (!dragRef.current) return;
+      const delta = me.clientX - dragRef.current.startX;
+      if (Math.abs(delta) > 5) dragRef.current.didDrag = true;
+      el.scrollLeft = dragRef.current.startScrollLeft - delta;
+    };
+    const onUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  // Swallow the click that follows a drag so it doesn't trigger select/open.
+  const onCarouselClickCapture = (e: React.MouseEvent) => {
+    if (dragRef.current?.didDrag) {
+      e.stopPropagation();
+      dragRef.current.didDrag = false;
+    }
+  };
 
   // Backfill cover art from the live feed for any podcast lacking a stored image.
   useEffect(() => {
@@ -178,8 +212,16 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         {subscribeBtn}
       </div>
 
-      {/* Carousel of podcast covers */}
-      <div style={{ flexShrink: 0, display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 6 }}>
+      {/* Carousel of podcast covers — drag to swipe (like Pick it up) */}
+      <div
+        ref={scrollRef}
+        onMouseDown={onCarouselMouseDown}
+        onMouseLeave={() => { if (dragRef.current) { setIsDragging(false); dragRef.current = null; } }}
+        onDragStart={e => e.preventDefault()}
+        onClickCapture={onCarouselClickCapture}
+        className="pickitup-scroll"
+        style={{ flexShrink: 0, display: 'flex', gap: 12, overflowX: 'auto', overflowY: 'hidden', paddingBottom: 6, cursor: isDragging ? 'grabbing' : 'grab', userSelect: isDragging ? 'none' : undefined, WebkitOverflowScrolling: 'touch' }}
+      >
         {/* All chip */}
         <button
           onClick={() => setSelectedId(null)}
