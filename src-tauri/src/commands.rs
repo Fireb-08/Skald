@@ -776,6 +776,37 @@ pub async fn add_book_to_collection(
         .await
 }
 
+/// PATCH /api/collections/:id — update a collection (reorder books, or edit
+/// name/description). `payload` is e.g. { books: [ids] } or { name, description }.
+#[tauri::command]
+pub async fn update_collection(
+    server_url: String,
+    collection_id: String,
+    payload: serde_json::Value,
+) -> Result<models::Collection, String> {
+    println!("[Collection] update_collection id={collection_id}");
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).update_collection(&collection_id, payload).await;
+    if let Err(e) = &result { println!("[Collection] update_collection FAILED: {e}"); }
+    result
+}
+
+/// DELETE /api/collections/:id/book/:bookId — remove a book from a collection.
+#[tauri::command]
+pub async fn remove_book_from_collection(
+    server_url: String,
+    collection_id: String,
+    book_id: String,
+) -> Result<models::Collection, String> {
+    println!("[Collection] remove_book_from_collection id={collection_id} book={book_id}");
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).remove_book_from_collection(&collection_id, &book_id).await;
+    if let Err(e) = &result { println!("[Collection] remove_book_from_collection FAILED: {e}"); }
+    result
+}
+
 /// Closes all open listening sessions for the current user. Called once on
 /// app startup to clean up ghost sessions left from previous runs so the
 /// server's session list stays consistent.

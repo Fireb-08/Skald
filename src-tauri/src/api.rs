@@ -1224,6 +1224,51 @@ impl AbsClient {
         Ok(())
     }
 
+    /// PATCH /api/collections/{id} — update a collection. Pass `{ books: [ids] }`
+    /// to reorder, or `{ name, description }` to edit. Returns the updated collection.
+    pub async fn update_collection(
+        &self,
+        collection_id: &str,
+        payload: serde_json::Value,
+    ) -> Result<Collection, String> {
+        let resp = self
+            .http
+            .patch(format!("{}/api/collections/{collection_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("update_collection failed: HTTP {}", resp.status()));
+        }
+
+        resp.json::<Collection>().await.map_err(|e| e.to_string())
+    }
+
+    /// DELETE /api/collections/{id}/book/{book_id} — remove a book from a
+    /// collection. Returns the updated collection.
+    pub async fn remove_book_from_collection(
+        &self,
+        collection_id: &str,
+        book_id: &str,
+    ) -> Result<Collection, String> {
+        let resp = self
+            .http
+            .delete(format!("{}/api/collections/{collection_id}/book/{book_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("remove_book_from_collection failed: HTTP {}", resp.status()));
+        }
+
+        resp.json::<Collection>().await.map_err(|e| e.to_string())
+    }
+
     // ── Admin user-management endpoints ─────────────────────────────────────
     // All four endpoints require an admin or root token; calling them as a
     // regular user will return HTTP 403 from the ABS server.

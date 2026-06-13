@@ -160,6 +160,8 @@ pub fn run() {
             commands::get_collections,
             commands::create_collection,
             commands::add_book_to_collection,
+            commands::update_collection,
+            commands::remove_book_from_collection,
             commands::register_shortcuts,
             commands::login_with_api_key,
             commands::clear_stored_token,
