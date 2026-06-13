@@ -228,6 +228,22 @@ pub struct UpdateLibraryPayload {
     pub settings: Option<LibrarySettings>,
 }
 
+/// A registered custom metadata provider (ABS v2.8+). Slug is `custom-{id}` and
+/// is the value used as a library's `provider` or in a match search.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomMetadataProvider {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub media_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_header_value: Option<String>,
+    #[serde(default)]
+    pub slug: String,
+}
+
 /// Metadata block inside a LibraryFile entry.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]

@@ -6,7 +6,7 @@ import ReactDOM from 'react-dom';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
-import { searchBooks, searchProviders, updateMedia, fetchItem, getCover } from '../api/abs';
+import { searchBooks, searchProviders, updateMedia, fetchItem, getCover, getCustomMetadataProviders } from '../api/abs';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -447,26 +447,24 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
   // here. Falls back to a minimal hardcoded list on failure or an empty response.
   useEffect(() => {
     let cancelled = false;
-    searchProviders(serverUrl)
-      .then(raw => {
-        if (cancelled) return;
-        const books = (((raw as Record<string, unknown>)?.providers as Record<string, unknown>)
-          ?.books as { value: string; text: string }[] | undefined) ?? [];
-        const arr = books.map(p => ({ id: p.value, name: p.text }));
-        const list = arr.length > 0 ? arr : (() => {
-          console.warn('[MatchModal] /api/search/providers returned no providers — using fallback list');
-          return FALLBACK_PROVIDERS;
-        })();
-        setProviders(list);
-        // Re-point the selection at the new list if the current value isn't in it
-        setProvider(p => list.some(x => x.id === p) ? p : (list[0]?.id ?? 'audible'));
-      })
-      .catch(e => {
-        if (cancelled) return;
-        console.warn('[MatchModal] failed to fetch /api/search/providers:', e);
-        setProviders(FALLBACK_PROVIDERS);
-        setProvider(p => FALLBACK_PROVIDERS.some(x => x.id === p) ? p : (FALLBACK_PROVIDERS[0]?.id ?? 'audible'));
-      });
+    // Fetch built-in providers and registered custom providers in parallel and
+    // merge them so custom providers are selectable when matching.
+    Promise.all([
+      searchProviders(serverUrl).catch(() => null),
+      getCustomMetadataProviders(serverUrl).catch(() => []),
+    ]).then(([raw, custom]) => {
+      if (cancelled) return;
+      const books = (((raw as Record<string, unknown>)?.providers as Record<string, unknown>)
+        ?.books as { value: string; text: string }[] | undefined) ?? [];
+      const builtins = books.map(p => ({ id: p.value, name: p.text }));
+      const base = builtins.length > 0 ? builtins : FALLBACK_PROVIDERS;
+      const customBook = (custom ?? [])
+        .filter(p => p.mediaType === 'book')
+        .map(p => ({ id: p.slug, name: `${p.name} (custom)` }));
+      const list = [...base, ...customBook];
+      setProviders(list);
+      setProvider(p => list.some(x => x.id === p) ? p : (list[0]?.id ?? 'audible'));
+    });
     return () => { cancelled = true; };
   }, [serverUrl]);
 

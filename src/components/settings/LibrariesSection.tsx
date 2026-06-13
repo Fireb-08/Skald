@@ -13,11 +13,14 @@ import {
   deleteLibrary as apiDeleteLibrary,
   scanLibrary as apiScanLibrary,
   browseServerFilesystem,
+  getCustomMetadataProviders,
+  createCustomMetadataProvider,
+  deleteCustomMetadataProvider,
   LIBRARY_ICONS,
   LIBRARY_PROVIDERS_BOOK,
   LIBRARY_PROVIDERS_PODCAST,
 } from '../../api/abs';
-import type { Library, LibrarySettings, UpdateLibraryPayload, FsEntry } from '../../api/abs';
+import type { Library, LibrarySettings, UpdateLibraryPayload, FsEntry, CustomMetadataProvider } from '../../api/abs';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -454,9 +457,10 @@ interface LibraryFormProps {
   onCancel: () => void;
   submitLabel: string;
   serverUrl: string;
+  customProviders: CustomMetadataProvider[];
 }
 
-function LibraryForm({ initial, lockMediaType = false, onSubmit, onCancel, submitLabel, serverUrl }: LibraryFormProps) {
+function LibraryForm({ initial, lockMediaType = false, onSubmit, onCancel, submitLabel, serverUrl, customProviders }: LibraryFormProps) {
   const [form, setForm] = useState<FormState>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -504,8 +508,11 @@ function LibraryForm({ initial, lockMediaType = false, onSubmit, onCancel, submi
     }
   }
 
-  const providers = (form.mediaType === 'podcast' ? LIBRARY_PROVIDERS_PODCAST : LIBRARY_PROVIDERS_BOOK)
-    .map(v => ({ value: v, label: v }));
+  const providers = [
+    ...(form.mediaType === 'podcast' ? LIBRARY_PROVIDERS_PODCAST : LIBRARY_PROVIDERS_BOOK).map(v => ({ value: v, label: v })),
+    // Append registered custom providers for this media type (slug = custom-{id}).
+    ...customProviders.filter(p => p.mediaType === form.mediaType).map(p => ({ value: p.slug, label: `${p.name} (custom)` })),
+  ];
 
   const iconOptions = LIBRARY_ICONS.map(v => ({ value: v, label: `${iconEmoji(v)}  ${v}` }));
 
@@ -693,6 +700,82 @@ function LibraryForm({ initial, lockMediaType = false, onSubmit, onCancel, submi
   );
 }
 
+// ── Custom metadata providers manager ─────────────────────────────────────────
+
+function CustomProvidersManager({ providers, onAdd, onDelete }: {
+  providers: CustomMetadataProvider[];
+  onAdd: (p: { name: string; url: string; mediaType: string; authHeaderValue?: string }) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [auth, setAuth] = useState('');
+  const [mediaType, setMediaType] = useState<'book' | 'podcast'>('book');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function add() {
+    if (!name.trim() || !url.trim()) { setErr('Name and URL are required.'); return; }
+    setErr(''); setBusy(true);
+    try {
+      await onAdd({ name: name.trim(), url: url.trim(), mediaType, authHeaderValue: auth.trim() || undefined });
+      setName(''); setUrl(''); setAuth('');
+    } catch (e) {
+      setErr(typeof e === 'string' ? e : (e as Error)?.message ?? 'Failed to add provider.');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-accent)', paddingBottom: 6, borderBottom: '1px solid var(--onyx-glass-edge)' }}>
+        Custom Metadata Providers
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 0', lineHeight: 1.5 }}>
+        Register a community or self-hosted provider; it then appears in the Provider dropdown above and in the Match dialog.
+      </div>
+
+      {providers.length === 0 && (
+        <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', padding: '4px 0 10px' }}>None registered.</div>
+      )}
+      {providers.map(p => (
+        <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--onyx-line)' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
+            <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p.mediaType} · {p.url}
+            </div>
+          </div>
+          <SmallBtn danger onClick={() => void onDelete(p.id)}>Delete</SmallBtn>
+        </div>
+      ))}
+
+      {/* Add form */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Field value={name} onChange={setName} placeholder="Provider name" />
+          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+            {(['book', 'podcast'] as const).map(mt => (
+              <button key={mt} onClick={() => setMediaType(mt)} style={{
+                padding: '5px 12px', borderRadius: 6,
+                background: mediaType === mt ? 'var(--onyx-accent-dim)' : 'transparent',
+                border: `1px solid ${mediaType === mt ? 'var(--onyx-accent-edge)' : 'rgba(255,255,255,0.08)'}`,
+                color: mediaType === mt ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+                fontFamily: MONO, fontSize: 10.5, cursor: 'pointer',
+              }}>{mt}</button>
+            ))}
+          </div>
+        </div>
+        <Field value={url} onChange={setUrl} placeholder="https://provider.example/search" mono />
+        <Field value={auth} onChange={setAuth} placeholder="Authorization header value (optional)" mono />
+        {err && <div style={{ fontFamily: MONO, fontSize: 11, color: '#e8716a' }}>{err}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <SmallBtn onClick={add} disabled={busy}>{busy ? 'Adding…' : '+ Add Provider'}</SmallBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export interface LibrariesSectionProps {
@@ -703,6 +786,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
   const isAdmin = st.isAdmin;
 
   const [libraries, setLibraries] = useState<Library[]>([]);
+  const [customProviders, setCustomProviders] = useState<CustomMetadataProvider[]>([]);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [editTarget, setEditTarget] = useState<string | null>(null);   // library id
@@ -732,6 +816,8 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
     setListError('');
     try {
       setLibraries(await getLibrariesFull(st.serverUrl));
+      // Custom providers are best-effort — older ABS versions lack the endpoint.
+      getCustomMetadataProviders(st.serverUrl).then(setCustomProviders).catch(() => setCustomProviders([]));
     } catch (e) {
       setListError(typeof e === 'string' ? e : (e as Error)?.message ?? 'Failed to load libraries.');
     } finally {
@@ -798,6 +884,18 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
     }
   }
 
+  async function handleAddProvider(p: { name: string; url: string; mediaType: string; authHeaderValue?: string }) {
+    const created = await createCustomMetadataProvider(st.serverUrl, p);
+    setCustomProviders(prev => [...prev, created]);
+    showToast(`Provider "${created.name}" added`);
+  }
+
+  async function handleDeleteProvider(id: string) {
+    await deleteCustomMetadataProvider(st.serverUrl, id);
+    setCustomProviders(prev => prev.filter(p => p.id !== id));
+    showToast('Provider removed');
+  }
+
   return (
     <div>
       <SectionHead
@@ -836,6 +934,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
             onCancel={() => setCreateMode(false)}
             submitLabel="Create Library"
             serverUrl={st.serverUrl}
+            customProviders={customProviders}
           />
         </div>
       )}
@@ -981,6 +1080,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
                       onCancel={() => setEditTarget(null)}
                       submitLabel="Save Changes"
                       serverUrl={st.serverUrl}
+                      customProviders={customProviders}
                     />
                   </div>
                 )}
@@ -988,6 +1088,15 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
             );
           })}
         </div>
+      )}
+
+      {/* Custom metadata providers */}
+      {!loading && !listError && (
+        <CustomProvidersManager
+          providers={customProviders}
+          onAdd={handleAddProvider}
+          onDelete={handleDeleteProvider}
+        />
       )}
 
       {/* Toast */}

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, CustomMetadataProvider, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -1690,6 +1690,69 @@ impl AbsClient {
             return Err(format!("scan_library failed: HTTP {}", resp.status()));
         }
 
+        Ok(())
+    }
+
+    // ── Custom metadata providers (admin) ────────────────────────────────────
+
+    /// GET /api/custom-metadata-providers — list registered custom providers.
+    pub async fn get_custom_metadata_providers(&self) -> Result<Vec<CustomMetadataProvider>, String> {
+        #[derive(Deserialize)]
+        struct Wrapper { #[serde(default)] providers: Vec<CustomMetadataProvider> }
+
+        let resp = self
+            .http
+            .get(format!("{}/api/custom-metadata-providers", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_custom_metadata_providers failed: HTTP {}", resp.status()));
+        }
+
+        Ok(resp.json::<Wrapper>().await.map_err(|e| e.to_string())?.providers)
+    }
+
+    /// POST /api/custom-metadata-providers — register one. Body needs name, url,
+    /// mediaType; optional authHeaderValue. Returns the created provider.
+    pub async fn create_custom_metadata_provider(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<CustomMetadataProvider, String> {
+        #[derive(Deserialize)]
+        struct Wrapper { provider: CustomMetadataProvider }
+
+        let resp = self
+            .http
+            .post(format!("{}/api/custom-metadata-providers", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("create_custom_metadata_provider failed: HTTP {}", resp.status()));
+        }
+
+        Ok(resp.json::<Wrapper>().await.map_err(|e| e.to_string())?.provider)
+    }
+
+    /// DELETE /api/custom-metadata-providers/{id} — remove a custom provider.
+    pub async fn delete_custom_metadata_provider(&self, id: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .delete(format!("{}/api/custom-metadata-providers/{id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("delete_custom_metadata_provider failed: HTTP {}", resp.status()));
+        }
         Ok(())
     }
 

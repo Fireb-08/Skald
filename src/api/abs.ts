@@ -1023,6 +1023,38 @@ export function scanLibrary(serverUrl: string, libraryId: string, force: boolean
   return invoke('scan_library', { serverUrl, libraryId, force });
 }
 
+// ── Custom metadata providers (admin) ───────────────────────────────────────────
+
+/** A registered custom metadata provider. `slug` (custom-{id}) is the value used
+ *  as a library's provider or in a match search. */
+export interface CustomMetadataProvider {
+  id: string;
+  name: string;
+  url: string;
+  mediaType: string;
+  authHeaderValue?: string | null;
+  slug: string;
+}
+
+/** GET /api/custom-metadata-providers — list custom providers. Admin only. */
+export function getCustomMetadataProviders(serverUrl: string): Promise<CustomMetadataProvider[]> {
+  return invoke('get_custom_metadata_providers', { serverUrl });
+}
+
+/** POST /api/custom-metadata-providers — register one (name/url/mediaType + optional
+ *  authHeaderValue). Returns the created provider. Admin only. */
+export function createCustomMetadataProvider(
+  serverUrl: string,
+  payload: { name: string; url: string; mediaType: string; authHeaderValue?: string },
+): Promise<CustomMetadataProvider> {
+  return invoke('create_custom_metadata_provider', { serverUrl, payload });
+}
+
+/** DELETE /api/custom-metadata-providers/:id — remove one. Admin only. */
+export function deleteCustomMetadataProvider(serverUrl: string, id: string): Promise<void> {
+  return invoke('delete_custom_metadata_provider', { serverUrl, id });
+}
+
 // ── Server settings ───────────────────────────────────────────────────────────
 // Mirrors models::ServerSettings in src-tauri/src/models.rs.
 // All fields are optional — older ABS versions may omit some.

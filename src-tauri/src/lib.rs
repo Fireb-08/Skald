@@ -215,6 +215,10 @@ pub fn run() {
             commands::update_library,
             commands::delete_library,
             commands::scan_library,
+            // Custom metadata providers (admin)
+            commands::get_custom_metadata_providers,
+            commands::create_custom_metadata_provider,
+            commands::delete_custom_metadata_provider,
             // Server settings (admin/root only — ABS enforces this server-side)
             commands::fetch_server_settings,
             commands::update_server_settings,

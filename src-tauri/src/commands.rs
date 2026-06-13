@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 use tauri::Emitter; // .emit() on AppHandle is a trait method — must be in scope
 use tokio_util::sync::CancellationToken;
 
-use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, LoggerData, NotificationSettings, NotificationsResponse, ServerSettings, TasksResponse}, session::SessionManager, socket};
+use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, CustomMetadataProvider, LoggerData, NotificationSettings, NotificationsResponse, ServerSettings, TasksResponse}, session::SessionManager, socket};
 
 // Close an async file handle and delete the file from disk.
 // On Windows, an open file handle prevents remove_file from succeeding, so the
@@ -2006,5 +2006,42 @@ pub async fn scan_library(
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     AbsClient::new(server_url).with_token(token).scan_library(&library_id, force).await
+}
+
+// ── Custom metadata providers (admin) ────────────────────────────────────────
+
+/// GET /api/custom-metadata-providers — list custom providers.
+#[tauri::command]
+pub async fn get_custom_metadata_providers(server_url: String) -> Result<Vec<CustomMetadataProvider>, String> {
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).get_custom_metadata_providers().await;
+    match &result {
+        Ok(p) => println!("[Providers] get_custom_metadata_providers OK — {} provider(s)", p.len()),
+        Err(e) => println!("[Providers] get_custom_metadata_providers FAILED: {e}"),
+    }
+    result
+}
+
+/// POST /api/custom-metadata-providers — register a custom provider.
+#[tauri::command]
+pub async fn create_custom_metadata_provider(
+    server_url: String,
+    payload: serde_json::Value,
+) -> Result<CustomMetadataProvider, String> {
+    println!("[Providers] create_custom_metadata_provider payload: {payload}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).create_custom_metadata_provider(payload).await;
+    if let Err(e) = &result { println!("[Providers] create_custom_metadata_provider FAILED: {e}"); }
+    result
+}
+
+/// DELETE /api/custom-metadata-providers/:id — remove a custom provider.
+#[tauri::command]
+pub async fn delete_custom_metadata_provider(server_url: String, id: String) -> Result<(), String> {
+    println!("[Providers] delete_custom_metadata_provider id={id}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).delete_custom_metadata_provider(&id).await;
+    if let Err(e) = &result { println!("[Providers] delete_custom_metadata_provider FAILED: {e}"); }
+    result
 }
 
