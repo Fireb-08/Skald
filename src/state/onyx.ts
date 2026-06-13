@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task } from '../api/abs';
+import { type AdvFilter, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
 import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings } from '../api/abs';
 
 export type { ServerSettings };
@@ -272,6 +273,9 @@ export interface OnyxState {
   setFilter: (filter: string) => void;
   contextFilter: ContextFilter | null;
   setContextFilter: (filter: ContextFilter | null) => void;
+  // Advanced shelf filters (tags / language / explicit). Session-only.
+  advFilter: AdvFilter;
+  setAdvFilter: (f: AdvFilter) => void;
   search: string;
   setSearch: (search: string) => void;
   accentColor: string;
@@ -687,6 +691,7 @@ export function useOnyxState(): OnyxState {
   const [focusCollapsed, setFocusCollapsed] = useState(false);
   const [filter, setFilter] = useState('all');
   const [contextFilter, setContextFilter] = useState<ContextFilter | null>(null);
+  const [advFilter, setAdvFilter] = useState<AdvFilter>(EMPTY_ADV_FILTER);
   const [search, setSearch] = useState('');
 
   const [accentColor, setAccentColorRaw] = useState(
@@ -1122,6 +1127,7 @@ export function useOnyxState(): OnyxState {
     focusCollapsed, setFocusCollapsed,
     filter, setFilter,
     contextFilter, setContextFilter,
+    advFilter, setAdvFilter,
     search, setSearch,
     accentColor, setAccentColor,
     theme, setTheme,

@@ -35,3 +35,56 @@ export function groupMatchesFilter(
   // Unknown filter value — default to showing the group
   return true;
 }
+
+// ── Advanced filters (tags / language / explicit) ───────────────────────────────
+
+export interface AdvFilter {
+  tags: string[];
+  tagMode: 'include' | 'exclude';
+  language: string;                       // '' = any
+  explicit: 'all' | 'explicit' | 'clean';
+}
+
+export const EMPTY_ADV_FILTER: AdvFilter = { tags: [], tagMode: 'include', language: '', explicit: 'all' };
+
+/** True when any advanced filter is set (so the shelf knows to apply it). */
+export function advFilterActive(f: AdvFilter): boolean {
+  return f.tags.length > 0 || f.language !== '' || f.explicit !== 'all';
+}
+
+/** Whether a single book passes the advanced filters. */
+export function bookMatchesAdvFilter(b: LibraryItem, f: AdvFilter): boolean {
+  if (f.tags.length > 0) {
+    const bookTags = b.media.tags ?? [];
+    const hasAny = f.tags.some(t => bookTags.includes(t));
+    if (f.tagMode === 'include' && !hasAny) return false;
+    if (f.tagMode === 'exclude' && hasAny) return false;
+  }
+  if (f.language && (b.media.metadata.language ?? '') !== f.language) return false;
+  if (f.explicit !== 'all') {
+    const isExplicit = !!(b.media.metadata as unknown as { explicit?: boolean }).explicit;
+    if (f.explicit === 'explicit' && !isExplicit) return false;
+    if (f.explicit === 'clean' && isExplicit) return false;
+  }
+  return true;
+}
+
+// ── Natural title sorting ───────────────────────────────────────────────────────
+
+/** Strip a leading sort-ignore prefix (e.g. "The ", "A ") from a title. */
+function stripSortPrefix(title: string, prefixes: string[]): string {
+  const lower = title.toLowerCase();
+  for (const p of prefixes) {
+    const pref = `${p.toLowerCase()} `;
+    if (lower.startsWith(pref)) return title.slice(pref.length);
+  }
+  return title;
+}
+
+/** Numeric-aware ("Book 2" < "Book 10") title comparison that honors the server's
+ *  sort-ignore prefixes. Pass an empty `prefixes` array to disable prefix stripping. */
+export function naturalTitleCompare(a: string, b: string, prefixes: string[]): number {
+  return stripSortPrefix(a, prefixes).localeCompare(
+    stripSortPrefix(b, prefixes), undefined, { numeric: true, sensitivity: 'base' },
+  );
+}

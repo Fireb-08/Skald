@@ -3,9 +3,11 @@ import type { OnyxState, LibraryItem } from '../../state/onyx';
 import {
   bookTitle, bookAuthor, bookSeries, bookNarrator, bookProgress, bookGenres, bookPublisher,
 } from '../../state/onyx';
+import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare } from '../../lib/shelfFilters';
 import type { SeriesObject } from '../../api/abs';
 import { getLibrarySeries } from '../../api/abs';
 import ViewModeToggle from './ViewModeToggle';
+import FilterPopover from './FilterPopover';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -127,6 +129,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
       if (kind === 'publisher'  && bookPublisher(b) !== value)                   return false;
       if ((kind === 'collection' || kind === 'playlist') && !(bookIds ?? []).includes(b.id)) return false;
     }
+    if (advFilterActive(st.advFilter) && !bookMatchesAdvFilter(b, st.advFilter)) return false;
     const prog = bookProgress(b, st.mediaProgress);
     if (!st.showFinished && prog >= 0.98 && st.filter !== 'finished') return false;
     if (st.filter === 'reading'  && !prog)      return false;
@@ -146,7 +149,8 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   if (st.contextFilter?.kind === 'series') {
     filtered.sort((a, b) => seriesVolOf(a) - seriesVolOf(b));
   } else if (st.librarySort === 'title') {
-    filtered.sort((a, b) => bookTitle(a).localeCompare(bookTitle(b)));
+    const prefixes = st.serverSettings?.sortingIgnorePrefix ? (st.serverSettings.sortingPrefixes ?? []) : [];
+    filtered.sort((a, b) => naturalTitleCompare(bookTitle(a), bookTitle(b), prefixes));
   } else if (st.librarySort === 'author') {
     filtered.sort((a, b) => bookAuthor(a).localeCompare(bookAuthor(b)) || bookTitle(a).localeCompare(bookTitle(b)));
   } else if (st.librarySort === 'most-listened') {
@@ -274,7 +278,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
             <div style={{ marginRight: pillsInline ? 6 : 0 }}>
               <ViewModeToggle st={st} />
             </div>
-            {pillsInline && filterPills}
+            {pillsInline && <>{filterPills}<FilterPopover st={st} /></>}
           </div>
         )}
 
@@ -285,6 +289,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
           {!toggleInline && <ViewModeToggle st={st} />}
           {filterPills}
+          <FilterPopover st={st} />
         </div>
       )}
 

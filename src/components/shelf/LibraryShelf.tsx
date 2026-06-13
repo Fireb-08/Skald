@@ -12,6 +12,7 @@ import Icon from '../Icon';
 import SortIndicator from './SortIndicator';
 import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
+import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare } from '../../lib/shelfFilters';
 import MatchModal from '../MatchModal';
 import MetadataEditor from '../MetadataEditor';
 import CoverPicker from '../CoverPicker';
@@ -420,6 +421,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
       if (kind === 'publisher'  && bookPublisher(b) !== value)               return false;
       if ((kind === 'collection' || kind === 'playlist') && !(bookIds ?? []).includes(b.id)) return false;
     }
+    if (advFilterActive(st.advFilter) && !bookMatchesAdvFilter(b, st.advFilter)) return false;
     const prog = bookProgress(b, st.mediaProgress);
     if (!st.showFinished && prog >= 0.98 && st.filter !== 'finished') return false;
     if (st.filter === 'reading'  && !prog)      return false;
@@ -444,7 +446,8 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   } else if (st.contextFilter?.kind === 'series') {
     filtered.sort((a, b) => seriesVolOf(bookSeries(a)) - seriesVolOf(bookSeries(b)));
   } else if (st.librarySort === 'title') {
-    filtered.sort((a, b) => bookTitle(a).localeCompare(bookTitle(b)));
+    const prefixes = st.serverSettings?.sortingIgnorePrefix ? (st.serverSettings.sortingPrefixes ?? []) : [];
+    filtered.sort((a, b) => naturalTitleCompare(bookTitle(a), bookTitle(b), prefixes));
   } else if (st.librarySort === 'author') {
     filtered.sort((a, b) => bookAuthor(a).localeCompare(bookAuthor(b)) || bookTitle(a).localeCompare(bookTitle(b)));
   } else if (st.librarySort === 'most-listened') {
@@ -472,6 +475,8 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     st.contextFilter?.kind ?? '',
     st.contextFilter?.value ?? '',
     st.search,
+    // Advanced filters change the dataset — include them so the grid remounts.
+    JSON.stringify(st.advFilter),
     // Include bookIds so a playlist reorder forces the virtualizer to remount
     // with the new sort order rather than serving the stale cached layout.
     (st.contextFilter?.bookIds ?? []).join(','),
