@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library } from '../api/abs';
+import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
 import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings } from '../api/abs';
 
@@ -16,7 +16,7 @@ import {
 
 // ─── Re-exported API types ────────────────────────────────────────────────────
 
-export type { LibraryItem, MediaProgress, ListeningStats, Library };
+export type { LibraryItem, MediaProgress, ListeningStats, Library, PodcastEpisode };
 export type { AbsBookmark };
 export type { DownloadRecord };
 
@@ -261,6 +261,10 @@ export interface OnyxState {
   // server-side via the episode-scoped session, so this is presentation-only.
   currentEpisodeId: string | null;
   setCurrentEpisodeId: (id: string | null) => void;
+  // The full episode object for the playing episode, so the Player can show
+  // episode title/description/date/duration without re-fetching the item.
+  currentEpisode: PodcastEpisode | null;
+  setCurrentEpisode: (e: PodcastEpisode | null) => void;
   currentBook: LibraryItem | undefined;
   focusedBook: LibraryItem | undefined;
   focusedBookId: string | null;
@@ -685,6 +689,7 @@ export function useOnyxState(): OnyxState {
   // Podcast detail navigation + currently-playing episode (cluster E).
   const [podcastDetailId, setPodcastDetailId] = useState<string | null>(null);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
+  const [currentEpisode, setCurrentEpisode] = useState<PodcastEpisode | null>(null);
   // focusedBookId intentionally starts null — seeded from library on load by the
   // effect below. No localStorage read: we want a clean state each session so
   // the GreetingPane is the true default until the user starts playback.
@@ -1198,6 +1203,7 @@ export function useOnyxState(): OnyxState {
     screen, setScreen,
     podcastDetailId, setPodcastDetailId,
     currentEpisodeId, setCurrentEpisodeId,
+    currentEpisode, setCurrentEpisode,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
     playing, setPlaying,

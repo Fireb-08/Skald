@@ -77,7 +77,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
 
   const play = (ep: PodcastEpisode) => {
     if (!ep.id) return;
-    playEpisode(st, item.id, ep.id).catch(e => {
+    playEpisode(st, item.id, ep).catch(e => {
       console.error('[Podcast] playEpisode failed:', e);
       st.setToast({ message: 'Could not start episode', type: 'error' });
     });

@@ -5,6 +5,7 @@ import {
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
   recordStopPoint, getStopPoints,
+  asPodcastItem,
 } from '../api/abs';
 import type { LocalStopPoint } from '../api/abs';
 import type { CSSProperties } from 'react';
@@ -66,6 +67,17 @@ export default function Player({ st }: PlayerProps) {
   if (!b) return null;
 
   const isFocusedDifferent = st.focusedBookId !== null && st.focusedBookId !== st.currentBookId;
+
+  // Podcast-aware presentation. `b` is a minified library item (no episodes[]),
+  // so the playing episode's metadata comes from st.currentEpisode (set by
+  // playEpisode). Episode notes stand in for the book synopsis.
+  const isPodcast = b.mediaType === 'podcast';
+  const ep = isPodcast ? st.currentEpisode : null;
+  const detailLabel = isPodcast ? 'Description' : 'Synopsis';
+  const descriptionHtml = isPodcast
+    ? (ep?.description || b.media?.metadata?.description || '')
+    : (b.media?.metadata?.description || '');
+  const noDescText = isPodcast ? 'No description available.' : 'No synopsis available.';
 
   // Chapters are locked when the focused book differs from the playing book,
   // OR when playback has not yet started (position is 0 and not playing).
@@ -184,6 +196,8 @@ export default function Player({ st }: PlayerProps) {
     setOlRatings(null);
     setOlShelves(null);
     if (!b) return;
+    // Open Library is book-only — skip the lookup entirely for podcasts.
+    if (isPodcast) return;
 
     // Serve from cache immediately if fresh — no network request.
     const cached = getCachedReview(b.id);
@@ -528,28 +542,36 @@ export default function Player({ st }: PlayerProps) {
             <Cover item={b} size={coverSize} fill serverUrl={st.serverUrl} style={{ transition: 'width 0.3s ease, height 0.3s ease' }} />
           </div>
           <div style={{ marginTop: 32, textAlign: 'center', position: 'relative', zIndex: 1, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, width: '100%' }}>
-            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 8 }}>{bSeries}</div>
-            <div style={{ fontFamily: SERIF, fontSize: 48, fontWeight: 500, lineHeight: 1, letterSpacing: '-0.02em' }}>{bookTitle(b)}</div>
-            <div style={{ marginTop: 10, fontSize: 16, color: 'var(--onyx-text-dim)' }}>
-              by{' '}
-              <span
-                onClick={() => { st.setContextFilter({ kind: 'author', value: bookAuthor(b) }); st.setShelfTab('library'); st.setScreen('library'); }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'var(--onyx-text-dim)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'transparent'; }}
-                style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.15s' }}
-              >{bookAuthor(b)}</span>
-            </div>
-            <div style={{ marginTop: 2, fontSize: 13, color: 'var(--onyx-text-mute)' }}>
-              {bookNarrator(b) && <>
-                narrated by{' '}
-                <span
-                  onClick={() => { st.setContextFilter({ kind: 'narrator', value: bookNarrator(b) }); st.setShelfTab('library'); st.setScreen('library'); }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'var(--onyx-text-mute)'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'transparent'; }}
-                  style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.15s' }}
-                >{bookNarrator(b)}</span>
-              </>}
-            </div>
+            <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 8 }}>{isPodcast ? 'Podcast' : bSeries}</div>
+            <div style={{ fontFamily: SERIF, fontSize: isPodcast ? 30 : 48, fontWeight: 500, lineHeight: 1.05, letterSpacing: '-0.02em' }}>{isPodcast ? (ep?.title || bookTitle(b)) : bookTitle(b)}</div>
+            {isPodcast ? (
+              // For an episode, the "show" is the podcast title; author filtering
+              // is book-only so this line is plain text.
+              <div style={{ marginTop: 10, fontSize: 16, color: 'var(--onyx-text-dim)' }}>{bookTitle(b)}</div>
+            ) : (
+              <>
+                <div style={{ marginTop: 10, fontSize: 16, color: 'var(--onyx-text-dim)' }}>
+                  by{' '}
+                  <span
+                    onClick={() => { st.setContextFilter({ kind: 'author', value: bookAuthor(b) }); st.setShelfTab('library'); st.setScreen('library'); }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'var(--onyx-text-dim)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'transparent'; }}
+                    style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.15s' }}
+                  >{bookAuthor(b)}</span>
+                </div>
+                <div style={{ marginTop: 2, fontSize: 13, color: 'var(--onyx-text-mute)' }}>
+                  {bookNarrator(b) && <>
+                    narrated by{' '}
+                    <span
+                      onClick={() => { st.setContextFilter({ kind: 'narrator', value: bookNarrator(b) }); st.setShelfTab('library'); st.setScreen('library'); }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'var(--onyx-text-mute)'; }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.textDecorationColor = 'transparent'; }}
+                      style={{ cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'transparent', transition: 'text-decoration-color 0.15s' }}
+                    >{bookNarrator(b)}</span>
+                  </>}
+                </div>
+              </>
+            )}
 
             {/* Synopsis — inline when space allows, collapsed to hover popover when cramped */}
             {synopsisCollapsed ? (
@@ -585,7 +607,7 @@ export default function Player({ st }: PlayerProps) {
                     borderBottom: '1px dotted var(--onyx-text-mute)',
                     paddingBottom: 1,
                   }}>
-                    Synopsis
+                    {detailLabel}
                   </span>
 
                   {/* Popover via portal — fixed positioning on document.body escapes
@@ -617,10 +639,10 @@ export default function Player({ st }: PlayerProps) {
                         lineHeight: 1.6,
                         boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
                       }}>
-                      {b.media?.metadata?.description ? (
-                        <div dangerouslySetInnerHTML={{ __html: b.media.metadata.description }} />
+                      {descriptionHtml ? (
+                        <div dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
                       ) : (
-                        <span style={{ fontStyle: 'italic', color: 'var(--onyx-text-mute)' }}>No synopsis available.</span>
+                        <span style={{ fontStyle: 'italic', color: 'var(--onyx-text-mute)' }}>{noDescText}</span>
                       )}
                     </div>,
                     document.body,
@@ -631,17 +653,17 @@ export default function Player({ st }: PlayerProps) {
               // Normal inline synopsis — full scrollable block when there is enough room.
               <div style={{ marginTop: 24, width: '100%', textAlign: 'left', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginBottom: 8 }}>
-                  Synopsis
+                  {detailLabel}
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto' }}>
-                  {b.media?.metadata?.description ? (
+                  {descriptionHtml ? (
                     <div
                       style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--onyx-text-dim)' }}
-                      dangerouslySetInnerHTML={{ __html: b.media.metadata.description }}
+                      dangerouslySetInnerHTML={{ __html: descriptionHtml }}
                     />
                   ) : (
                     <div style={{ fontSize: 13, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>
-                      No synopsis available.
+                      {noDescText}
                     </div>
                   )}
                 </div>
@@ -862,7 +884,11 @@ export default function Player({ st }: PlayerProps) {
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, marginRight: -8, paddingRight: 8 }}>
                 {(() => {
                   const meta = b.media?.metadata;
-                  const prog = st.mediaProgress.find(p => p.libraryItemId === st.currentBookId);
+                  // For a podcast, progress is keyed on (item, episode); for a
+                  // book, on the item alone.
+                  const prog = st.mediaProgress.find(p =>
+                    p.libraryItemId === st.currentBookId &&
+                    (isPodcast ? p.episodeId === st.currentEpisodeId : true));
                   const dash = '—';
                   const detailRow = (label: string, value: React.ReactNode) => (
                     <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 0', borderBottom: '1px solid var(--onyx-line)', gap: 12 }}>
@@ -872,6 +898,52 @@ export default function Player({ st }: PlayerProps) {
                   );
                   const tags = b.media?.tags ?? [];
                   const genres = meta?.genres?.filter(Boolean) ?? [];
+
+                  const sectionHead = (label: string, mt = 0) => (
+                    <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: mt, marginBottom: 4, paddingBottom: 4 }}>{label}</div>
+                  );
+                  const listeningRows = prog ? (
+                    <>
+                      {detailRow('Progress',
+                        <span style={{ color: prog.isFinished ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
+                          {Math.round(prog.progress * 100)}%{prog.isFinished && ' ✓'}
+                        </span>
+                      )}
+                      {detailRow('Listened',   fmtTime(prog.currentTime))}
+                      {detailRow('Remaining',  fmtRemaining(Math.max(0, prog.duration - prog.currentTime)))}
+                      {detailRow('Last played', new Date(prog.lastUpdate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}
+                    </>
+                  ) : (
+                    <div style={{ padding: '12px 0', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>Not started</div>
+                  );
+
+                  // ── Podcast / episode details ──────────────────────────────
+                  if (isPodcast) {
+                    const pMeta = asPodcastItem(b).media.metadata;
+                    const pGenres = (pMeta?.genres ?? []).filter(Boolean);
+                    const epDur = ep?.duration ?? st.bookSecs ?? 0;
+                    const pub = ep?.publishedAt ? new Date(ep.publishedAt) : ep?.pubDate ? new Date(ep.pubDate) : null;
+                    const epNum = [ep?.season ? `S${ep.season}` : '', ep?.episode ? `E${ep.episode}` : ''].filter(Boolean).join(' ');
+                    return (
+                      <>
+                        {sectionHead('Podcast')}
+                        {detailRow('Author',   pMeta?.author   || dash)}
+                        {detailRow('Genre',    pGenres.join(', ') || dash)}
+                        {detailRow('Language', pMeta?.language || dash)}
+                        {pMeta?.explicit !== undefined && detailRow('Explicit', pMeta.explicit ? 'Yes' : 'No')}
+
+                        {sectionHead('Episode', 16)}
+                        {ep?.title && detailRow('Title', ep.title)}
+                        {pub && !isNaN(pub.getTime()) && detailRow('Published', pub.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }))}
+                        {epNum && detailRow('Number', epNum)}
+                        {detailRow('Duration', epDur > 0 ? fmtRemaining(epDur) : dash)}
+
+                        {sectionHead('Listening', 16)}
+                        {listeningRows}
+                      </>
+                    );
+                  }
+
                   return (
                     <>
                       {/* Book details */}

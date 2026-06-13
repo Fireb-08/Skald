@@ -3,6 +3,7 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
+import type { PodcastEpisode } from './abs';
 import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress } from './abs';
 
 // Guard against concurrent playBook calls.
@@ -26,6 +27,7 @@ export async function playBook(
     // A book is starting — clear any episode context from a prior podcast play
     // (covers both the offline and online paths below).
     st.setCurrentEpisodeId(null);
+    st.setCurrentEpisode(null);
 
     // ── Offline path: play from local file when the book is downloaded ──────────
     // If the book is downloaded locally, play from disk rather than opening a
@@ -135,9 +137,11 @@ export async function playBook(
 export async function playEpisode(
   st: OnyxState,
   podcastItemId: string,
-  episodeId: string,
+  episode: PodcastEpisode,
   startTimeOverride?: number,
 ): Promise<void> {
+  const episodeId = episode.id;
+  if (!episodeId) return;
   if (playBookInFlight) {
     console.log('[playEpisode] already in flight — ignoring duplicate call');
     return;
@@ -167,6 +171,7 @@ export async function playEpisode(
     st.setSessionId(result.sessionId);
     st.setSessionReady(true);
     st.setCurrentEpisodeId(episodeId);
+    st.setCurrentEpisode(episode);
     st.setCurrentBookId(podcastItemId);
     st.setFocusedBookId(podcastItemId);
     st.setPosition(result.currentTime);
