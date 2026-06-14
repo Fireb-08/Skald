@@ -9,12 +9,19 @@ export interface LogsSectionProps { st: OnyxState; }
 // Cap the in-memory buffer — logs can be high-volume.
 const MAX_LOGS = 2000;
 
+// LogLevel numerics (server/utils/constants.js): TRACE=0, DEBUG=1, INFO=2,
+// WARN=3, ERROR=4, FATAL=5, NOTE=6. The "FATAL only" preset (cluster L — there is
+// no crash-log endpoint, so crash-level lines are isolated here in the daily log)
+// matches FATAL exactly, NOT FATAL-and-above, since NOTE(6) sorts above FATAL.
+const FATAL_LEVEL = 5;
+
 const colorForLevel = (level: number) =>
   LOGGER_LEVELS.find(l => l.value === level)?.color ?? 'var(--onyx-text)';
 
 export default function LogsSection({ st }: LogsSectionProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [minLevel, setMinLevel] = useState(2); // Info and above by default
+  const [fatalOnly, setFatalOnly] = useState(false); // crash-level preset (cluster L)
   const [search, setSearch] = useState('');
   const [autoScroll, setAutoScroll] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -68,8 +75,10 @@ export default function LogsSection({ st }: LogsSectionProps) {
   }, [liveSyncOn, minLevel, st.serverUrl]);
 
   // Client-side view: respect the level filter (covers the seed too) + search.
+  // The FATAL-only preset overrides the min-level dropdown and matches FATAL
+  // exactly (crash-level isolation — cluster L).
   const filtered = logs.filter(l =>
-    l.level >= minLevel &&
+    (fatalOnly ? l.level === FATAL_LEVEL : l.level >= minLevel) &&
     (search === '' ||
       l.message.toLowerCase().includes(search.toLowerCase()) ||
       l.source.toLowerCase().includes(search.toLowerCase()))
@@ -93,9 +102,30 @@ export default function LogsSection({ st }: LogsSectionProps) {
 
       {/* Controls */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '4px 0 14px' }}>
-        <select value={minLevel} onChange={e => setMinLevel(Number(e.target.value))} style={{ ...inputStyle, cursor: 'pointer' }}>
+        <select
+          value={minLevel}
+          onChange={e => setMinLevel(Number(e.target.value))}
+          disabled={fatalOnly}
+          title={fatalOnly ? 'Disabled while FATAL only is active' : undefined}
+          style={{ ...inputStyle, cursor: fatalOnly ? 'default' : 'pointer', opacity: fatalOnly ? 0.5 : 1 }}
+        >
           {LOGGER_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}+</option>)}
         </select>
+        {/* FATAL-only preset — isolates crash-level lines (cluster L; ABS has no
+            crash-log endpoint, so these surface via the normal daily log). */}
+        <button
+          onClick={() => setFatalOnly(v => !v)}
+          title="Show only FATAL (crash-level) entries"
+          style={{
+            ...inputStyle, cursor: 'pointer',
+            background: fatalOnly ? 'var(--onyx-accent-dim)' : 'var(--onyx-panel2)',
+            color: fatalOnly ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
+            border: `1px solid ${fatalOnly ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+            fontWeight: fatalOnly ? 600 : 400,
+          }}
+        >
+          FATAL only
+        </button>
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
