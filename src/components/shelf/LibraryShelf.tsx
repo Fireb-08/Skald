@@ -19,6 +19,7 @@ import CoverPicker from '../CoverPicker';
 import CollectionPicker from '../CollectionPicker';
 import PlaylistPicker from '../PlaylistPicker';
 import FilesModal from './FilesModal';
+import ShareModal from '../ShareModal';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -376,6 +377,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   const [playlistItem, setPlaylistItem] = useState<LibraryItem | null>(null);
   const [editItem, setEditItem] = useState<LibraryItem | null>(null);
   const [coverItem, setCoverItem] = useState<LibraryItem | null>(null);
+  const [shareItem, setShareItem] = useState<LibraryItem | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Ref to the inner scroll container — required by the virtualizer, which must
@@ -515,7 +517,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem, setFilesItem, setPlaylistItem, setEditItem, setCoverItem)}
+          items={buildItemContextMenu(contextMenu.item, st, setMatchItem, setCollectionItem, setFilesItem, setPlaylistItem, setEditItem, setCoverItem, setShareItem)}
           onClose={() => setContextMenu(null)}
         />
       )}
@@ -569,6 +571,13 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
           bookId={filesItem.id}
           serverUrl={st.serverUrl}
           onClose={() => setFilesItem(null)}
+        />
+      )}
+      {shareItem && (
+        <ShareModal
+          item={shareItem}
+          st={st}
+          onClose={() => setShareItem(null)}
         />
       )}
     </Glass>

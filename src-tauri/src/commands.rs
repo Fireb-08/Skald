@@ -2173,3 +2173,88 @@ pub async fn export_opml(server_url: String, library_id: String) -> Result<Strin
     AbsClient::new(server_url).with_token(token).export_opml(&library_id).await
 }
 
+// ── Sharing & RSS feeds (cluster G) ──────────────────────────────────────────
+// Admin-gated on the server. `[Sharing]` diagnostics retained through the
+// roadmap, then stripped (per CLAUDE.md).
+
+/// POST /api/share/mediaitem — create a public share link. `expires_at` is Unix
+/// ms; pass 0 for never-expires (ABS rejects null). Returns the created share.
+#[tauri::command]
+pub async fn create_share(
+    server_url: String,
+    slug: String,
+    media_item_type: String,
+    media_item_id: String,
+    expires_at: Option<i64>,
+    is_downloadable: bool,
+) -> Result<models::MediaItemShare, String> {
+    println!("[Sharing] create_share slug={slug} type={media_item_type} item={media_item_id} expires={expires_at:?} downloadable={is_downloadable}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url)
+        .with_token(token)
+        .create_share(&slug, &media_item_type, &media_item_id, expires_at, is_downloadable)
+        .await;
+    if let Err(e) = &result {
+        println!("[Sharing] create_share error: {e}");
+    }
+    result
+}
+
+/// DELETE /api/share/mediaitem/:id — revoke a share.
+#[tauri::command]
+pub async fn delete_share(server_url: String, share_id: String) -> Result<(), String> {
+    println!("[Sharing] delete_share id={share_id}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).delete_share(&share_id).await
+}
+
+/// GET /api/share/:slug — public re-validation of a tracked share (404 ⇒ gone).
+#[tauri::command]
+pub async fn get_share_by_slug(server_url: String, slug: String) -> Result<models::MediaItemShare, String> {
+    println!("[Sharing] get_share_by_slug slug={slug}");
+    AbsClient::new(server_url).get_share_by_slug(&slug).await
+}
+
+/// GET /api/feeds — list all open RSS feeds.
+#[tauri::command]
+pub async fn get_feeds(server_url: String) -> Result<Vec<models::RssFeed>, String> {
+    println!("[Sharing] get_feeds");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).get_feeds().await;
+    if let Ok(feeds) = &result {
+        println!("[Sharing] get_feeds → {} open feed(s)", feeds.len());
+    }
+    result
+}
+
+/// POST /api/feeds/:kind/:id/open — open a feed for an item/collection/series.
+/// `entity_kind` is "item" | "collection" | "series"; `server_address` is the
+/// public ABS origin (pass the configured server URL).
+#[tauri::command]
+pub async fn open_feed(
+    server_url: String,
+    entity_kind: String,
+    entity_id: String,
+    server_address: String,
+    slug: String,
+) -> Result<models::RssFeed, String> {
+    println!("[Sharing] open_feed kind={entity_kind} id={entity_id} slug={slug} address={server_address}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url)
+        .with_token(token)
+        .open_feed(&entity_kind, &entity_id, &server_address, &slug)
+        .await;
+    if let Err(e) = &result {
+        println!("[Sharing] open_feed error: {e}");
+    }
+    result
+}
+
+/// POST /api/feeds/:id/close — close/revoke an open feed.
+#[tauri::command]
+pub async fn close_feed(server_url: String, feed_id: String) -> Result<(), String> {
+    println!("[Sharing] close_feed id={feed_id}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).close_feed(&feed_id).await
+}
+

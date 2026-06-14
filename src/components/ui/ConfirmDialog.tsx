@@ -1,3 +1,5 @@
+import ReactDOM from 'react-dom';
+
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -13,10 +15,15 @@ export interface ConfirmDialogProps {
 export default function ConfirmDialog({
   title, message, confirmLabel, danger, onConfirm, onCancel,
 }: ConfirmDialogProps) {
-  return (
+  // Portaled to document.body so the overlay isn't trapped inside a parent
+  // stacking context — without this it renders below body-level modal portals
+  // (e.g. ShareModal) regardless of zIndex.
+  const dialog = (
     <div
       style={{
-        position: 'fixed', inset: 0, zIndex: 500,
+        // Above modals (z 500) and the context menu (z 1000) — a confirmation
+        // must always sit on top, including when launched from within a modal.
+        position: 'fixed', inset: 0, zIndex: 2000,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'rgba(0,0,0,0.65)',
       }}
@@ -82,4 +89,6 @@ export default function ConfirmDialog({
       </div>
     </div>
   );
+
+  return ReactDOM.createPortal(dialog, document.body);
 }

@@ -29,3 +29,5 @@ export { default as ScheduledTasksSection } from './ScheduledTasksSection';
 export type { ScheduledTasksSectionProps } from './ScheduledTasksSection';
 export { default as LogsSection } from './LogsSection';
 export type { LogsSectionProps } from './LogsSection';
+export { default as SharingSection } from './SharingSection';
+export type { SharingSectionProps } from './SharingSection';

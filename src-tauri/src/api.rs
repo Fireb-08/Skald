@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, CustomMetadataProvider, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, CustomMetadataProvider, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MediaItemShare, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, RssFeed, RssFeedsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -2144,5 +2144,153 @@ impl AbsClient {
         }
 
         resp.json().await.map_err(|e| e.to_string())
+    }
+
+    // ── Sharing & RSS feeds (cluster G) ──────────────────────────────────────
+    // All admin-only on the server (isAdminOrUp → 403). Routes/bodies verified
+    // against ShareController.js / RSSFeedController.js. Request bodies built
+    // inline (create_collection convention); responses use the cluster-G models.
+
+    /// POST /api/share/mediaitem — create a public share link for a book or
+    /// podcast episode. Body verified against ShareController.createMediaItemShare:
+    /// `{ slug, mediaItemType, mediaItemId, expiresAt, isDownloadable }`.
+    /// `expires_at` is Unix ms; ABS validates `expiresAt === null` as an error, so
+    /// pass `0` for never-expires (ABS stores `expiresAt || null`). Returns the
+    /// created MediaItemShare. ABS rejects a slug or mediaItemId already shared.
+    pub async fn create_share(
+        &self,
+        slug: &str,
+        media_item_type: &str,
+        media_item_id: &str,
+        expires_at: Option<i64>,
+        is_downloadable: bool,
+    ) -> Result<MediaItemShare, String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/share/mediaitem", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({
+                "slug": slug,
+                "mediaItemType": media_item_type,
+                "mediaItemId": media_item_id,
+                // ABS rejects null here; 0 means never-expires (stored as null).
+                "expiresAt": expires_at,
+                "isDownloadable": is_downloadable,
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("create_share failed: HTTP {status} — {body}"));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// DELETE /api/share/mediaitem/{id} — revoke a share. Returns 200 with no body.
+    pub async fn delete_share(&self, share_id: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .delete(format!("{}/api/share/mediaitem/{share_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("delete_share failed: HTTP {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// GET /api/share/{slug} — public, unauthenticated fetch of a share by slug.
+    /// Used by the local Share Manager to re-validate tracked shares (a 404 means
+    /// the share is gone and should be purged from the local list). No auth header.
+    pub async fn get_share_by_slug(&self, slug: &str) -> Result<MediaItemShare, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/share/{slug}", self.root()))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_share_by_slug failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// GET /api/feeds — list all open RSS feeds. ABS returns
+    /// `{ feeds: [...], minified: [...] }`; we take the full `feeds` array.
+    pub async fn get_feeds(&self) -> Result<Vec<RssFeed>, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/feeds", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_feeds failed: HTTP {}", resp.status()));
+        }
+
+        let body: RssFeedsResponse = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.feeds)
+    }
+
+    /// Open an RSS feed for an item / collection / series. The three ABS routes
+    /// share the same body (`{ serverAddress, slug }`, both required) and differ
+    /// only in path, so they collapse to one helper. `entity_kind` is one of
+    /// "item" | "collection" | "series" (mapping to the route segment). Returns
+    /// the created feed. `server_address` is the public ABS origin the feedUrl is
+    /// built from — pass the configured server URL.
+    pub async fn open_feed(
+        &self,
+        entity_kind: &str,
+        entity_id: &str,
+        server_address: &str,
+        slug: &str,
+    ) -> Result<RssFeed, String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/feeds/{entity_kind}/{entity_id}/open", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({
+                "serverAddress": server_address,
+                "slug": slug,
+            }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("open_feed failed: HTTP {status} — {body}"));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// POST /api/feeds/{id}/close — close/revoke an open feed. No body; the route
+    /// takes the feed id. Returns 200.
+    pub async fn close_feed(&self, feed_id: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/feeds/{feed_id}/close", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("close_feed failed: HTTP {}", resp.status()));
+        }
+        Ok(())
     }
 }

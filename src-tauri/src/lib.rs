@@ -261,6 +261,12 @@ pub fn run() {
             commands::delete_episode,
             commands::get_recent_episodes,
             commands::export_opml,
+            commands::create_share,
+            commands::delete_share,
+            commands::get_share_by_slug,
+            commands::get_feeds,
+            commands::open_feed,
+            commands::close_feed,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

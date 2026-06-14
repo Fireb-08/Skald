@@ -889,3 +889,92 @@ pub struct LoggerData {
     #[serde(default)]
     pub current_daily_logs: Vec<LogEntry>,
 }
+
+// ── Sharing & RSS feeds (cluster G) ──────────────────────────────────────────
+// Admin-only public surfaces. Routes verified against server/routers/ApiRouter.js
+// → ShareController / RSSFeedController; response shapes against
+// server/models/MediaItemShare.js (toJSONForClient) and server/models/Feed.js
+// (toOldJSON). Request bodies are built inline in api.rs (matching the
+// create_collection convention); these structs cover only the response shapes.
+
+/// A media-item share link — the object returned by POST /api/share/mediaitem
+/// (MediaItemShare.toJSONForClient). `userId`/`pash`/`extraData` are server-only
+/// and omitted by ABS. The date fields arrive as ISO strings (Sequelize DATE →
+/// JSON.stringify), so they are kept as raw strings; `expiresAt` is null for a
+/// share that never expires.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaItemShare {
+    pub id: String,
+    pub slug: String,
+    pub media_item_id: String,
+    /// "book" | "podcastEpisode".
+    pub media_item_type: String,
+    #[serde(default)]
+    pub is_downloadable: bool,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// The `meta` block of an RSS feed (Feed.toOldJSON().meta). Only the fields the
+/// Feed Manager surfaces are modelled; unknown keys are ignored by serde.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RssFeedMeta {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub explicit: bool,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub prevent_indexing: bool,
+    #[serde(default)]
+    pub owner_name: Option<String>,
+    #[serde(default)]
+    pub owner_email: Option<String>,
+}
+
+/// An open RSS feed — Feed.toOldJSON(). `entityType` is "libraryItem" |
+/// "collection" | "series"; `feedUrl` is the public, unauthenticated URL. The
+/// per-episode array is not modelled (the Feed Manager only lists/closes feeds).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RssFeed {
+    pub id: String,
+    #[serde(default)]
+    pub slug: String,
+    /// "libraryItem" | "collection" | "series".
+    #[serde(default)]
+    pub entity_type: String,
+    #[serde(default)]
+    pub entity_id: String,
+    #[serde(default)]
+    pub feed_url: String,
+    #[serde(default)]
+    pub server_address: Option<String>,
+    #[serde(default)]
+    pub meta: Option<RssFeedMeta>,
+    #[serde(default)]
+    pub created_at: Option<Value>,
+    #[serde(default)]
+    pub updated_at: Option<Value>,
+}
+
+/// Response shape of GET /api/feeds — `{ feeds: [...], minified: [...] }`. Only
+/// the full `feeds` array is consumed.
+#[derive(Debug, Deserialize)]
+pub struct RssFeedsResponse {
+    #[serde(default)]
+    pub feeds: Vec<RssFeed>,
+}
