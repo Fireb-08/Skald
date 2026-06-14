@@ -42,7 +42,7 @@ export default function SharingSection({ st }: SharingSectionProps) {
     const checks = await Promise.allSettled(tracked.map(s => getShareBySlug(st.serverUrl, s.slug)));
     const live = tracked.filter((s, i) => {
       if (checks[i].status === 'rejected') {
-        console.log('[Sharing] purging stale tracked share', s.slug);
+        // Share no longer exists on the server — drop the stale local record.
         removeTrackedShare(s.id);
         return false;
       }
@@ -54,11 +54,9 @@ export default function SharingSection({ st }: SharingSectionProps) {
   const loadFeeds = useCallback(async () => {
     setFeedsLoading(true);
     try {
-      const list = await getFeeds(st.serverUrl);
-      setFeeds(list);
-      console.log('[Sharing] SharingSection loaded', list.length, 'open feed(s)');
+      setFeeds(await getFeeds(st.serverUrl));
     } catch (e) {
-      console.error('[Sharing] getFeeds failed:', e);
+      console.error('[SharingSection] getFeeds failed:', e);
       st.setToast({ message: `Failed to load feeds: ${String(e)}`, type: 'error' });
     } finally {
       setFeedsLoading(false);

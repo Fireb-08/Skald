@@ -82,11 +82,9 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
     fetchItem(st.serverUrl, item.id)
       .then(full => {
         if (cancelled) return;
-        const id = full.media?.id ?? null;
-        setMediaId(id);
-        console.log('[Sharing] resolved media.id for', item.id, '→', id ?? 'missing');
+        setMediaId(full.media?.id ?? null);
       })
-      .catch(e => console.error('[Sharing] media.id resolve failed:', e));
+      .catch(e => console.error('[ShareModal] media.id resolve failed:', e));
     return () => { cancelled = true; };
   }, [mediaId, canShare, st.serverUrl, item.id]);
 
@@ -97,11 +95,9 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
     getFeeds(st.serverUrl)
       .then(feeds => {
         if (cancelled) return;
-        const existing = feeds.find(f => f.entityId === item.id) ?? null;
-        setFeed(existing);
-        console.log('[Sharing] ShareModal feed lookup for', item.id, '→', existing ? existing.feedUrl : 'none');
+        setFeed(feeds.find(f => f.entityId === item.id) ?? null);
       })
-      .catch(e => console.error('[Sharing] feed lookup failed:', e))
+      .catch(e => console.error('[ShareModal] feed lookup failed:', e))
       .finally(() => { if (!cancelled) setFeedLoading(false); });
     return () => { cancelled = true; };
   }, [st.serverUrl, item.id]);
