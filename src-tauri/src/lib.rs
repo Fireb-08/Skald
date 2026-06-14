@@ -189,6 +189,9 @@ pub fn run() {
             commands::create_user,
             commands::update_user,
             commands::delete_user,
+            commands::get_user,
+            commands::change_password,
+            commands::get_auth_settings,
             // Local stop-point log — position safety net independent of the server
             commands::record_stop_point,
             commands::get_stop_points,

@@ -12,8 +12,11 @@ import {
   createUser,
   updateUser,
   deleteUser,
+  getUser,
+  changePassword,
+  getAuthSettings,
 } from '../../api/abs';
-import type { AdminUser } from '../../api/abs';
+import type { AdminUser, UserPermissions, AuthSettings } from '../../api/abs';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -115,6 +118,103 @@ const TrashIcon = (
   </svg>
 );
 
+// ── Shared modal field styles ────────────────────────────────────────────────
+const fieldLabelStyle: React.CSSProperties = {
+  fontFamily: MONO, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase',
+  color: 'var(--onyx-text-mute)', marginBottom: 6,
+};
+const fieldInputStyle: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '9px 12px', background: 'rgba(0,0,0,0.25)',
+  border: '1px solid var(--onyx-glass-edge)', borderRadius: 7, color: 'var(--onyx-text)',
+  fontSize: 13, outline: 'none', fontFamily: 'inherit',
+};
+const ghostBtnStyle: React.CSSProperties = {
+  padding: '8px 18px', background: 'transparent', border: '1px solid var(--onyx-glass-edge)',
+  borderRadius: 7, color: 'var(--onyx-text-dim)', fontFamily: MONO, fontSize: 11,
+  letterSpacing: '0.07em', textTransform: 'uppercase', cursor: 'pointer',
+};
+const brassBtnStyle: React.CSSProperties = {
+  // Theme accent (follows the selected accent), not a hardcoded gold gradient.
+  padding: '8px 18px', background: 'var(--onyx-accent)',
+  border: '1px solid var(--onyx-accent-edge)',
+  borderRadius: 7, color: 'var(--onyx-bg)', fontFamily: MONO, fontSize: 11, letterSpacing: '0.07em',
+  textTransform: 'uppercase', cursor: 'pointer', fontWeight: 600,
+};
+
+// ── ChangePasswordModal ──────────────────────────────────────────────────────
+
+/** Self-service password change (PATCH /api/me/password). Guests are blocked
+ *  server-side; the caller hides this for guest accounts. */
+function ChangePasswordModal({ serverUrl, onClose }: { serverUrl: string; onClose: () => void }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!next) return setError('Enter a new password.');
+    if (next !== confirm) return setError('New passwords do not match.');
+    setError('');
+    setPending(true);
+    try {
+      await changePassword(serverUrl, current, next);
+      setDone(true);
+    } catch (err) {
+      setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'Change failed.');
+      setPending(false);
+    }
+  };
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.65)' }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form
+        onSubmit={submit}
+        style={{ width: 400, maxWidth: '90vw', background: 'var(--onyx-panel2)', backdropFilter: 'blur(40px) saturate(120%)', WebkitBackdropFilter: 'blur(40px) saturate(120%)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 12, boxShadow: '0 24px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)', padding: '26px 26px 22px', display: 'flex', flexDirection: 'column', gap: 18 }}
+      >
+        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)' }}>Change password</div>
+        {done ? (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)', lineHeight: 1.5 }}>
+              Your password has been changed.
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" onClick={onClose} style={brassBtnStyle}>Done</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <div style={fieldLabelStyle}>Current password</div>
+              <input style={fieldInputStyle} type="password" value={current} onChange={e => setCurrent(e.target.value)} autoFocus />
+            </div>
+            <div>
+              <div style={fieldLabelStyle}>New password</div>
+              <input style={fieldInputStyle} type="password" value={next} onChange={e => setNext(e.target.value)} />
+            </div>
+            <div>
+              <div style={fieldLabelStyle}>Confirm new password</div>
+              <input style={fieldInputStyle} type="password" value={confirm} onChange={e => setConfirm(e.target.value)} />
+            </div>
+            {error && <div style={{ fontSize: 12, color: '#e8716a', fontFamily: MONO }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              <button type="button" onClick={onClose} style={ghostBtnStyle}>Cancel</button>
+              <button type="submit" disabled={pending} style={{ ...brassBtnStyle, cursor: pending ? 'wait' : 'pointer' }}>
+                {pending ? 'Saving…' : 'Change'}
+              </button>
+            </div>
+          </>
+        )}
+      </form>
+    </div>
+  );
+}
+
 // ── UserModal ──────────────────────────────────────────────────────────────
 
 interface UserModalProps {
@@ -126,8 +226,15 @@ interface UserModalProps {
   initialType?: string;
   /** When true, the password field shows a "leave blank to keep" hint. */
   isEdit?: boolean;
-  /** Called with the validated field values. Should throw on server errors. */
-  onSubmit: (username: string, password: string, type: 'user' | 'admin') => Promise<void>;
+  /** Full user (with permissions) when editing — drives the access-control editor. */
+  editUser?: AdminUser;
+  /** Libraries available to assign (cluster H). */
+  libraries?: Array<{ id: string; name: string }>;
+  /** Tags available to assign (derived from the loaded library). */
+  availableTags?: string[];
+  /** Called with the validated field values + permissions (null = leave default).
+   *  Should throw on server errors. */
+  onSubmit: (username: string, password: string, type: 'user' | 'admin', permissions: UserPermissions | null) => Promise<void>;
   onCancel: () => void;
 }
 
@@ -137,6 +244,9 @@ function UserModal({
   initialUsername = '',
   initialType = 'user',
   isEdit = false,
+  editUser,
+  libraries = [],
+  availableTags = [],
   onSubmit,
   onCancel,
 }: UserModalProps) {
@@ -149,6 +259,20 @@ function UserModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
 
+  // ── Access-control state (edit mode only); seeded from the full user. ──
+  const seed = editUser?.permissions;
+  const seedLibs = editUser?.librariesAccessible ?? seed?.librariesAccessible ?? [];
+  const seedTags = editUser?.itemTagsSelected ?? seed?.itemTagsSelected ?? [];
+  const [accessAllLibraries, setAccessAllLibraries] = useState(seed?.accessAllLibraries ?? true);
+  const [librariesAccessible, setLibrariesAccessible] = useState<string[]>(seedLibs);
+  const [accessAllTags, setAccessAllTags] = useState(seed?.accessAllTags ?? true);
+  const [itemTagsSelected, setItemTagsSelected] = useState<string[]>(seedTags);
+  const [tagsExclusive, setTagsExclusive] = useState(seed?.selectedTagsNotAccessible ?? false);
+  const [accessExplicit, setAccessExplicit] = useState(seed?.accessExplicitContent ?? false);
+
+  const toggleInArray = (arr: string[], v: string) =>
+    arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     // Validate required fields before making the network call.
@@ -157,7 +281,22 @@ function UserModal({
     setError('');
     setPending(true);
     try {
-      await onSubmit(username.trim(), password, userType);
+      // Build the permissions blob only in edit mode (add uses server defaults).
+      // Spread the existing permissions so non-edited flags (download/update/…)
+      // are preserved; override the access-control fields the editor exposes.
+      let permissions: UserPermissions | null = null;
+      if (isEdit && seed) {
+        permissions = {
+          ...seed,
+          accessAllLibraries,
+          librariesAccessible: accessAllLibraries ? [] : librariesAccessible,
+          accessAllTags,
+          itemTagsSelected: accessAllTags ? [] : itemTagsSelected,
+          selectedTagsNotAccessible: tagsExclusive,
+          accessExplicitContent: accessExplicit,
+        };
+      }
+      await onSubmit(username.trim(), password, userType, permissions);
     } catch (err) {
       setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'An error occurred.');
       setPending(false);
@@ -218,6 +357,8 @@ function UserModal({
           display: 'flex',
           flexDirection: 'column',
           gap: 18,
+          maxHeight: '90vh',
+          overflowY: 'auto',
         }}
       >
         {/* Modal title */}
@@ -276,6 +417,70 @@ function UserModal({
           </div>
         </div>
 
+        {/* ── Access control (edit mode only) ── */}
+        {isEdit && seed && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4, borderTop: '1px solid var(--onyx-line)' }}>
+            <div style={fieldLabel}>Access control</div>
+
+            {/* Explicit content */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={accessExplicit} onChange={e => setAccessExplicit(e.target.checked)} />
+              Allow explicit content
+            </label>
+
+            {/* Library access */}
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={accessAllLibraries} onChange={e => setAccessAllLibraries(e.target.checked)} />
+                Access all libraries
+              </label>
+              {!accessAllLibraries && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingLeft: 24, maxHeight: 120, overflowY: 'auto' }}>
+                  {libraries.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No libraries found.</div>}
+                  {libraries.map(lib => (
+                    <label key={lib.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--onyx-text-dim)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={librariesAccessible.includes(lib.id)} onChange={() => setLibrariesAccessible(prev => toggleInArray(prev, lib.id))} />
+                      {lib.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Tag access */}
+            <div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={accessAllTags} onChange={e => setAccessAllTags(e.target.checked)} />
+                Access all tags
+              </label>
+              {!accessAllTags && (
+                <div style={{ marginTop: 8, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {/* Inclusive vs exclusive */}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Pill active={!tagsExclusive} onClick={() => setTagsExclusive(false)}>only selected</Pill>
+                    <Pill active={tagsExclusive} onClick={() => setTagsExclusive(true)}>all except</Pill>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
+                    {availableTags.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No tags in the loaded library.</div>}
+                    {availableTags.map(tag => {
+                      const on = itemTagsSelected.includes(tag);
+                      return (
+                        <button key={tag} type="button" onClick={() => setItemTagsSelected(prev => toggleInArray(prev, tag))}
+                          style={{ padding: '4px 10px', borderRadius: 999, fontFamily: MONO, fontSize: 10.5, cursor: 'pointer',
+                            background: on ? 'var(--onyx-accent-dim)' : 'transparent',
+                            border: `1px solid ${on ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+                            color: on ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
+                          {tag}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Inline validation / server error */}
         {error && (
           <div style={{ fontSize: 12, color: '#e8716a', fontFamily: MONO }}>
@@ -308,11 +513,11 @@ function UserModal({
             disabled={pending}
             style={{
               padding: '8px 18px',
-              // Brass gradient matches the primary "Enter" button on the login screen.
-              background: 'linear-gradient(180deg, #e9bb5e, #d4a64a 55%, #a37d2e)',
-              border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)',
+              // Theme accent (follows the selected accent), not a hardcoded gold gradient.
+              background: 'var(--onyx-accent)',
+              border: '1px solid var(--onyx-accent-edge)',
               borderRadius: 7,
-              color: '#1a1306',
+              color: 'var(--onyx-bg)',
               fontFamily: MONO,
               fontSize: 11,
               letterSpacing: '0.07em',
@@ -358,6 +563,25 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [deletePending, setDeletePending] = useState(false);
+
+  // cluster H: self-service password change + read-only SSO status.
+  const [showChangePw, setShowChangePw] = useState(false);
+  const isGuest = (st.user?.type ?? '') === 'guest';
+  const [authSettings, setAuthSettings] = useState<AuthSettings | null>(null);
+  const oidcEnabled = authSettings?.authActiveAuthMethods?.includes('openid') ?? false;
+
+  // Library list + tags for the permissions editor (tags derived from the loaded
+  // library, mirroring FilterPopover; covers the active library's tags). Empty
+  // ids/tags are filtered out so React list keys stay unique.
+  const libraryOptions = st.libraries.filter(l => l.id).map(l => ({ id: l.id, name: l.name }));
+  const availableTags = [...new Set(st.library.flatMap(b => b.media.tags ?? []))].filter(Boolean).sort((a, b) => a.localeCompare(b));
+
+  // Admin-only: read whether OIDC/SSO is configured (read-only indicator).
+  useEffect(() => {
+    if (!isAdmin || !st.serverUrl) return;
+    getAuthSettings(st.serverUrl).then(setAuthSettings).catch(e => console.error('[AccountSection] getAuthSettings failed:', e));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch the full user list once on mount — only when the session is admin.
   useEffect(() => {
@@ -441,7 +665,8 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
     }
   }
 
-  /** POSTs a new user and inserts it into the sorted list. */
+  /** POSTs a new user and inserts it into the sorted list. (Permissions are left
+   *  at the server defaults on create; edit the user to refine access.) */
   async function handleCreate(username: string, password: string, type: 'user' | 'admin') {
     const created = await createUser(st.serverUrl, username, password, type);
     setUsers(prev =>
@@ -454,8 +679,8 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
     setShowAdd(false);
   }
 
-  /** PATCHes an existing user and replaces its cached row in-place. */
-  async function handleEdit(username: string, password: string, type: 'user' | 'admin') {
+  /** PATCHes an existing user (incl. permissions) and replaces its cached row. */
+  async function handleEdit(username: string, password: string, type: 'user' | 'admin', permissions: UserPermissions | null) {
     if (!editTarget) return;
     const updated = await updateUser(
       st.serverUrl,
@@ -464,9 +689,24 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
       // Empty string → null so the server keeps the existing password hash.
       password || null,
       type,
+      permissions,
     );
     setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
     setEditTarget(null);
+  }
+
+  /** Opens the edit modal, fetching the full user first so the permissions
+   *  object is available (the list endpoint may omit it). */
+  async function openEdit(u: AdminUser) {
+    try {
+      const full = await getUser(st.serverUrl, u.id);
+      setEditTarget(full);
+    } catch (e) {
+      // Fall back to the list row — the editor will skip the permissions block
+      // (it requires a permissions object) but username/type still work.
+      console.error('[AccountSection] getUser failed:', e);
+      setEditTarget(u);
+    }
   }
 
   /** DELETEs the targeted account and removes it from the cached list. */
@@ -533,6 +773,25 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
         </div>
       </div>
 
+      {/* ── Admin self-service: password change + read-only SSO status ── */}
+      {isAdmin && (
+        <>
+          <Row label="Password" hint="Change your own account password.">
+            <button
+              onClick={() => setShowChangePw(true)}
+              style={{ padding: '8px 16px', background: 'transparent', border: '1px solid var(--onyx-glass-edge)', borderRadius: 7, color: 'var(--onyx-text-dim)', fontFamily: MONO, fontSize: 11, letterSpacing: '0.07em', textTransform: 'uppercase' as const, cursor: 'pointer' }}
+            >
+              Change password
+            </button>
+          </Row>
+          <Row label="Single sign-on (SSO)" hint="OpenID Connect is enabled in this server's Audiobookshelf auth settings. SSO login from Skald is not yet available.">
+            <span style={{ fontFamily: MONO, fontSize: 11, color: oidcEnabled ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)' }}>
+              {oidcEnabled ? 'Enabled · OpenID' : 'Not configured'}
+            </span>
+          </Row>
+        </>
+      )}
+
       {/* ── Non-admin view: read-only account info ── */}
       {!isAdmin && (
         <>
@@ -565,23 +824,27 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
             <TypeBadge type={st.user?.type ?? 'user'} />
           </Row>
 
-          {/* Change password — not yet implemented; shown disabled for discoverability. */}
-          <Row label="Password" hint="Contact your server administrator to change your password.">
+          {/* Change password — self-service. Guests cannot (server returns 403). */}
+          <Row
+            label="Password"
+            hint={isGuest ? 'Guest accounts cannot change their password.' : 'Change your account password.'}
+          >
             <button
-              disabled
-              title="Not yet available"
+              onClick={() => setShowChangePw(true)}
+              disabled={isGuest}
+              title={isGuest ? 'Not available for guest accounts' : 'Change password'}
               style={{
                 padding: '8px 16px',
                 background: 'transparent',
                 border: '1px solid var(--onyx-glass-edge)',
                 borderRadius: 7,
-                color: 'var(--onyx-text-mute)',
+                color: isGuest ? 'var(--onyx-text-mute)' : 'var(--onyx-text-dim)',
                 fontFamily: MONO,
                 fontSize: 11,
                 letterSpacing: '0.07em',
                 textTransform: 'uppercase' as const,
-                cursor: 'default',
-                opacity: 0.45,
+                cursor: isGuest ? 'default' : 'pointer',
+                opacity: isGuest ? 0.45 : 1,
               }}
             >
               Change password
@@ -785,7 +1048,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
                       {!isSelf && (
                         <>
                           <RowButton
-                            onClick={() => setEditTarget(u)}
+                            onClick={() => openEdit(u)}
                             title={`Edit ${u.username}`}
                           >
                             {PencilIcon}
@@ -853,9 +1116,17 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
           initialUsername={editTarget.username}
           initialType={editTarget.type}
           isEdit
+          editUser={editTarget}
+          libraries={libraryOptions}
+          availableTags={availableTags}
           onSubmit={handleEdit}
           onCancel={() => setEditTarget(null)}
         />
+      )}
+
+      {/* Change-password modal (self-service) */}
+      {showChangePw && (
+        <ChangePasswordModal serverUrl={st.serverUrl} onClose={() => setShowChangePw(false)} />
       )}
 
       {/* Delete confirmation — ConfirmDialog is already styled to match the Glass aesthetic */}

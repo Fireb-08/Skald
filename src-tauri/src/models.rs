@@ -377,6 +377,53 @@ pub struct AdminUser {
     pub is_active: Option<bool>,
     /// Library-item ID the user is currently reading, if any.
     pub current_book_id: Option<String>,
+    // ── Access control (cluster H) ───────────────────────────────────────────
+    /// Full permissions object. Present on GET /api/users/:id; may be absent on
+    /// the list endpoint depending on ABS version.
+    #[serde(default)]
+    pub permissions: Option<UserPermissions>,
+    /// Libraries this user may access. ABS serializes this as a TOP-LEVEL user key
+    /// (not inside `permissions`); honored only when `accessAllLibraries` is false.
+    #[serde(default)]
+    pub libraries_accessible: Vec<String>,
+    /// Item tags selected for tag-based access. Also TOP-LEVEL in the user JSON;
+    /// honored only when `accessAllTags` is false.
+    #[serde(default)]
+    pub item_tags_selected: Vec<String>,
+}
+
+/// A user's permissions object — server/models/User.js `getDefaultPermissionsForUserType`.
+/// NOTE: in the API's user JSON, `librariesAccessible`/`itemTagsSelected` are split
+/// out to TOP-LEVEL keys on the user (see `AdminUser`), so they normally arrive
+/// empty here. They are kept on this struct so the same object can be sent back
+/// nested on `PATCH /api/users/:id` — the update handler accepts them either way.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPermissions {
+    #[serde(default)] pub download: bool,
+    #[serde(default)] pub update: bool,
+    #[serde(default)] pub delete: bool,
+    #[serde(default)] pub upload: bool,
+    #[serde(default)] pub create_ereader: bool,
+    #[serde(default)] pub access_all_libraries: bool,
+    #[serde(default)] pub access_all_tags: bool,
+    #[serde(default)] pub access_explicit_content: bool,
+    /// false = inclusive (only the selected tags); true = exclusive (all but them).
+    #[serde(default)] pub selected_tags_not_accessible: bool,
+    #[serde(default)] pub libraries_accessible: Vec<String>,
+    #[serde(default)] pub item_tags_selected: Vec<String>,
+}
+
+/// Minimal view of GET /api/auth-settings (admin-only). Only the fields the
+/// read-only "SSO configured" indicator needs are modelled; OIDC is enabled iff
+/// `auth_active_auth_methods` contains "openid".
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthSettings {
+    #[serde(default)]
+    pub auth_active_auth_methods: Vec<String>,
+    #[serde(default)]
+    pub auth_open_id_issuer_url: Option<String>,
 }
 
 /// Response from POST /api/items/{id}/play — the active playback session.

@@ -589,6 +589,24 @@ export interface Playlist {
 // Mirror of models::AdminUser in src-tauri/src/models.rs.
 // Used by the AccountSection admin view; never used in the auth flow.
 
+/** A user's permissions object (cluster H). ABS splits librariesAccessible /
+ *  itemTagsSelected out to top-level user keys in its JSON, so they normally
+ *  arrive empty here; they may be sent back nested on update. */
+export interface UserPermissions {
+  download: boolean;
+  update: boolean;
+  delete: boolean;
+  upload: boolean;
+  createEreader: boolean;
+  accessAllLibraries: boolean;
+  accessAllTags: boolean;
+  accessExplicitContent: boolean;
+  /** false = inclusive (only selected tags); true = exclusive (all but them). */
+  selectedTagsNotAccessible: boolean;
+  librariesAccessible: string[];
+  itemTagsSelected: string[];
+}
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -600,6 +618,17 @@ export interface AdminUser {
   createdAt: number | null;
   isActive: boolean | null;
   currentBookId: string | null;
+  // ── Access control (cluster H); present on getUser, may be absent in the list.
+  permissions?: UserPermissions | null;
+  librariesAccessible?: string[];
+  itemTagsSelected?: string[];
+}
+
+/** Minimal GET /api/auth-settings view (admin-only). OIDC is enabled iff
+ *  authActiveAuthMethods includes "openid". */
+export interface AuthSettings {
+  authActiveAuthMethods: string[];
+  authOpenIDIssuerURL?: string | null;
 }
 
 export function deleteItem(serverUrl: string, itemId: string): Promise<void> {
@@ -749,20 +778,38 @@ export function createUser(
 }
 
 /** PATCH /api/users/{id} — partially updates a user account.
- *  Pass `null` for any field that should remain unchanged on the server. */
+ *  Pass `null` for any field that should remain unchanged on the server.
+ *  `permissions` (cluster H) carries librariesAccessible/itemTagsSelected nested. */
 export function updateUser(
   serverUrl: string,
   userId: string,
   username: string | null,
   password: string | null,
   userType: string | null,
+  permissions: UserPermissions | null = null,
 ): Promise<AdminUser> {
-  return invoke('update_user', { serverUrl, userId, username, password, userType });
+  return invoke('update_user', { serverUrl, userId, username, password, userType, permissions });
 }
 
 /** DELETE /api/users/{id} — permanently removes a user account. */
 export function deleteUser(serverUrl: string, userId: string): Promise<void> {
   return invoke('delete_user', { serverUrl, userId });
+}
+
+/** GET /api/users/{id} — fetch one user with the full permissions object. */
+export function getUser(serverUrl: string, userId: string): Promise<AdminUser> {
+  return invoke('get_user', { serverUrl, userId });
+}
+
+/** PATCH /api/me/password — self-service password change. Guests are rejected
+ *  server-side (403). */
+export function changePassword(serverUrl: string, current: string, newPassword: string): Promise<void> {
+  return invoke('change_password', { serverUrl, current, newPassword });
+}
+
+/** GET /api/auth-settings — admin-only auth config (read-only SSO indicator). */
+export function getAuthSettings(serverUrl: string): Promise<AuthSettings> {
+  return invoke('get_auth_settings', { serverUrl });
 }
 
 // ── Listening sessions types (Settings → Playback → Sessions) ─────────────

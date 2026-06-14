@@ -1188,7 +1188,11 @@ pub async fn update_user(
     username: Option<String>,
     password: Option<String>,
     user_type: Option<String>,
+    // cluster H: optional permissions blob (carries librariesAccessible /
+    // itemTagsSelected nested); None leaves access control untouched.
+    permissions: Option<serde_json::Value>,
 ) -> Result<models::AdminUser, String> {
+    println!("[Auth] update_user id={user_id} type={user_type:?} permissions={}", permissions.is_some());
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     // Treat an empty password string the same as None so the server keeps the
@@ -1201,6 +1205,7 @@ pub async fn update_user(
             username.as_deref(),
             pw,
             user_type.as_deref(),
+            permissions,
         )
         .await
 }
@@ -1216,6 +1221,37 @@ pub async fn delete_user(server_url: String, user_id: String) -> Result<(), Stri
         .with_token(token)
         .delete_user(&user_id)
         .await
+}
+
+// ── Auth & user access (cluster H) ───────────────────────────────────────────
+// `[Auth]` diagnostics retained through the roadmap, then stripped (per CLAUDE.md).
+
+/// GET /api/users/:id — fetch one user with the full permissions object.
+#[tauri::command]
+pub async fn get_user(server_url: String, user_id: String) -> Result<models::AdminUser, String> {
+    println!("[Auth] get_user id={user_id}");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).get_user(&user_id).await
+}
+
+/// PATCH /api/me/password — self-service password change ({ password, newPassword }).
+#[tauri::command]
+pub async fn change_password(server_url: String, current: String, new_password: String) -> Result<(), String> {
+    println!("[Auth] change_password (current len={}, new len={})", current.len(), new_password.len());
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    let result = AbsClient::new(server_url).with_token(token).change_password(&current, &new_password).await;
+    if let Err(e) = &result {
+        println!("[Auth] change_password error: {e}");
+    }
+    result
+}
+
+/// GET /api/auth-settings — admin-only; read-only check of whether OIDC is enabled.
+#[tauri::command]
+pub async fn get_auth_settings(server_url: String) -> Result<models::AuthSettings, String> {
+    println!("[Auth] get_auth_settings");
+    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
+    AbsClient::new(server_url).with_token(token).get_auth_settings().await
 }
 
 #[tauri::command]

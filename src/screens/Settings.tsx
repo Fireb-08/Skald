@@ -32,22 +32,25 @@ type SectionId =
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
 
+// Sorted alphabetically by label. Admin-only entries (Backups, Logs,
+// Notifications, Scheduled Tasks, Sharing & RSS) are filtered out for non-admins
+// at render time but keep their alphabetical slot when shown.
 const NAV: NavSection[] = [
+  { id: 'about',           label: 'About',           icon: 'dot'        },
   { id: 'account',         label: 'Account',         icon: 'home'       },
-  { id: 'server',          label: 'Server',          icon: 'monitor'    },
-  { id: 'notifications',   label: 'Notifications',   icon: 'airplay'    },
+  { id: 'appearance',      label: 'Appearance',      icon: 'speaker'    },
+  { id: 'audio',           label: 'Audio',           icon: 'headphones' },
   { id: 'backups',         label: 'Backups',         icon: 'bookmark'   },
-  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep'      },
+  { id: 'downloads',       label: 'Downloads',       icon: 'bookmark'   },
+  { id: 'integrations',    label: 'Integrations',    icon: 'airplay'    },
+  { id: 'keyboard',        label: 'Keyboard',        icon: 'kbd'        },
+  { id: 'library',         label: 'Library',         icon: 'grid'       },
   { id: 'logs',            label: 'Logs',            icon: 'list'       },
+  { id: 'notifications',   label: 'Notifications',   icon: 'airplay'    },
+  { id: 'playback',        label: 'Playback',        icon: 'play'       },
+  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep'      },
+  { id: 'server',          label: 'Server',          icon: 'monitor'    },
   { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay'    },
-  { id: 'playback',   label: 'Playback',   icon: 'play'       },
-  { id: 'audio',      label: 'Audio',      icon: 'headphones' },
-  { id: 'library',    label: 'Library',    icon: 'grid'       },
-  { id: 'downloads',  label: 'Downloads',  icon: 'bookmark'   },
-  { id: 'appearance', label: 'Appearance', icon: 'speaker'    },
-  { id: 'keyboard',   label: 'Keyboard',   icon: 'kbd'        },
-  { id: 'integrations', label: 'Integrations', icon: 'airplay'  },
-  { id: 'about',        label: 'About',        icon: 'dot'      },
 ];
 
 export default function Settings({ st, onLogout }: SettingsProps) {

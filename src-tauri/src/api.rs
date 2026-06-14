@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::models::{AdminUser, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, CustomMetadataProvider, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MediaItemShare, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, RssFeed, RssFeedsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
+use crate::models::{AdminUser, AuthSettings, BackupsResponse, Bookmark, Collection, CollectionsResponse, CreateLibraryPayload, CustomMetadataProvider, FsDirectory, Library, LibraryItem, LibrarySeries, LibraryStats, ListeningSession, ListeningSessionsResponse, ListeningStats, LoggerData, MediaItemShare, MeResponse, NotificationSettings, NotificationsResponse, PlaySession, Playlist, PlaylistItemInput, PlaylistsResponse, RssFeed, RssFeedsResponse, ServerSettings, TasksResponse, UpdateLibraryPayload, User, UserStats};
 
 #[derive(Clone)]
 pub struct AbsClient {
@@ -1665,12 +1665,16 @@ impl AbsClient {
         username: Option<&str>,
         password: Option<&str>,
         user_type: Option<&str>,
+        permissions: Option<serde_json::Value>,
     ) -> Result<AdminUser, String> {
         // Build a sparse JSON body with only the fields that were provided.
         let mut body = serde_json::Map::new();
         if let Some(u) = username  { body.insert("username".into(), u.into()); }
         if let Some(p) = password  { body.insert("password".into(), p.into()); }
         if let Some(t) = user_type { body.insert("type".into(), t.into()); }
+        // The permissions blob carries librariesAccessible/itemTagsSelected nested;
+        // the ABS PATCH handler extracts them either nested or top-level.
+        if let Some(p) = permissions { body.insert("permissions".into(), p); }
 
         let resp = self
             .http
@@ -1682,10 +1686,17 @@ impl AbsClient {
             .map_err(|e| e.to_string())?;
 
         if !resp.status().is_success() {
-            return Err(format!("update_user failed: HTTP {}", resp.status()));
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("update_user failed: HTTP {status} — {body}"));
         }
 
-        resp.json().await.map_err(|e| e.to_string())
+        // PATCH /api/users/:id responds with an envelope `{ success, user }` —
+        // unlike findOne, which returns the user directly. Unwrap it.
+        #[derive(serde::Deserialize)]
+        struct UpdateUserResponse { user: AdminUser }
+        let body: UpdateUserResponse = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.user)
     }
 
     /// GET /api/users/online → openSessions — extracts currently active playback sessions.
@@ -1762,6 +1773,66 @@ impl AbsClient {
         }
 
         Ok(())
+    }
+
+    // ── Auth & user access (cluster H) ───────────────────────────────────────
+
+    /// GET /api/users/:id — fetch one user with the full `permissions` object plus
+    /// the top-level `librariesAccessible`/`itemTagsSelected`. Admin-gated. The
+    /// list endpoint may omit permissions, so the editor fetches the full user.
+    pub async fn get_user(&self, user_id: &str) -> Result<AdminUser, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/users/{user_id}", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_user failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
+    /// PATCH /api/me/password — self-service password change. Body verified against
+    /// MeController.updatePassword: `{ password, newPassword }`. Returns 200 with no
+    /// body; guests get 403, bad input 400 (with the server's message surfaced).
+    pub async fn change_password(&self, current: &str, new_password: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .patch(format!("{}/api/me/password", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({ "password": current, "newPassword": new_password }))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("change_password failed: HTTP {status} — {body}"));
+        }
+        Ok(())
+    }
+
+    /// GET /api/auth-settings — admin-only auth configuration. Used read-only to
+    /// tell whether OIDC/SSO is enabled (`auth_active_auth_methods` contains "openid").
+    pub async fn get_auth_settings(&self) -> Result<AuthSettings, String> {
+        let resp = self
+            .http
+            .get(format!("{}/api/auth-settings", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !resp.status().is_success() {
+            return Err(format!("get_auth_settings failed: HTTP {}", resp.status()));
+        }
+
+        resp.json().await.map_err(|e| e.to_string())
     }
 
     // ── Playlist endpoints ───────────────────────────────────────────────────
