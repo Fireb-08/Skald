@@ -610,6 +610,33 @@ export default function Player({ st }: PlayerProps) {
   else if (displayTitle.length > 28) titleFontSize = isPodcast ? 26 : 38;
   if (containerHeight < 620) titleFontSize = Math.min(titleFontSize, isPodcast ? 24 : 34);
 
+  // ── Bookmarks timeline-rail helpers ──
+  // "Jun 14, 2026 · 5:36 PM" style stamp for local entries.
+  const fmtStamp = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  };
+  // Chapter ({ n, t }) at an absolute position within a given chapter set.
+  // Saved bookmarks belong to the focused book (displayChapters); local stop
+  // points were recorded against the playing book (chapters).
+  const chapterAtPos = (pos: number, chs: typeof displayChapters) => (chs.length ? chapterAt(chs, pos).chapter : null);
+  // One row of the timeline rail: a connecting line + dot, then time/label/meta.
+  const railRow = (opts: { keyId: string; time: string; label: string; italic: boolean; meta?: string; accent: boolean; isLast: boolean; onClick: () => void }) => (
+    <button key={opts.keyId} onClick={opts.onClick} style={{ display: 'flex', gap: 14, width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', padding: 0 }}>
+      {/* Rail: vertical connector (omitted on the last row) + the dot */}
+      <div style={{ position: 'relative', width: 14, flexShrink: 0, alignSelf: 'stretch', display: 'flex', justifyContent: 'center' }}>
+        {!opts.isLast && <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: 14, bottom: -2, width: 1, background: 'var(--onyx-line)' }} />}
+        <div style={{ position: 'absolute', top: 4, width: 9, height: 9, borderRadius: '50%', background: opts.accent ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', boxShadow: opts.accent ? '0 0 8px var(--onyx-accent)' : 'none' }} />
+      </div>
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0, paddingBottom: 18 }}>
+        <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)' }}>{opts.time}</div>
+        <div style={{ fontFamily: SERIF, fontStyle: opts.italic ? 'italic' : 'normal', fontSize: 14, color: 'var(--onyx-text)', lineHeight: 1.3, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis' }}>{opts.label}</div>
+        {opts.meta && <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em', marginTop: 5 }}>{opts.meta}</div>}
+      </div>
+    </button>
+  );
+
   return (
     <div ref={containerRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '12px 32px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden', position: 'relative' }}>
 
@@ -1195,49 +1222,50 @@ export default function Player({ st }: PlayerProps) {
               <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
 
                 {bookmarkTab === 'bookmarks' ? (
-                  // ── Saved bookmarks (server) ───────────────────────────────
+                  // ── Saved bookmarks (server) — timeline rail; label = bookmark
+                  //    title, meta = chapter. Gold dot when labelled, muted if not. ──
                   playerBookmarks.length === 0 ? (
                     <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
                       No bookmarks yet
                     </div>
-                  ) : playerBookmarks.map((bm, i) => (
-                    <button key={`${bm.time}-${i}`} onClick={() => seekAudio(bm.time).catch(console.error)} style={{ padding: '11px 0', background: 'none', border: 'none', borderBottom: i < playerBookmarks.length - 1 ? '1px solid var(--onyx-line)' : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', width: '100%' }}>
-                      <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)', marginBottom: 4 }}>{fmtTime(bm.time)}</div>
-                      <div style={{ fontSize: 13, color: 'var(--onyx-text)', lineHeight: 1.3 }}>{bm.title}</div>
-                    </button>
-                  ))
+                  ) : playerBookmarks.map((bm, i) => {
+                    const ch = chapterAtPos(bm.time, displayChapters);
+                    const meta = ch ? `Ch. ${ch.n}${ch.t ? ` · ${ch.t}` : ''}` : undefined;
+                    return railRow({
+                      keyId: `${bm.time}-${i}`,
+                      time: fmtTime(bm.time),
+                      label: bm.title || 'Untitled',
+                      italic: true,
+                      meta,
+                      accent: !!bm.title,
+                      isLast: i === playerBookmarks.length - 1,
+                      onClick: () => seekAudio(bm.time).catch(console.error),
+                    });
+                  })
                 ) : (
-                  // ── Local Play — stop points recorded independently of the server ──
+                  // ── Local Play — stop points; label = the chapter the stamp was
+                  //    at, meta = when it was recorded. ──
                   stopPoints.length === 0 ? (
                     <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em' }}>
                       No local history yet
                     </div>
-                  ) : stopPoints.map((point, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        // Seek to the recorded position — same pattern as chapter row click.
+                  ) : stopPoints.map((point, i) => {
+                    const ch = chapterAtPos(point.position, chapters);
+                    const label = ch ? (ch.t || `Chapter ${ch.n}`) : 'Unknown chapter';
+                    return railRow({
+                      keyId: `${point.recordedAt}-${i}`,
+                      time: fmtTime(point.position),
+                      label,
+                      italic: false,
+                      meta: fmtStamp(point.recordedAt),
+                      accent: !!ch,
+                      isLast: i === stopPoints.length - 1,
+                      onClick: () => {
                         seekAudio(point.position).catch(console.error);
                         st.setPosition(point.position);
-                      }}
-                      style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        width: '100%', padding: '8px 0', background: 'none', border: 'none',
-                        borderBottom: i < stopPoints.length - 1 ? '1px solid var(--onyx-line)' : 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {/* Date and time of the recorded stop on the left */}
-                      <span style={{ fontSize: 11, color: 'var(--onyx-text-mute)', fontFamily: MONO }}>
-                        {new Date(point.recordedAt).toLocaleDateString()}{' '}
-                        {new Date(point.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {/* Playback position in accent mono on the right */}
-                      <span style={{ fontSize: 12, color: 'var(--onyx-accent)', fontFamily: MONO }}>
-                        {fmtTime(point.position)}
-                      </span>
-                    </button>
-                  ))
+                      },
+                    });
+                  })
                 )}
               </div>
             </Glass>
