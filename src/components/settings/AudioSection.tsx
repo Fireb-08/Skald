@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { getAudioDevices, setAudioDevice as setAudioDeviceCmd } from '../../api/abs';
 import type { AudioDevice } from '../../api/abs';
 import {
@@ -7,7 +7,7 @@ import {
 } from '../../api/eq';
 import type { EqSettings, EqPreset } from '../../api/eq';
 import Icon from '../Icon';
-import { SectionHead, Row, Toggle, MONO } from './shared';
+import { SectionHead, Row, Toggle, MONO, Panel, Seg, eyebrowStyle } from './shared';
 import Dropdown from './Dropdown';
 
 function formatHz(hz: number): string {
@@ -19,41 +19,6 @@ function formatGain(g: number): string {
   if (g === 0) return '0';
   const r = Math.round(g * 10) / 10;
   return r > 0 ? `+${r}` : `${r}`;
-}
-
-// ── Shared visual tokens (mirrors the Appearance panel facelift) ──────────────
-const DIM_GOLD = 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.6)';
-const panelStyle: CSSProperties = {
-  background: 'rgba(255,255,255,0.02)',
-  border: '1px solid var(--onyx-glass-edge)',
-  borderRadius: 14,
-  overflow: 'hidden',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-  marginTop: 24,
-};
-const panelHeadStyle: CSSProperties = {
-  padding: '14px 20px', borderBottom: '1px solid var(--onyx-line)',
-  fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: DIM_GOLD,
-};
-const eyebrowStyle: CSSProperties = {
-  fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: DIM_GOLD,
-};
-
-/** Segmented control button — rectangular uppercase pill (accent when active). */
-function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '6px 11px', borderRadius: 6, fontFamily: MONO, fontSize: 10,
-        letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap', cursor: 'pointer',
-        background: active ? 'var(--onyx-accent-dim)' : 'transparent',
-        border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
-        color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
-        fontWeight: active ? 600 : 400,
-      }}
-    >{children}</button>
-  );
 }
 
 // ── EQ response-curve graph ───────────────────────────────────────────────────
@@ -242,9 +207,7 @@ export default function AudioSection() {
       </Row>
 
       {/* ── Signal chain panel ── */}
-      <div style={panelStyle}>
-        <div style={panelHeadStyle}>Signal chain</div>
-        <div style={{ padding: '2px 20px 18px' }}>
+      <Panel label="Signal chain" bodyStyle={{ padding: '2px 20px 18px' }}>
           {/* Equalizer master toggle */}
           <Row label="Equalizer" hint="10-band DSP equalizer powered by LibVLC. Changes apply live.">
             {eqSettings !== null && <Toggle on={eqEnabled} onChange={handleToggleEq} />}
@@ -356,8 +319,7 @@ export default function AudioSection() {
               </div>
             )}
           </div>
-        </div>
-      </div>
+    </Panel>
     </div>
   );
 }

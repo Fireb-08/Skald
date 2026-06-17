@@ -14,7 +14,6 @@ import {
   AppearanceSection,
   KeyboardSection,
   AboutSection,
-  IntegrationsSection,
   NotificationsSection,
   BackupSection,
   ScheduledTasksSection,
@@ -28,7 +27,7 @@ export interface SettingsProps { st: OnyxState; onLogout: () => void; }
 
 type SectionId =
   | 'account' | 'server' | 'notifications' | 'backups' | 'scheduled-tasks' | 'logs' | 'sharing' | 'playback' | 'audio'
-  | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about' | 'integrations';
+  | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about';
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
 
@@ -42,7 +41,6 @@ const NAV: NavSection[] = [
   { id: 'audio',           label: 'Audio',           icon: 'headphones' },
   { id: 'backups',         label: 'Backups',         icon: 'bookmark'   },
   { id: 'downloads',       label: 'Downloads',       icon: 'bookmark'   },
-  { id: 'integrations',    label: 'Integrations',    icon: 'airplay'    },
   { id: 'keyboard',        label: 'Keyboard',        icon: 'kbd'        },
   { id: 'library',         label: 'Libraries',       icon: 'grid'       },
   { id: 'logs',            label: 'Logs',            icon: 'list'       },
@@ -130,7 +128,6 @@ export default function Settings({ st, onLogout }: SettingsProps) {
           {section === 'downloads'  && <DownloadsSection st={st} />}
           {section === 'appearance' && <AppearanceSection st={st} />}
           {section === 'keyboard'      && <KeyboardSection />}
-          {section === 'integrations' && <IntegrationsSection st={st} />}
           {section === 'about'         && <AboutSection />}
         </Glass>
       </div>

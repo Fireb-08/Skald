@@ -11,8 +11,6 @@ export { default as AppearanceSection } from './AppearanceSection';
 export type { AppearanceSectionProps } from './AppearanceSection';
 export { default as KeyboardSection } from './KeyboardSection';
 export { default as AboutSection } from './AboutSection';
-export { default as IntegrationsSection } from './IntegrationsSection';
-export type { IntegrationsSectionProps } from './IntegrationsSection';
 export { default as SyncSection } from './SyncSection';
 export type { SyncSectionProps } from './SyncSection';
 export { default as LibrariesSection } from './LibrariesSection';

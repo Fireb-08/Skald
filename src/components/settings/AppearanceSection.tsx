@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useRef, useEffect, useState, type CSSProperties } from 'react';
 import type { OnyxState } from '../../state/onyx';
-import { SectionHead, Row, Toggle, MONO } from './shared';
+import { SectionHead, Row, Toggle, Panel, Seg, SegGroup, eyebrowStyle } from './shared';
 
 export interface AppearanceSectionProps { st: OnyxState; }
 
@@ -20,51 +20,8 @@ const SWATCHES = ['#d4a64a', '#c96442', '#7aa86a', '#5a8fc4', '#a86a8e', '#9b7fd
 // settings pane scrolls). Above it they sit side by side as in the reference.
 const STACK_BREAKPOINT = 840;
 
-// Dim-gold eyebrow used for panel headers and sub-headers.
-const DIM_GOLD = 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.6)';
-
-const panelStyle: CSSProperties = {
-  background: 'rgba(255,255,255,0.02)',
-  border: '1px solid var(--onyx-glass-edge)',
-  borderRadius: 14,
-  overflow: 'hidden',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-  boxSizing: 'border-box',
-};
-const panelHeadStyle: CSSProperties = {
-  padding: '14px 20px',
-  borderBottom: '1px solid var(--onyx-line)',
-  fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase',
-  color: DIM_GOLD,
-};
-const panelBodyStyle: CSSProperties = { padding: '2px 20px 8px' };
-const subEyebrow: CSSProperties = {
-  padding: '16px 0 8px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em',
-  textTransform: 'uppercase', color: DIM_GOLD,
-};
-
-/** Segmented control button — the rectangular, uppercase pills used throughout
- *  the Appearance panels (active = accent tint; inactive = subtle outline). */
-function Seg({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '6px 11px', borderRadius: 6, fontFamily: MONO, fontSize: 10,
-        letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap', cursor: 'pointer',
-        background: active ? 'var(--onyx-accent-dim)' : 'transparent',
-        border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
-        color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
-        fontWeight: active ? 600 : 400,
-      }}
-    >{children}</button>
-  );
-}
-
-// Right-aligned, wrapping group wrapper for a row's segmented buttons.
-function SegGroup({ children }: { children: ReactNode }) {
-  return <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{children}</div>;
-}
+// "Shelf tabs" sub-header inside the Shelf panel — eyebrow styling, block layout.
+const subEyebrow: CSSProperties = { ...eyebrowStyle, padding: '16px 0 8px' };
 
 export default function AppearanceSection({ st }: AppearanceSectionProps) {
   const currentHex = (st.accentColor || '').toLowerCase();
@@ -85,9 +42,7 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
 
   // ── Theme panel ────────────────────────────────────────────────────────────
   const themePanel = (
-    <div style={{ ...panelStyle, width: stacked ? '100%' : 380, flexShrink: 0 }}>
-      <div style={panelHeadStyle}>Theme</div>
-      <div style={panelBodyStyle}>
+    <Panel label="Theme" style={{ marginTop: 0, width: stacked ? '100%' : 380, flexShrink: 0 }}>
         <Row label="Theme">
           <SegGroup>
             {[
@@ -134,15 +89,12 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
         <Row label="Translucent surfaces" hint="Glass effect on cards. Disable for performance on older hardware.">
           <Toggle on={st.translucent} onChange={st.setTranslucent} />
         </Row>
-      </div>
-    </div>
+    </Panel>
   );
 
   // ── Shelf panel ────────────────────────────────────────────────────────────
   const shelfPanel = (
-    <div style={{ ...panelStyle, width: stacked ? '100%' : 'auto', flex: stacked ? '0 0 auto' : 1, minWidth: 0 }}>
-      <div style={panelHeadStyle}>Shelf</div>
-      <div style={panelBodyStyle}>
+    <Panel label="Shelf" style={{ marginTop: 0, width: stacked ? '100%' : 'auto', flex: stacked ? '0 0 auto' : 1, minWidth: 0 }}>
         <Row label="Default sort">
           <SegGroup>
             {SORTS.map(s => (
@@ -197,8 +149,7 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
         <Row label="Playlists tab" hint="Show the Playlists tab on the library shelf.">
           <Toggle on={!!st.optionalTabs.playlists} onChange={v => st.setOptionalTab('playlists', v)} />
         </Row>
-      </div>
-    </div>
+    </Panel>
   );
 
   return (

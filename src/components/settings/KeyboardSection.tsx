@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { registerShortcuts } from '../../api/abs';
 import type { ShortcutBinding } from '../../api/abs';
 import { DEFAULT_SHORTCUTS } from '../../hooks/useGlobalShortcuts';
-import { SectionHead, MONO } from './shared';
+import { SectionHead, MONO, SERIF, Panel } from './shared';
 
 const ACTION_LABELS: Record<string, string> = {
   play_pause:   'Play / Pause',
@@ -44,6 +44,25 @@ function buildShortcutString(e: KeyboardEvent): string | null {
   return parts.join('+');
 }
 
+// Display-only key glyphs (the stored binding string keeps the textual names).
+const KEY_GLYPHS: Record<string, string> = { Left: '←', Right: '→', Up: '↑', Down: '↓' };
+const displayKey = (part: string): string => KEY_GLYPHS[part] ?? part;
+
+// Base keycap; modifiers render neutral, the final (main) key renders accent gold.
+const keycapBase: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  minWidth: 24, padding: '4px 9px', borderRadius: 5, lineHeight: 1,
+  fontFamily: MONO, fontSize: 11, userSelect: 'none',
+};
+const modCap: React.CSSProperties = {
+  ...keycapBase, background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
+  boxShadow: '0 1px 0 var(--onyx-glass-edge)', color: 'var(--onyx-text-dim)',
+};
+const mainCap: React.CSSProperties = {
+  ...keycapBase, background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)',
+  boxShadow: '0 1px 0 rgba(0,0,0,0.3)', color: 'var(--onyx-accent)',
+};
+
 function ShortcutChord({ shortcut, active }: { shortcut: string; active: boolean }) {
   if (active) {
     return (
@@ -54,24 +73,16 @@ function ShortcutChord({ shortcut, active }: { shortcut: string; active: boolean
   }
   const parts = shortcut.split('+');
   return (
-    <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
-      {parts.map((p, i) => (
-        <kbd key={i} style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          padding: '3px 7px',
-          borderRadius: 5,
-          background: 'var(--onyx-glass)',
-          border: '1px solid var(--onyx-glass-edge)',
-          boxShadow: '0 1px 0 var(--onyx-glass-edge)',
-          fontFamily: MONO,
-          fontSize: 11,
-          color: 'var(--onyx-text)',
-          cursor: 'pointer',
-          userSelect: 'none' as const,
-        }}>
-          {p}
-        </kbd>
-      ))}
+    <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+      {parts.map((p, i) => {
+        const isLast = i === parts.length - 1;
+        return (
+          <span key={i} style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            {i > 0 && <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)' }}>+</span>}
+            <kbd style={isLast ? mainCap : modCap}>{displayKey(p)}</kbd>
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -119,57 +130,58 @@ export default function KeyboardSection() {
     <div>
       <SectionHead title="Keyboard" subtitle="Global shortcuts — work even when Skald is in the background." />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Panel label="Global shortcuts">
         {bindings.map(b => {
           const isListening = listeningFor === b.action;
           return (
             <div
               key={b.action}
+              onClick={() => setListeningFor(isListening ? null : b.action)}
+              title={isListening ? 'Press Escape to cancel' : 'Click to remap'}
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '12px 0',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+                cursor: 'pointer', transition: 'background 0.1s',
                 borderBottom: '1px solid var(--onyx-line)',
-                background: isListening ? 'var(--onyx-accent-dim)' : 'transparent',
-                borderRadius: isListening ? 6 : 0,
-                paddingLeft: isListening ? 10 : 0,
-                paddingRight: isListening ? 10 : 0,
-                transition: 'background 0.1s',
+                // When listening, the accent highlight extends slightly into the panel
+                // padding (negative margin offsets the extra padding so content stays put).
+                ...(isListening
+                  ? { background: 'var(--onyx-accent-dim)', borderRadius: 8, borderBottomColor: 'transparent', padding: '14px 12px', margin: '0 -12px' }
+                  : { padding: '14px 2px' }),
               }}
             >
-              <div style={{ fontSize: 13.5, color: 'var(--onyx-text)', fontWeight: 500 }}>
+              <span style={{ fontFamily: SERIF, fontSize: 15, color: 'var(--onyx-text)' }}>
                 {ACTION_LABELS[b.action] ?? b.action}
-              </div>
-              <button
-                onClick={() => setListeningFor(isListening ? null : b.action)}
-                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                title={isListening ? 'Press Escape to cancel' : 'Click to remap'}
-              >
-                <ShortcutChord shortcut={b.shortcut} active={isListening} />
-              </button>
+              </span>
+              <ShortcutChord shortcut={b.shortcut} active={isListening} />
             </div>
           );
         })}
-      </div>
 
-      <div style={{ marginTop: 28, display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          onClick={resetDefaults}
-          style={{
-            padding: '7px 16px',
-            background: 'transparent',
-            border: '1px solid var(--onyx-glass-edge)',
-            borderRadius: 7,
-            color: 'var(--onyx-text-dim)',
-            cursor: 'pointer',
-            fontFamily: MONO,
-            fontSize: 11,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase' as const,
-          }}
-        >
-          Reset to defaults
-        </button>
-      </div>
+        {/* Footer: system-wide note + reset */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '14px 2px 6px' }}>
+          <span style={{ fontSize: 12, color: 'var(--onyx-text-mute)', lineHeight: 1.4 }}>
+            Shortcuts are registered system-wide and may conflict with other apps.
+          </span>
+          <button
+            onClick={resetDefaults}
+            style={{
+              flexShrink: 0,
+              padding: '7px 15px',
+              background: 'transparent',
+              border: '1px solid var(--onyx-glass-edge)',
+              borderRadius: 7,
+              color: 'var(--onyx-text-dim)',
+              cursor: 'pointer',
+              fontFamily: MONO,
+              fontSize: 10,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            Reset to defaults
+          </button>
+        </div>
+      </Panel>
     </div>
   );
 }

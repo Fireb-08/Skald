@@ -110,8 +110,7 @@ export default function CronEditor({ value, onChange }: CronEditorProps) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         {/* Frequency */}
         <select
           value={state.mode}
@@ -192,12 +191,6 @@ export default function CronEditor({ value, onChange }: CronEditorProps) {
             style={{ ...controlStyle, width: 150, cursor: 'text', textAlign: 'right' }}
           />
         )}
-      </div>
-
-      {/* Transparency: show the generated cron so power users can see the result. */}
-      <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)' }}>
-        {buildCron(state) || '—'}
-      </span>
     </div>
   );
 }

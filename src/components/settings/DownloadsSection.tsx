@@ -7,7 +7,28 @@ import {
 import type { DownloadRecord } from '../../api/abs';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import Cover from '../Cover';
-import { SectionHead, Row, MONO } from './shared';
+import { SectionHead, Row, MONO, SERIF, Panel } from './shared';
+
+// Subtle metadata chip (e.g. size / relative date on a download row).
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{
+      fontFamily: MONO, fontSize: 10, letterSpacing: '0.03em', color: 'var(--onyx-text-dim)',
+      background: 'rgba(255,255,255,0.04)', border: '1px solid var(--onyx-glass-edge)',
+      borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap',
+    }}>{children}</span>
+  );
+}
+
+// Muted outline badge used in a panel header (e.g. "Coming soon").
+function MutedBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{
+      fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase',
+      color: 'var(--onyx-text-mute)', border: '1px solid var(--onyx-line)', borderRadius: 4, padding: '3px 8px',
+    }}>{children}</span>
+  );
+}
 
 // Format bytes as KB / MB / GB to one decimal place for size display.
 function fmtSize(bytes: number): string {
@@ -132,9 +153,8 @@ export default function DownloadsSection({ st }: Props) {
     };
   }, []); // register once per mount — setters and st.setDownloads are stable
 
-  // Sum all file sizes for the subtitle and the storage-used row.
+  // Sum all file sizes for the "used" pill in the header.
   const totalBytes = records.reduce((sum, r) => sum + r.fileSize, 0);
-  const storageLabel = totalBytes > 0 ? ` — ${fmtSize(totalBytes)} used` : '';
 
   // Confirm and execute deletion of a single downloaded book.
   const handleConfirmDelete = async () => {
@@ -185,144 +205,85 @@ export default function DownloadsSection({ st }: Props) {
 
   return (
     <div>
-      <SectionHead
-        title="Downloads"
-        subtitle={`Offline copies and cache${storageLabel}.`}
-      />
+      <SectionHead title="Downloads" subtitle="Offline copies and cache." />
 
-      {/* Cache location — shows the path to the downloads directory with a Reveal button. */}
-      <Row label="Cache location" hint={cacheDir || 'Loading…'}>
-        <button
-          onClick={() => revealCacheDir().catch(console.error)}
-          style={{
-            padding: '6px 14px',
-            fontSize: 11,
-            fontFamily: MONO,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase' as const,
-            background: 'var(--onyx-glass)',
-            border: '1px solid var(--onyx-glass-edge)',
-            borderRadius: 6,
-            color: 'var(--onyx-text-dim)',
-            cursor: 'pointer',
-          }}
-        >
-          Reveal
-        </button>
-      </Row>
+      {/* Total storage used — pill in lieu of a hard cache limit (none configured). */}
+      {totalBytes > 0 && (
+        <div style={{ marginBottom: 4 }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: 6,
+            background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', color: 'var(--onyx-accent)',
+            fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+          }}>{fmtSize(totalBytes)} used</span>
+        </div>
+      )}
 
-      {/* Maximum cache size — no configurable limit in v0.1.0; a cap can be a future feature. */}
-      <Row
-        label="Maximum cache size"
-        hint="No limit set — manage individual downloads below."
-      />
-
-      {/* ── In Progress ────────────────────────────────────────────────────────
-          Rendered only while at least one download is actively streaming from Rust.
-          Each row shows the book title, a live progress bar, and a Cancel button. */}
-      {inProgress.size > 0 && (
-        <div>
-          {/* Sub-section label */}
-          <div style={{
-            marginTop: 20,
-            marginBottom: 4,
-            fontSize: 11,
-            fontFamily: MONO,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase' as const,
-            color: 'var(--onyx-text-mute)',
-          }}>
-            In Progress
+      {/* ── Cache ────────────────────────────────────────────────────────── */}
+      <Panel label="Cache">
+        <Row label="Location" hint="Where downloaded audio files are stored on this device.">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              readOnly
+              value={cacheDir || 'Loading…'}
+              onFocus={e => e.currentTarget.select()}
+              title={cacheDir}
+              style={{
+                fontFamily: MONO, fontSize: 11, background: 'rgba(0,0,0,0.3)',
+                border: '1px solid var(--onyx-glass-edge)', borderRadius: 7, color: 'var(--onyx-text-dim)',
+                padding: '7px 10px', width: 300, maxWidth: '38vw', outline: 'none',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            />
+            <button
+              onClick={() => revealCacheDir().catch(console.error)}
+              style={{
+                padding: '7px 14px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const, background: 'transparent',
+                border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, color: 'var(--onyx-text-dim)', cursor: 'pointer',
+              }}
+            >
+              Reveal
+            </button>
           </div>
+        </Row>
+      </Panel>
 
-          {Array.from(inProgress.entries()).map(([itemId, { title, bytesDownloaded, totalBytes: total }]) => {
+      {/* ── Downloading (only while transfers are active) ──────────────────── */}
+      {inProgress.size > 0 && (
+        <Panel label="Downloading">
+          {Array.from(inProgress.entries()).map(([itemId, { title, bytesDownloaded, totalBytes: total }], i, arr) => {
             // pct is null when the server didn't send Content-Length — shows indeterminate bar.
             const pct = total > 0 ? Math.min(100, (bytesDownloaded / total) * 100) : null;
             return (
               <div
                 key={itemId}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 0',
-                  borderBottom: '1px solid var(--onyx-line)',
-                  gap: 12,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--onyx-line)' : 'none', gap: 12,
                 }}
               >
-                {/* Title + progress bar + byte counter */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 13,
-                    color: 'var(--onyx-text)',
-                    fontWeight: 500,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    marginBottom: 6,
-                  }}>
+                  <div style={{ fontSize: 13, color: 'var(--onyx-text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 6 }}>
                     {title}
                   </div>
-
-                  {/* Compact 3px progress bar track */}
-                  <div style={{
-                    height: 3,
-                    borderRadius: 2,
-                    background: 'var(--onyx-glass-edge)',
-                    overflow: 'hidden',
-                  }}>
+                  <div style={{ height: 3, borderRadius: 2, background: 'var(--onyx-glass-edge)', overflow: 'hidden' }}>
                     {pct !== null ? (
-                      // Determinate: fill grows as bytes arrive.
-                      <div style={{
-                        height: '100%',
-                        width: `${pct}%`,
-                        background: 'var(--onyx-accent)',
-                        borderRadius: 2,
-                        transition: 'width 0.2s ease',
-                      }} />
+                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--onyx-accent)', borderRadius: 2, transition: 'width 0.2s ease' }} />
                     ) : (
-                      // Indeterminate: sliding shimmer when Content-Length is absent.
-                      <div style={{
-                        height: '100%',
-                        width: '40%',
-                        background: 'var(--onyx-accent)',
-                        borderRadius: 2,
-                        animation: 'onyx-indeterminate 1.4s ease-in-out infinite',
-                      }} />
+                      <div style={{ height: '100%', width: '40%', background: 'var(--onyx-accent)', borderRadius: 2, animation: 'onyx-indeterminate 1.4s ease-in-out infinite' }} />
                     )}
                   </div>
-
-                  {/* Byte counter below the bar */}
-                  <div style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: 'var(--onyx-text-mute)',
-                    fontFamily: MONO,
-                  }}>
-                    {total > 0
-                      ? `${fmtSize(bytesDownloaded)} / ${fmtSize(total)}`
-                      : fmtSize(bytesDownloaded)}
+                  <div style={{ marginTop: 4, fontSize: 11, color: 'var(--onyx-text-mute)', fontFamily: MONO }}>
+                    {total > 0 ? `${fmtSize(bytesDownloaded)} / ${fmtSize(total)}` : fmtSize(bytesDownloaded)}
                   </div>
                 </div>
-
-                {/* Cancel button — signals Rust to abort on the next chunk boundary.
-                    The download-cancelled event clears this row once the partial file
-                    has been deleted by the Rust streaming loop. */}
                 <button
                   onClick={() => cancelDownload(itemId).catch(console.error)}
                   title={`Cancel download of "${title}"`}
                   style={{
-                    flexShrink: 0,
-                    padding: '5px 12px',
-                    fontSize: 11,
-                    fontFamily: MONO,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase' as const,
-                    background: 'transparent',
-                    border: '1px solid var(--onyx-glass-edge)',
-                    borderRadius: 6,
-                    color: 'var(--onyx-text-dim)',
-                    cursor: 'pointer',
+                    flexShrink: 0, padding: '6px 13px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',
+                    textTransform: 'uppercase' as const, background: 'transparent',
+                    border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, color: 'var(--onyx-text-dim)', cursor: 'pointer',
                   }}
                 >
                   Cancel
@@ -330,192 +291,105 @@ export default function DownloadsSection({ st }: Props) {
               </div>
             );
           })}
-        </div>
+        </Panel>
       )}
 
-      {/* ── Completed downloads list ───────────────────────────────────────────
-          One row per book from the persistent downloads registry. Empty state
-          shown when nothing is downloaded or currently downloading. */}
-      {records.length === 0 && inProgress.size === 0 ? (
-        // Empty state — nothing downloaded yet.
-        <div style={{
-          padding: '40px 0',
-          textAlign: 'center',
-          color: 'var(--onyx-text-mute)',
-          fontSize: 13,
-          fontFamily: MONO,
-          letterSpacing: '0.04em',
-        }}>
-          No downloads yet
-        </div>
-      ) : records.length > 0 ? (
-        <>
-          {/* Sub-section label */}
-          <div style={{
-            marginTop: 20,
-            marginBottom: 4,
-            fontSize: 11,
-            fontFamily: MONO,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase' as const,
-            color: 'var(--onyx-text-mute)',
-          }}>
-            Downloaded Books
+      {/* ── Downloaded books ───────────────────────────────────────────────── */}
+      <Panel
+        label="Downloaded books"
+        action={
+          <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
+            {records.length} book{records.length === 1 ? '' : 's'}
+          </span>
+        }
+      >
+        {records.length === 0 ? (
+          <div style={{ padding: '28px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontSize: 12, fontFamily: MONO, letterSpacing: '0.04em' }}>
+            No downloads yet.
           </div>
+        ) : (
+          <>
+            {records.map((record, i) => {
+              // Full library item for the cover; may be undefined if removed server-side.
+              const libraryItem = st.library.find(b => b.id === record.itemId);
+              return (
+                <div
+                  key={record.itemId}
+                  style={{ display: 'flex', alignItems: 'center', padding: '13px 0', borderBottom: i < records.length - 1 ? '1px solid var(--onyx-line)' : 'none', gap: 14 }}
+                >
+                  {/* Cover thumbnail */}
+                  <div style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 6, overflow: 'hidden', background: 'var(--onyx-glass)' }}>
+                    {libraryItem ? (
+                      <Cover item={libraryItem} size={52} serverUrl={st.serverUrl} />
+                    ) : (
+                      <div style={{ width: 52, height: 52, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: MONO, fontSize: 16, fontWeight: 600, color: 'var(--onyx-text-mute)' }}>
+                        {record.title.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
 
-          {records.map(record => {
-            // Look up the full library item so we can render the cover thumbnail.
-            // May be undefined if the book was removed from the server while the
-            // local copy still exists — handled by the placeholder branch below.
-            const libraryItem = st.library.find(b => b.id === record.itemId);
+                  {/* Title + author + size/date chips */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: 'var(--onyx-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: 1.2 }}>
+                      {record.title}
+                    </div>
+                    <div style={{ marginTop: 2, fontSize: 12, color: 'var(--onyx-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {record.author || 'Unknown Author'}
+                    </div>
+                    <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <Chip>{fmtSize(record.fileSize)}</Chip>
+                      <Chip>{relativeTime(record.downloadedAt)}</Chip>
+                    </div>
+                    {/* Server-deleted warning — local copy retained and still playable offline. */}
+                    {record.serverDeleted && (
+                      <div style={{ marginTop: 5, fontSize: 10, color: '#d4834a', fontFamily: MONO, letterSpacing: '0.04em' }}>
+                        ⚠ No longer on server — local copy only
+                      </div>
+                    )}
+                  </div>
 
-            return (
-              <div
-                key={record.itemId}
+                  {/* Delete (danger) */}
+                  <button
+                    onClick={() => setPendingDelete(record)}
+                    title={`Remove "${record.title}" from downloads`}
+                    style={{
+                      flexShrink: 0, padding: '6px 13px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',
+                      textTransform: 'uppercase' as const, background: 'rgba(220,80,80,0.12)',
+                      border: '1px solid rgba(220,80,80,0.35)', borderRadius: 6, color: '#e08a8a', cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              );
+            })}
+
+            {/* Clear all footer */}
+            <div style={{ marginTop: 6, paddingTop: 13, borderTop: '1px solid var(--onyx-line)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setPendingClearAll(true)}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '12px 0',
-                  borderBottom: '1px solid var(--onyx-line)',
-                  gap: 14,
+                  padding: '7px 15px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',
+                  textTransform: 'uppercase' as const, background: 'rgba(220,80,80,0.12)',
+                  border: '1px solid rgba(220,80,80,0.35)', borderRadius: 6, color: '#e08a8a', cursor: 'pointer',
                 }}
               >
-                {/* 40×40 cover thumbnail */}
-                <div style={{
-                  flexShrink: 0,
-                  width: 40,
-                  height: 40,
-                  borderRadius: 4,
-                  overflow: 'hidden',
-                  background: 'var(--onyx-glass)',
-                }}>
-                  {libraryItem ? (
-                    // Use the shared Cover component which handles cover caching.
-                    <Cover item={libraryItem} size={40} serverUrl={st.serverUrl} />
-                  ) : (
-                    // Fallback: first letter of title when item is no longer in the library.
-                    <div style={{
-                      width: 40,
-                      height: 40,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontFamily: MONO,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: 'var(--onyx-text-mute)',
-                    }}>
-                      {record.title.charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                </div>
+                Clear all downloads
+              </button>
+            </div>
+          </>
+        )}
+      </Panel>
 
-                {/* Book metadata — title at 14px, author/size/date at 11px muted */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 14,
-                    color: 'var(--onyx-text)',
-                    fontWeight: 500,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}>
-                    {record.title}
-                  </div>
-                  <div style={{
-                    marginTop: 3,
-                    fontSize: 11,
-                    color: 'var(--onyx-text-mute)',
-                    fontFamily: MONO,
-                    display: 'flex',
-                    gap: 8,
-                    flexWrap: 'nowrap',
-                    overflow: 'hidden',
-                  }}>
-                    {/* Author — default to "Unknown Author" when blank */}
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
-                      {record.author || 'Unknown Author'}
-                    </span>
-                    <span style={{ color: 'var(--onyx-line)', flexShrink: 0 }}>·</span>
-                    {/* File size */}
-                    <span style={{ flexShrink: 0 }}>{fmtSize(record.fileSize)}</span>
-                    <span style={{ color: 'var(--onyx-line)', flexShrink: 0 }}>·</span>
-                    {/* Relative download date, e.g. "2 days ago" */}
-                    <span style={{ flexShrink: 0 }}>{relativeTime(record.downloadedAt)}</span>
-                  </div>
-                  {/* Server-deleted warning — the book was removed from the server but
-                      the local file is retained and still playable offline. */}
-                  {record.serverDeleted && (
-                    <div style={{
-                      marginTop: 4,
-                      fontSize: 10,
-                      color: '#d4834a', // amber warning tone matching the shelf badge
-                      fontFamily: MONO,
-                      letterSpacing: '0.04em',
-                    }}>
-                      ⚠ No longer on server — local copy only
-                    </div>
-                  )}
-                </div>
-
-                {/* Trash delete button — opens ConfirmDialog before acting */}
-                <button
-                  onClick={() => setPendingDelete(record)}
-                  title={`Remove "${record.title}" from downloads`}
-                  style={{
-                    flexShrink: 0,
-                    padding: '5px 12px',
-                    fontSize: 11,
-                    fontFamily: MONO,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase' as const,
-                    background: 'transparent',
-                    border: '1px solid rgba(232,113,106,0.35)',
-                    borderRadius: 6,
-                    color: '#e8716a',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            );
-          })}
-
-          {/* Clear all button — only rendered when there is at least one completed download. */}
-          <div style={{ marginTop: 20, paddingBottom: 8, display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              onClick={() => setPendingClearAll(true)}
-              style={{
-                padding: '7px 16px',
-                fontSize: 11,
-                fontFamily: MONO,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase' as const,
-                background: 'transparent',
-                border: '1px solid rgba(232,113,106,0.35)',
-                borderRadius: 6,
-                color: '#e8716a',
-                cursor: 'pointer',
-              }}
-            >
-              Clear All Downloads
-            </button>
-          </div>
-        </>
-      ) : null}
-
-      {/* ── WIP settings rows ────────────────────────────────────────────────── */}
-
-      {/* Auto-download next book in series — planned for Phase G. */}
-      <Row label="Auto-download next in series">
-        <WipBadge />
-      </Row>
-
-      {/* Keep downloaded books after finishing — planned for Phase G. */}
-      <Row label="Keep downloads after finishing">
-        <WipBadge />
-      </Row>
+      {/* ── Behaviour (planned) ────────────────────────────────────────────── */}
+      <Panel label="Behaviour" action={<MutedBadge>Coming soon</MutedBadge>}>
+        <Row label="Auto-download next in series" hint="Automatically queue the next book when you finish one.">
+          <WipBadge />
+        </Row>
+        <Row label="Keep downloads after finishing" hint="Retain the local file instead of removing it on completion.">
+          <WipBadge />
+        </Row>
+      </Panel>
 
       {/* ── Confirmation dialogs ─────────────────────────────────────────────── */}
 

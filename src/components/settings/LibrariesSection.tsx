@@ -4,8 +4,9 @@
 // adds the nav-level guard; this component returns null as a safety net).
 
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { SectionHead, MONO, SERIF } from './shared';
+import { SectionHead, Row, Toggle, MONO, SERIF } from './shared';
 import type { OnyxState } from '../../state/onyx';
+import { clearReviewCache } from '../../api/reviewCache';
 import {
   getLibrariesFull,
   createLibrary as apiCreateLibrary,
@@ -776,6 +777,53 @@ function CustomProvidersManager({ providers, onAdd, onDelete }: {
   );
 }
 
+// ── Open Library integration ──────────────────────────────────────────────────
+// Moved here from the former standalone Integrations tab — it enriches the player
+// with Open Library community ratings, so it lives alongside library settings. The
+// review-cache reset is part of the same integration (it clears Open Library data).
+function OpenLibraryManager({ st }: { st: OnyxState }) {
+  const [cacheCleared, setCacheCleared] = useState(false);
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-accent)', paddingBottom: 6, borderBottom: '1px solid var(--onyx-glass-edge)' }}>
+        Open Library
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 0', lineHeight: 1.5 }}>
+        Enrich the player with community ratings and shelf data from Open Library.
+      </div>
+
+      <Row label="Open Library" hint="Community ratings and shelf data.">
+        <Toggle on={st.enableOpenLibrary} onChange={st.setEnableOpenLibrary} />
+      </Row>
+
+      <Row label="Review cache" hint="Force a fresh fetch of all ratings data on next visit to the Player screen.">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {cacheCleared && (
+            <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em' }}>
+              Cache cleared
+            </span>
+          )}
+          <button
+            onClick={() => {
+              clearReviewCache();
+              setCacheCleared(true);
+              setTimeout(() => setCacheCleared(false), 2000);
+            }}
+            style={{
+              padding: '7px 14px', borderRadius: 6, cursor: 'pointer',
+              background: 'transparent', border: '1px solid var(--onyx-glass-edge)',
+              color: 'var(--onyx-text-dim)', fontFamily: MONO, fontSize: 10,
+              letterSpacing: '0.06em', textTransform: 'uppercase' as const,
+            }}
+          >
+            Clear review cache
+          </button>
+        </div>
+      </Row>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export interface LibrariesSectionProps {
@@ -1098,6 +1146,9 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
           onDelete={handleDeleteProvider}
         />
       )}
+
+      {/* Open Library integration (moved from the former Integrations tab) */}
+      <OpenLibraryManager st={st} />
 
       {/* Toast */}
       {toast && (

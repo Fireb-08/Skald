@@ -1,7 +1,16 @@
-import { useState, useCallback, type ReactNode } from 'react';
+import { useState, useCallback, type ReactNode, type CSSProperties } from 'react';
 
 export const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 export const MONO = "'JetBrains Mono', ui-monospace, monospace";
+
+// Dimmed accent (gold) — used for panel eyebrows and sub-headers across the
+// settings facelift. References the live accent tokens so it follows the theme.
+export const DIM_GOLD = 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.6)';
+
+// Mono uppercase eyebrow label (panel headers, sub-section headers).
+export const eyebrowStyle: CSSProperties = {
+  fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: DIM_GOLD,
+};
 
 export function useLocal<T>(key: string, def: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {
@@ -75,6 +84,62 @@ export function Pill({ active, onClick, children }: PillProps) {
       }}
     >{children}</button>
   );
+}
+
+// ── Glass panel (settings facelift) ───────────────────────────────────────────
+// A bordered glass card with an eyebrow header that can carry a right-aligned
+// action/badge. `style` overrides the outer card (width/flex/marginTop — e.g. the
+// Appearance two-column layout); `bodyStyle` overrides the body padding.
+export interface PanelProps {
+  label: string;
+  action?: ReactNode;
+  children: ReactNode;
+  style?: CSSProperties;
+  bodyStyle?: CSSProperties;
+}
+export function Panel({ label, action, children, style, bodyStyle }: PanelProps) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.02)',
+      border: '1px solid var(--onyx-glass-edge)',
+      borderRadius: 14,
+      overflow: 'hidden',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
+      boxSizing: 'border-box',
+      marginTop: 20,
+      ...style,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--onyx-line)' }}>
+        <span style={eyebrowStyle}>{label}</span>
+        {action}
+      </div>
+      <div style={{ padding: '2px 20px 8px', ...bodyStyle }}>{children}</div>
+    </div>
+  );
+}
+
+// ── Segmented control (settings facelift) ─────────────────────────────────────
+// Rectangular uppercase mono pill; accent-tinted when active.
+export interface SegProps { active: boolean; onClick: () => void; children: ReactNode; }
+export function Seg({ active, onClick, children }: SegProps) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '6px 11px', borderRadius: 6, fontFamily: MONO, fontSize: 10,
+        letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap', cursor: 'pointer',
+        background: active ? 'var(--onyx-accent-dim)' : 'transparent',
+        border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+        color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+        fontWeight: active ? 600 : 400,
+      }}
+    >{children}</button>
+  );
+}
+
+// Right-aligned wrapping group for a Row's segmented buttons.
+export function SegGroup({ children }: { children: ReactNode }) {
+  return <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>{children}</div>;
 }
 
 export interface TextInputProps {
