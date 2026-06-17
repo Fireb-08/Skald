@@ -161,10 +161,18 @@ pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) 
     save_progress_queue(downloads_dir, &queue)
 }
 
-// Remove a successfully flushed entry after it has been confirmed on the server.
-pub fn remove_progress_entry(downloads_dir: &Path, item_id: &str) -> Result<(), String> {
+// Remove a successfully flushed entry after it has been confirmed on the server,
+// but ONLY if it hasn't been superseded since it was read (matched on recorded_at).
+// The 1-second offline tick loop upserts a newer entry for the same item between
+// the flush's snapshot read and this remove; matching on recorded_at ensures we
+// delete exactly the entry we sent and leave any newer position for the next flush.
+pub fn remove_progress_entry(downloads_dir: &Path, item_id: &str, recorded_at: i64) -> Result<(), String> {
     let mut queue = load_progress_queue(downloads_dir);
-    queue.retain(|e| e.item_id != item_id);
+    let before = queue.len();
+    queue.retain(|e| !(e.item_id == item_id && e.recorded_at == recorded_at));
+    // No match → the entry was already replaced by a newer tick write; leave it
+    // queued for the next flush rather than rewriting the file unnecessarily.
+    if queue.len() == before { return Ok(()); }
     save_progress_queue(downloads_dir, &queue)
 }
 

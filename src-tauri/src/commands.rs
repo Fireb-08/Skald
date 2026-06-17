@@ -920,9 +920,10 @@ pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
         // episode_id is None here — see OfflineProgressEntry in downloads.rs.
         match client.update_progress(&entry.item_id, None, entry.current_time, entry.duration, entry.is_finished).await {
             Ok(()) => {
-                // Remove only after a confirmed server write — ensures the entry
-                // survives for a retry if the app closes between syncs.
-                let _ = downloads::remove_progress_entry(&dl_dir, &entry.item_id);
+                // Remove only after a confirmed server write — and only the exact
+                // entry we sent (matched on recorded_at), so a newer position the
+                // tick loop queued mid-flush isn't dropped.
+                let _ = downloads::remove_progress_entry(&dl_dir, &entry.item_id, entry.recorded_at);
                 flushed += 1;
             }
             Err(_) => {
@@ -2228,10 +2229,25 @@ pub async fn delete_share(server_url: String, share_id: String) -> Result<(), St
     AbsClient::new(server_url).with_token(token).delete_share(&share_id).await
 }
 
-/// GET /api/share/:slug — public re-validation of a tracked share (404 ⇒ gone).
+/// GET /public/share/:slug — public re-validation of a tracked share (404 ⇒ gone).
 #[tauri::command]
 pub async fn get_share_by_slug(server_url: String, slug: String) -> Result<models::MediaItemShare, String> {
     AbsClient::new(server_url).get_share_by_slug(&slug).await
+}
+
+/// GET /api/items/:id?expanded=1&include=share — recover an item's existing share
+/// (admin + book only). Returns None when the item has no share. This is how the
+/// modal shows a link that already exists, even one created on the web client.
+#[tauri::command]
+pub async fn get_item_share(server_url: String, item_id: String) -> Result<Option<models::MediaItemShare>, String> {
+    // Authenticated route (/api/items/:id) — unlike the public get_share_by_slug,
+    // this needs the stored token.
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    AbsClient::new(server_url)
+        .with_token(token)
+        .get_item_share(&item_id)
+        .await
 }
 
 /// GET /api/feeds — list all open RSS feeds.

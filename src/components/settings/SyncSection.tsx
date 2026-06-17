@@ -180,32 +180,33 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
       label="Live sync"
       hint="Maintain a live connection to the server for real-time progress and library updates."
     >
-      {/* Right-side slot: connection indicator + toggle */}
+      {/* Right-side slot: connection indicator (only when active) + toggle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
 
-        {/* Live connection status — dot + label. Always rendered (not hidden
-            when liveSync is false) so the user can see 'Off' as a baseline. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        {/* Live connection status — shown only when sync is connected/reconnecting.
+            When off, the toggle alone conveys the state (no redundant "Off" label). */}
+        {connectionStatus !== 'off' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {/* 6 px filled circle — colour encodes state at a glance */}
+            <div style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: dotColor,
+              flexShrink: 0,
+            }} />
 
-          {/* 6 px filled circle — colour encodes state at a glance */}
-          <div style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            background: dotColor,
-            flexShrink: 0,
-          }} />
-
-          {/* Mono 10 px label — compact, technical feel matching Onyx aesthetics */}
-          <span style={{
-            fontFamily: MONO,
-            fontSize: 10,
-            letterSpacing: '0.04em',
-            color: labelColor,
-          }}>
-            {labelText}
-          </span>
-        </div>
+            {/* Mono 10 px label — compact, technical feel matching Onyx aesthetics */}
+            <span style={{
+              fontFamily: MONO,
+              fontSize: 10,
+              letterSpacing: '0.04em',
+              color: labelColor,
+            }}>
+              {labelText}
+            </span>
+          </div>
+        )}
 
         {/* Toggle — calls handleToggle which drives the Rust socket commands */}
         <Toggle on={liveSync} onChange={handleToggle} />

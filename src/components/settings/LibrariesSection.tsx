@@ -4,7 +4,7 @@
 // adds the nav-level guard; this component returns null as a safety net).
 
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { SectionHead, Row, Toggle, MONO, SERIF } from './shared';
+import { SectionHead, Row, Toggle, MONO, SERIF, Panel } from './shared';
 import type { OnyxState } from '../../state/onyx';
 import { clearReviewCache } from '../../api/reviewCache';
 import {
@@ -727,11 +727,8 @@ function CustomProvidersManager({ providers, onAdd, onDelete }: {
   }
 
   return (
-    <div style={{ marginTop: 32 }}>
-      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-accent)', paddingBottom: 6, borderBottom: '1px solid var(--onyx-glass-edge)' }}>
-        Custom Metadata Providers
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 0', lineHeight: 1.5 }}>
+    <Panel label="Custom metadata providers">
+      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 2px', lineHeight: 1.5 }}>
         Register a community or self-hosted provider; it then appears in the Provider dropdown above and in the Match dialog.
       </div>
 
@@ -773,7 +770,7 @@ function CustomProvidersManager({ providers, onAdd, onDelete }: {
           <SmallBtn onClick={add} disabled={busy}>{busy ? 'Adding…' : '+ Add Provider'}</SmallBtn>
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -784,11 +781,8 @@ function CustomProvidersManager({ providers, onAdd, onDelete }: {
 function OpenLibraryManager({ st }: { st: OnyxState }) {
   const [cacheCleared, setCacheCleared] = useState(false);
   return (
-    <div style={{ marginTop: 32 }}>
-      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-accent)', paddingBottom: 6, borderBottom: '1px solid var(--onyx-glass-edge)' }}>
-        Open Library
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 0', lineHeight: 1.5 }}>
+    <Panel label="Open Library">
+      <div style={{ fontSize: 12, color: 'var(--onyx-text-dim)', margin: '10px 2px 2px', lineHeight: 1.5 }}>
         Enrich the player with community ratings and shelf data from Open Library.
       </div>
 
@@ -820,7 +814,7 @@ function OpenLibraryManager({ st }: { st: OnyxState }) {
           </button>
         </div>
       </Row>
-    </div>
+    </Panel>
   );
 }
 
@@ -951,20 +945,19 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
         subtitle="Manage libraries on your Audiobookshelf server."
       />
 
-      {/* Action header: New Library button aligned right */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-        {!createMode && (
+      <Panel
+        label="Libraries"
+        action={!createMode ? (
           <SmallBtn onClick={() => { setCreateMode(true); setEditTarget(null); setDeleteTarget(null); }}>
             + New Library
           </SmallBtn>
-        )}
-      </div>
-
+        ) : undefined}
+      >
       {/* Create form */}
       {createMode && (
         <div style={{
-          marginBottom: 16,
-          border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.2)',
+          margin: '8px 2px 14px',
+          border: '1px solid var(--onyx-accent-edge)',
           borderRadius: 8,
           overflow: 'hidden',
         }}>
@@ -1001,28 +994,22 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
 
       {/* Library list */}
       {!loading && !listError && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div>
           {libraries.length === 0 && !createMode && (
             <div style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', padding: '12px 0' }}>
               No libraries found.
             </div>
           )}
 
-          {libraries.map(lib => {
+          {libraries.map((lib, idx) => {
             const isEditing = editTarget === lib.id;
             const isDeleting = deleteTarget?.id === lib.id;
             const isScanning = scanPending.has(lib.id);
 
             return (
-              <div key={lib.id}>
-                {/* Library card header */}
-                <div style={{
-                  padding: '14px 16px',
-                  borderRadius: isEditing ? '8px 8px 0 0' : 8,
-                  background: isEditing ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.05)' : 'rgba(255,255,255,0.03)',
-                  border: `1px solid ${isEditing ? 'rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22)' : 'rgba(255,255,255,0.06)'}`,
-                  borderBottom: isEditing ? 'none' : undefined,
-                }}>
+              <div key={lib.id} style={{ borderBottom: idx < libraries.length - 1 && !isEditing ? '1px solid var(--onyx-line)' : 'none' }}>
+                {/* Library row */}
+                <div style={{ padding: '14px 2px' }}>
                   {/* Top row: icon · name+meta · action buttons */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 18, flexShrink: 0, lineHeight: 1 }}>
@@ -1113,12 +1100,12 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
                   )}
                 </div>
 
-                {/* Inline edit form — expands below the card with flush top border */}
+                {/* Inline edit form — expands below the row */}
                 {isEditing && (
                   <div style={{
-                    border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.22)',
-                    borderTop: 'none',
-                    borderRadius: '0 0 8px 8px',
+                    margin: '0 2px 14px',
+                    border: '1px solid var(--onyx-accent-edge)',
+                    borderRadius: 8,
                     overflow: 'hidden',
                   }}>
                     <LibraryForm
@@ -1137,6 +1124,7 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
           })}
         </div>
       )}
+      </Panel>
 
       {/* Custom metadata providers */}
       {!loading && !listError && (

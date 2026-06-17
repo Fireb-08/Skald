@@ -267,6 +267,7 @@ pub fn run() {
             commands::create_share,
             commands::delete_share,
             commands::get_share_by_slug,
+            commands::get_item_share,
             commands::get_feeds,
             commands::open_feed,
             commands::close_feed,

@@ -79,8 +79,9 @@ export default function Settings({ st, onLogout }: SettingsProps) {
       </div>
 
       <div style={{ flex: 1, display: 'flex', gap: 24, minHeight: 0 }}>
-        {/* Sidebar */}
-        <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+        {/* Sidebar — scrolls vertically when the nav list is taller than the pane
+            (low-resolution windows would otherwise spill the last items out). */}
+        <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
           {NAV.map(s => {
             // Hide admin-only sections from non-admin users
             if ((s.id === 'notifications' || s.id === 'backups' || s.id === 'scheduled-tasks' || s.id === 'logs' || s.id === 'sharing' || s.id === 'library') && !st.isAdmin) return null;

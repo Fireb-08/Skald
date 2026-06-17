@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { OnyxState, ServerSettings } from '../../state/onyx';
-import { SectionHead, Row, Toggle, MONO, SERIF } from './shared';
+import { SectionHead, Row, Toggle, MONO, SERIF, Panel } from './shared';
 import {
   updateServerSettings,
   updateSortingPrefixes,
@@ -17,21 +17,6 @@ export interface ServerSettingsSectionProps {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-function GroupHead({ label }: { label: string }) {
-  return (
-    <div style={{
-      fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em',
-      textTransform: 'uppercase' as const,
-      color: 'var(--onyx-accent)',
-      marginTop: 28, marginBottom: 4,
-      paddingBottom: 6,
-      borderBottom: '1px solid var(--onyx-glass-edge)',
-    }}>
-      {label}
-    </div>
-  );
-}
 
 function Dropdown<T extends string | number>({
   value,
@@ -248,7 +233,7 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
       {head}
 
       {/* ── Scanner ──────────────────────────────────────────────────────── */}
-      <GroupHead label="Scanner" />
+      <Panel label="Scanner">
 
       <Row
         label="Find covers online"
@@ -313,8 +298,10 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
         />
       </Row>
 
+      </Panel>
+
       {/* ── Metadata storage ─────────────────────────────────────────────── */}
-      <GroupHead label="Metadata Storage" />
+      <Panel label="Metadata storage">
 
       <Row
         label="Store cover with item"
@@ -342,12 +329,14 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
         />
       </Row>
 
+      </Panel>
+
       {/* ── Sorting ──────────────────────────────────────────────────────── */}
-      <GroupHead label="Sorting" />
+      <Panel label="Sorting">
 
       <Row
         label="Ignore sort prefixes"
-        hint='Sort "The Name of the Wind" under N, not T.'
+        hint='Sort "The Great Gatsby" under G, not T.'
       >
         <Toggle
           on={s.sortingIgnorePrefix ?? false}
@@ -358,22 +347,28 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
         />
       </Row>
 
-      <Row
-        label="Prefixes"
-        hint="Click a prefix to remove it. Press Enter to add. Triggers a full title re-index."
-        align="top"
-      >
-        <PrefixEditor
-          prefixes={prefixes}
-          onChange={newPrefixes => {
-            setSettings(prev => ({ ...prev, sortingPrefixes: newPrefixes }));
-            patchPrefixes(newPrefixes);
-          }}
-        />
-      </Row>
+      {/* Prefix list is only relevant when prefix-ignoring is on — hide it
+          otherwise to avoid implying it has any effect. */}
+      {(s.sortingIgnorePrefix ?? false) && (
+        <Row
+          label="Prefixes"
+          hint="Click a prefix to remove it. Press Enter to add. Triggers a full title re-index."
+          align="top"
+        >
+          <PrefixEditor
+            prefixes={prefixes}
+            onChange={newPrefixes => {
+              setSettings(prev => ({ ...prev, sortingPrefixes: newPrefixes }));
+              patchPrefixes(newPrefixes);
+            }}
+          />
+        </Row>
+      )}
+
+      </Panel>
 
       {/* ── Podcasts ─────────────────────────────────────────────────────── */}
-      <GroupHead label="Podcasts" />
+      <Panel label="Podcasts">
 
       <Row
         label="Episode check schedule"
@@ -389,24 +384,10 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
         />
       </Row>
 
-      {/* ── Playback ─────────────────────────────────────────────────────── */}
-      <GroupHead label="Playback" />
-
-      <Row
-        label="Chromecast support"
-        hint="Enable casting to Chromecast devices via the web client."
-      >
-        <Toggle
-          on={s.chromecastEnabled ?? false}
-          onChange={v => {
-            setSettings(prev => ({ ...prev, chromecastEnabled: v }));
-            patch({ chromecastEnabled: v });
-          }}
-        />
-      </Row>
+      </Panel>
 
       {/* ── Logging ──────────────────────────────────────────────────────── */}
-      <GroupHead label="Logging" />
+      <Panel label="Logging">
 
       <Row label="Log level" hint="Controls verbosity of the server log files.">
         <Dropdown
@@ -443,6 +424,7 @@ export default function ServerSettingsSection({ st, embedded = false }: ServerSe
           }}
         />
       </Row>
+      </Panel>
     </div>
   );
 }

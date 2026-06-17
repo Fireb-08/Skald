@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { OnyxState } from '../../state/onyx';
 import { getLoggerData, startLogStream, stopLogStream, LOGGER_LEVELS, type LogEntry } from '../../api/abs';
-import { SectionHead, MONO } from './shared';
+import { SectionHead, MONO, Panel } from './shared';
 
 export interface LogsSectionProps { st: OnyxState; }
 
@@ -100,8 +100,9 @@ export default function LogsSection({ st }: LogsSectionProps) {
     <div>
       <SectionHead title="Logs" subtitle="Live server log. Admin only." />
 
+      <Panel label="Server log">
       {/* Controls */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '4px 0 14px' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '10px 0 14px' }}>
         <select
           value={minLevel}
           onChange={e => setMinLevel(Number(e.target.value))}
@@ -183,9 +184,10 @@ export default function LogsSection({ st }: LogsSectionProps) {
         </div>
       )}
 
-      <div style={{ fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 12 }}>
+      <div style={{ fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 12, paddingBottom: 4 }}>
         Showing {filtered.length} of {logs.length} buffered. Log level and retention are configured in Settings → Server → Logging.
       </div>
+      </Panel>
     </div>
   );
 }

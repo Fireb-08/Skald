@@ -1664,10 +1664,17 @@ export function deleteShare(serverUrl: string, shareId: string): Promise<void> {
   return invoke('delete_share', { serverUrl, shareId });
 }
 
-/** GET /api/share/:slug — public re-validation of a tracked share (rejects 404
+/** GET /public/share/:slug — public re-validation of a tracked share (rejects 404
  *  when the share no longer exists). */
 export function getShareBySlug(serverUrl: string, slug: string): Promise<MediaItemShare> {
   return invoke('get_share_by_slug', { serverUrl, slug });
+}
+
+/** GET /api/items/:id?expanded=1&include=share — the item's existing public share
+ *  (admin + book only), or null. The only way to recover a share by item; lets the
+ *  modal show a link that already exists, including one created on the web client. */
+export function getItemShare(serverUrl: string, itemId: string): Promise<MediaItemShare | null> {
+  return invoke('get_item_share', { serverUrl, itemId });
 }
 
 /** GET /api/feeds — list all open RSS feeds. */

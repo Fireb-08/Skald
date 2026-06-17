@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import { getTasks, validateCron, type Task } from '../../api/abs';
-import { SectionHead, Row, MONO } from './shared';
+import { SectionHead, Row, MONO, Panel } from './shared';
 import CronEditor from './CronEditor';
 
 export interface ScheduledTasksSectionProps { st: OnyxState; }
@@ -38,19 +38,6 @@ function describeCron(expr: string): string {
   if (min !== '*' && hr !== '*' && dom === '*' && dow === '*') return `daily at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
   if (dom === '*' && dow !== '*') return `weekly (day ${dow}) at ${hr.padStart(2, '0')}:${min.padStart(2, '0')}`;
   return 'custom schedule';
-}
-
-function GroupHead({ label }: { label: string }) {
-  return (
-    <div style={{
-      fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em',
-      textTransform: 'uppercase' as const, color: 'var(--onyx-accent)',
-      marginTop: 28, marginBottom: 4, paddingBottom: 6,
-      borderBottom: '1px solid var(--onyx-glass-edge)',
-    }}>
-      {label}
-    </div>
-  );
 }
 
 // Status presentation for a task: dot colour + label.
@@ -141,7 +128,7 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
       />
 
       {/* ── Activity monitor ─────────────────────────────────────────────── */}
-      <GroupHead label="Activity" />
+      <Panel label="Activity">
 
       {!liveSyncOn && (
         <div style={{ fontSize: 11.5, color: 'var(--onyx-text-mute)', padding: '10px 0 2px', lineHeight: 1.5 }}>
@@ -203,8 +190,10 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
         );
       })}
 
+      </Panel>
+
       {/* ── Schedule summary ─────────────────────────────────────────────── */}
-      <GroupHead label="Schedules" />
+      <Panel label="Schedules">
 
       <Row label="Automatic backups" hint="Edit in Settings → Backups.">
         <span style={{ fontSize: 12.5, color: backupEnabled ? 'var(--onyx-text)' : 'var(--onyx-text-mute)' }}>
@@ -218,8 +207,10 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
         </span>
       </Row>
 
+      </Panel>
+
       {/* ── Cron builder & validator ─────────────────────────────────────── */}
-      <GroupHead label="Cron Builder" />
+      <Panel label="Cron builder">
 
       <Row
         label="Build a schedule"
@@ -249,6 +240,7 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
           </div>
         </div>
       </Row>
+      </Panel>
     </div>
   );
 }

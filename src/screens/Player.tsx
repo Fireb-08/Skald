@@ -391,6 +391,28 @@ export default function Player({ st }: PlayerProps) {
   // Synopsis lives here as its own pane (rather than a left-column flyout).
   const [activePane, setActivePane] = useState<'details' | 'chapters' | 'bookmarks' | 'synopsis'>('chapters');
 
+  // ── Chapter-list auto-scroll ──────────────────────────────────────────────
+  // The currently-playing (or focused) chapter, mirroring rowChIdx in the list.
+  const activeChapterIdx = isFocusedDifferent ? focusedChIdx : chaptersLocked ? -1 : chIdx;
+  const chapterListRef = useRef<HTMLDivElement>(null);
+  const activeChapterRef = useRef<HTMLButtonElement>(null);
+  // Keep the active chapter centred in its scroll container as progress advances
+  // (and when the panel first becomes visible). Scrolls only the list container,
+  // never the window — re-runs only when the chapter index changes, not per tick.
+  useEffect(() => {
+    const chaptersVisible = !panesStacked || activePane === 'chapters';
+    if (!chaptersVisible || activeChapterIdx < 0) return;
+    const container = chapterListRef.current;
+    const el = activeChapterRef.current;
+    if (!container || !el) return;
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    // El top relative to the container's scrollable content, then centre it.
+    const offsetWithin = eRect.top - cRect.top + container.scrollTop;
+    const target = offsetWithin - container.clientHeight / 2 + el.clientHeight / 2;
+    container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+  }, [activeChapterIdx, activePane, panesStacked]);
+
   const waveformRef = useRef<HTMLDivElement>(null);
   const [waveWidth, setWaveWidth] = useState(600);
 
@@ -1124,7 +1146,7 @@ export default function Player({ st }: PlayerProps) {
                   Press play to begin
                 </div>
               )}
-              <div style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
+              <div ref={chapterListRef} style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {displayChapters.map((c, i) => {
                   // Use focusedChIdx for focused non-playing book, -1 (no highlight)
                   // when not yet started, or live chIdx during active playback.
@@ -1133,7 +1155,7 @@ export default function Player({ st }: PlayerProps) {
                     : chIdx;
                   const state = i < rowChIdx ? 'done' : i === rowChIdx ? 'playing' : 'next';
                   return (
-                    <button key={c.n} onClick={async () => {
+                    <button key={c.n} ref={i === activeChapterIdx ? activeChapterRef : null} onClick={async () => {
                       const pos = chapterStart(displayChapters, i);
                       if (!st.focusedBookId || st.focusedBookId === st.currentBookId) {
                         // Seek to the selected chapter's start position

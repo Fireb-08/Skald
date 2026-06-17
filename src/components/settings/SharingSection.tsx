@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import { getFeeds, deleteShare, closeFeed, getShareBySlug, type RssFeed } from '../../api/abs';
 import { getTrackedShares, removeTrackedShare, getPublicBaseUrl, setPublicBaseUrl, publicBase, absoluteFeedUrl, type TrackedShare } from '../../lib/shareTracker';
-import { SectionHead, MONO } from './shared';
+import { SectionHead, MONO, Panel } from './shared';
 
 export interface SharingSectionProps { st: OnyxState; }
 
@@ -18,6 +18,22 @@ async function copy(text: string, st: OnyxState, label: string): Promise<void> {
   } catch {
     st.setToast({ message: `Copy failed — ${text}`, type: 'info' });
   }
+}
+
+/** The URL rendered as an accent link that copies to the clipboard on click. */
+function CopyLink({ url, label, st }: { url: string; label: string; st: OnyxState }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <span
+      onClick={() => void copy(url, st, label)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title="Click to copy"
+      style={{ color: 'var(--onyx-accent)', cursor: 'pointer', textDecoration: hover ? 'underline' : 'none' }}
+    >
+      {url}
+    </span>
+  );
 }
 
 /**
@@ -36,19 +52,23 @@ export default function SharingSection({ st }: SharingSectionProps) {
   // Public base URL used to build share/feed links (persisted via shareTracker).
   const [pubUrl, setPubUrl] = useState(getPublicBaseUrl());
 
-  // Load tracked shares and drop any the server no longer has (404 on slug).
+  // List locally-tracked shares, then re-validate each against the public share
+  // route. Only a CONFIRMED 404 (the share is genuinely gone) purges a record —
+  // any other failure (network blip, unexpected response shape) keeps it listed,
+  // so a single bad response can never wipe valid local shares.
   const loadShares = useCallback(async () => {
     const tracked = getTrackedShares();
+    setShares(tracked); // show immediately; validation only ever removes, never adds
     const checks = await Promise.allSettled(tracked.map(s => getShareBySlug(st.serverUrl, s.slug)));
-    const live = tracked.filter((s, i) => {
-      if (checks[i].status === 'rejected') {
-        // Share no longer exists on the server — drop the stale local record.
+    let purged = false;
+    tracked.forEach((s, i) => {
+      const c = checks[i];
+      if (c.status === 'rejected' && /\b404\b/.test(String(c.reason))) {
         removeTrackedShare(s.id);
-        return false;
+        purged = true;
       }
-      return true;
     });
-    setShares(live);
+    if (purged) setShares(getTrackedShares());
   }, [st.serverUrl]);
 
   const loadFeeds = useCallback(async () => {
@@ -107,13 +127,13 @@ export default function SharingSection({ st }: SharingSectionProps) {
     });
   }, [st]);
 
-  const card: CSSProperties = { border: '1px solid var(--onyx-line)', borderRadius: 10, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, background: 'var(--onyx-panel2)' };
-  const sub: CSSProperties = { fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+  const sub: CSSProperties = { fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 3 };
   const ghostBtn: CSSProperties = { padding: '6px 12px', borderRadius: 7, cursor: 'pointer', background: 'var(--onyx-accent-dim)', border: '1px solid var(--onyx-accent-edge)', color: 'var(--onyx-accent)', fontFamily: MONO, fontSize: 10.5, flexShrink: 0 };
   const dangerBtn: CSSProperties = { padding: '6px 12px', borderRadius: 7, cursor: 'pointer', background: 'rgba(220,80,80,0.12)', border: '1px solid rgba(220,80,80,0.35)', color: '#e08a8a', fontFamily: MONO, fontSize: 10.5, flexShrink: 0 };
-  const heading: CSSProperties = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-dim)', margin: '26px 0 12px' };
-  const empty: CSSProperties = { fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', padding: '10px 0' };
+  const empty: CSSProperties = { fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', padding: '14px 2px', lineHeight: 1.5 };
   const input: CSSProperties = { padding: '8px 12px', minWidth: 320, fontSize: 13, background: 'rgba(0,0,0,0.3)', borderRadius: 8, color: 'var(--onyx-text)', border: '1px solid var(--onyx-glass-edge)', outline: 'none', fontFamily: MONO };
+  // Flat row inside a panel; divider below unless it's the last entry.
+  const row = (last: boolean): CSSProperties => ({ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 2px', borderBottom: last ? 'none' : '1px solid var(--onyx-line)' });
 
   return (
     <div>
@@ -123,30 +143,32 @@ export default function SharingSection({ st }: SharingSectionProps) {
       />
 
       {/* ── Public link address ── */}
-      <div style={heading}>Public link address</div>
-      <input
-        value={pubUrl}
-        onChange={e => { setPubUrl(e.target.value); setPublicBaseUrl(e.target.value); }}
-        placeholder={st.serverUrl}
-        style={input}
-      />
-      <div style={empty}>
-        Share and new RSS feed links are built from this address. Leave blank to use the server URL Skald connects to ({st.serverUrl}). Set it to a public domain (e.g. https://abs.example.com) so links work outside your LAN — your Audiobookshelf server must be reachable there.
-      </div>
+      <Panel label="Public link address">
+        <div style={{ padding: '12px 2px 2px' }}>
+          <input
+            value={pubUrl}
+            onChange={e => { setPubUrl(e.target.value); setPublicBaseUrl(e.target.value); }}
+            placeholder={st.serverUrl}
+            style={input}
+          />
+          <div style={{ ...empty, padding: '10px 0 2px' }}>
+            Share and new RSS feed links are built from this address. Leave blank to use the server URL Skald connects to ({st.serverUrl}). Set it to a public domain (e.g. https://abs.example.com) so links work outside your LAN — your Audiobookshelf server must be reachable there.
+          </div>
+        </div>
+      </Panel>
 
       {/* ── Share Manager ── */}
-      <div style={heading}>Share links</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <Panel label="Share links">
         {shares.length === 0 ? (
           <div style={empty}>
             No share links created from this device. ABS provides no way to list shares, so links created on the web client or another device aren't shown here.
           </div>
-        ) : shares.map(s => (
-          <div key={s.id} style={card}>
+        ) : shares.map((s, i) => (
+          <div key={s.id} style={row(i === shares.length - 1)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, color: 'var(--onyx-text)' }}>{s.title}</div>
               <div style={sub}>
-                {publicShareUrl(st.serverUrl, s.slug)}
+                <CopyLink url={publicShareUrl(st.serverUrl, s.slug)} label="Share link" st={st} />
                 {s.expiresAt ? ` · expires ${new Date(s.expiresAt).toLocaleDateString()}` : ' · never expires'}
                 {s.isDownloadable ? ' · downloadable' : ''}
               </div>
@@ -155,32 +177,25 @@ export default function SharingSection({ st }: SharingSectionProps) {
             <button onClick={() => revokeShare(s)} disabled={busyId === s.id} style={dangerBtn}>Revoke</button>
           </div>
         ))}
-      </div>
+      </Panel>
 
       {/* ── RSS Feed Manager ── */}
-      <div style={heading}>Open RSS feeds</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <Panel label="Open RSS feeds">
         {feedsLoading ? (
           <div style={empty}>Loading…</div>
         ) : feeds.length === 0 ? (
           <div style={empty}>No open feeds. Open one from an item's Share &amp; Publish menu.</div>
-        ) : feeds.map(f => (
-          <div key={f.id} style={card}>
+        ) : feeds.map((f, i) => (
+          <div key={f.id} style={row(i === feeds.length - 1)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, color: 'var(--onyx-text)' }}>{f.meta?.title || f.slug}</div>
-              <div style={sub}>{f.entityType} · {absoluteFeedUrl(f.serverAddress, f.feedUrl, st.serverUrl)}</div>
+              <div style={sub}>{f.entityType} · <CopyLink url={absoluteFeedUrl(f.serverAddress, f.feedUrl, st.serverUrl)} label="Feed URL" st={st} /></div>
             </div>
             <button onClick={() => void copy(absoluteFeedUrl(f.serverAddress, f.feedUrl, st.serverUrl), st, 'Feed URL')} style={ghostBtn}>Copy</button>
             <button onClick={() => close(f)} disabled={busyId === f.id} style={dangerBtn}>Close</button>
           </div>
         ))}
-      </div>
-
-      {/* ── OPDS (informational) ── */}
-      <div style={heading}>OPDS</div>
-      <div style={empty}>
-        Audiobookshelf does not expose an OPDS catalog endpoint, so there is nothing to manage here. If your deployment serves OPDS through a separate add-on, point your OPDS reader at that URL directly.
-      </div>
+      </Panel>
     </div>
   );
 }

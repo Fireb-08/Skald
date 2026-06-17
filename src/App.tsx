@@ -112,6 +112,20 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Downloaded-book progress sync ────────────────────────────────────────
+  // Downloaded books play from local disk with no server session, so the Rust
+  // 30s session-sync never runs for them — their progress only lands in the
+  // local offline queue. Flush that queue to the server every 30s while a local
+  // book is playing (mirroring the online sync cadence), and once more when local
+  // playback ends, so the server stays current. Flush failures are non-fatal:
+  // entries remain queued and the existing startup/reconnect flush picks them up.
+  useEffect(() => {
+    if (!st.isLocalPlayback || !st.serverUrl) return;
+    const flush = () => { flushOfflineProgress(st.serverUrl).catch(() => { /* offline — entries stay queued */ }); };
+    const iv = setInterval(flush, 30_000);
+    return () => { clearInterval(iv); flush(); };
+  }, [st.isLocalPlayback, st.serverUrl]);
+
   // ── Shutdown safety net ─────────────────────────────────────────────────
   // beforeunload fires when the WebView is dismissed and gives the frontend
   // a chance to initiate session close before the window disappears.  The

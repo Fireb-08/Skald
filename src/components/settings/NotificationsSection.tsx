@@ -15,7 +15,7 @@ import {
   type NotificationEventData,
   type Library,
 } from '../../api/abs';
-import { SectionHead, Row, MONO, SERIF } from './shared';
+import { SectionHead, Row, MONO, SERIF, Panel } from './shared';
 
 export interface NotificationsSectionProps { st: OnyxState; }
 
@@ -24,19 +24,6 @@ const APPRISE_DOCS_URL = 'https://github.com/advplyr/audiobookshelf/blob/master/
 const APPRISE_API_URL = 'https://github.com/caronc/apprise-api';
 
 // ── Small styled helpers (match the Onyx settings idiom) ────────────────────────
-
-function GroupHead({ label }: { label: string }) {
-  return (
-    <div style={{
-      fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em',
-      textTransform: 'uppercase' as const, color: 'var(--onyx-accent)',
-      marginTop: 28, marginBottom: 4, paddingBottom: 6,
-      borderBottom: '1px solid var(--onyx-glass-edge)',
-    }}>
-      {label}
-    </div>
-  );
-}
 
 function Btn({
   children, onClick, variant = 'ghost', disabled,
@@ -427,7 +414,7 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
       />
 
       {/* ── Apprise connection ───────────────────────────────────────────── */}
-      <GroupHead label="Apprise Connection" />
+      <Panel label="Apprise connection">
 
       {/* Persistent explanatory note — the #1 source of confusion is that ABS
           does not bundle Apprise and needs an external Apprise API server. */}
@@ -473,8 +460,10 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
         </div>
       </Row>
 
+      </Panel>
+
       {/* ── Notification rules ───────────────────────────────────────────── */}
-      <GroupHead label="Notifications" />
+      <Panel label="Notifications">
 
       {rules.length === 0 && editing !== 'new' && (
         <div style={{ fontSize: 12.5, color: 'var(--onyx-text-mute)', padding: '16px 0' }}>
@@ -541,8 +530,10 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
         </div>
       )}
 
+      </Panel>
+
       {/* ── Advanced ─────────────────────────────────────────────────────── */}
-      <GroupHead label="Advanced" />
+      <Panel label="Advanced">
 
       <Row label="Max failed attempts" hint="Consecutive failures before a notification is automatically disabled.">
         <NumField
@@ -565,6 +556,7 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
           onCommit={v => void patchSettings({ notificationDelay: v })}
         />
       </Row>
+      </Panel>
     </div>
   );
 }

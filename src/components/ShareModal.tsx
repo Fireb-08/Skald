@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import ReactDOM from 'react-dom';
 import type { LibraryItem, OnyxState } from '../state/onyx';
 import {
-  createShare, deleteShare, getFeeds, openFeed, closeFeed, fetchItem,
+  createShare, deleteShare, getFeeds, openFeed, closeFeed, fetchItem, getItemShare,
   type MediaItemShare, type RssFeed,
 } from '../api/abs';
 import {
@@ -68,6 +68,9 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
   const [expiryIdx, setExpiryIdx] = useState(0);
   const [downloadable, setDownloadable] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  // Inline error shown within the share section (a toast would sit behind the
+  // modal's blurred backdrop, out of view). Cleared on a new attempt / slug edit.
+  const [shareError, setShareError] = useState<string | null>(null);
 
   // ── RSS-feed state ────────────────────────────────────────────────────────
   const [feed, setFeed] = useState<RssFeed | null>(null);
@@ -88,6 +91,35 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
     return () => { cancelled = true; };
   }, [mediaId, canShare, st.serverUrl, item.id]);
 
+  // On open, ask the server whether this item already has a share. ABS exposes it
+  // via GET /api/items/:id?include=share (admin + book only) — the one way to
+  // recover a share by item. This shows links created on the web client or lost
+  // from local tracking, and re-tracks them so they also list in Settings.
+  useEffect(() => {
+    if (!canShare) return;
+    let cancelled = false;
+    getItemShare(st.serverUrl, item.id)
+      .then(existing => {
+        console.log('[ShareModal] getItemShare result:', existing);
+        if (cancelled || !existing) return;
+        const tracked: TrackedShare = {
+          id: existing.id,
+          slug: existing.slug,
+          libraryItemId: item.id,
+          mediaItemId: existing.mediaItemId,
+          mediaItemType: existing.mediaItemType || 'book',
+          title,
+          isDownloadable: existing.isDownloadable,
+          expiresAt: existing.expiresAt ? (Date.parse(existing.expiresAt) || null) : null,
+          createdAt: existing.createdAt ? (Date.parse(existing.createdAt) || Date.now()) : Date.now(),
+        };
+        addTrackedShare(tracked);
+        setShare(tracked);
+      })
+      .catch(e => console.error('[ShareModal] getItemShare failed:', e));
+    return () => { cancelled = true; };
+  }, [canShare, st.serverUrl, item.id, title]);
+
   // On open, look up an existing open feed for this item (no per-item route, so
   // we list all feeds and match on entityId).
   useEffect(() => {
@@ -103,9 +135,10 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
   }, [st.serverUrl, item.id]);
 
   const doCreateShare = useCallback(async () => {
+    setShareError(null);
     const s = slug.trim();
-    if (!s) { st.setToast({ message: 'A slug is required.', type: 'error' }); return; }
-    if (!mediaId) { st.setToast({ message: 'Could not resolve this item’s media id.', type: 'error' }); return; }
+    if (!s) { setShareError('A slug is required.'); return; }
+    if (!mediaId) { setShareError('Could not resolve this item’s media id.'); return; }
     setShareBusy(true);
     try {
       const ms = EXPIRY_OPTIONS[expiryIdx].ms;
@@ -124,7 +157,17 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
       st.setToast({ message: 'Share link created.', type: 'success' });
       void copy(shareUrl(st.serverUrl, created.slug), st, 'Share link');
     } catch (e) {
-      st.setToast({ message: `Create share failed: ${String(e)}`, type: 'error' });
+      const msg = String(e);
+      // ABS returns HTTP 409 "Item is already shared" when a share exists for this
+      // book. It exposes no way to look up that share by item (only by its slug,
+      // which we don't have when the share isn't tracked locally), so Skald can't
+      // retrieve or display the existing link — surface a clear, actionable note
+      // inline (a toast would be hidden behind the modal's blurred backdrop).
+      if (/already shared/i.test(msg) || /\b409\b/.test(msg)) {
+        setShareError('This book is already shared on the server, but Skald doesn’t have the link locally (it was created elsewhere or in an earlier session). Audiobookshelf can’t look up an existing share by item — revoke it from the Audiobookshelf web app, then create a new link here.');
+      } else {
+        setShareError(`Create share failed: ${msg}`);
+      }
     } finally {
       setShareBusy(false);
     }
@@ -246,7 +289,7 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
               <>
                 <div>
                   <div style={label}>Slug</div>
-                  <input value={slug} onChange={e => setSlug(e.target.value)} style={{ ...input, fontFamily: MONO }} placeholder="my-book" />
+                  <input value={slug} onChange={e => { setSlug(e.target.value); setShareError(null); }} style={{ ...input, fontFamily: MONO }} placeholder="my-book" />
                 </div>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 140 }}>
@@ -263,6 +306,17 @@ export default function ShareModal({ item, st, onClose }: ShareModalProps) {
                 <button onClick={() => void doCreateShare()} disabled={shareBusy || !slug.trim() || !mediaId} style={{ ...primaryBtn, alignSelf: 'flex-start', opacity: shareBusy || !slug.trim() || !mediaId ? 0.6 : 1 }}>
                   {shareBusy ? 'Creating…' : !mediaId ? 'Loading…' : 'Create share link'}
                 </button>
+                {/* Inline error (e.g. 409 already-shared) — shown in-section so it
+                    isn't hidden behind the modal's blurred backdrop like a toast. */}
+                {shareError && (
+                  <div style={{
+                    fontSize: 12, lineHeight: 1.5, color: '#e08a8a',
+                    background: 'rgba(220,80,80,0.1)', border: '1px solid rgba(220,80,80,0.3)',
+                    borderRadius: 8, padding: '10px 12px',
+                  }}>
+                    {shareError}
+                  </div>
+                )}
               </>
             )}
           </section>

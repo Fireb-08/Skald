@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { SPEEDS } from '../../state/onyx';
 import type { OnyxState } from '../../state/onyx';
-import { SectionHead, Row, Toggle, Pill, useLocal, MONO } from './shared';
+import { SectionHead, Row, Toggle, useLocal, MONO, Panel, Seg, SegGroup } from './shared';
 import ListeningSessionsSection from './ListeningSessionsSection';
 
 // 'playback' shows the existing speed/skip/sleep controls.
@@ -101,45 +101,46 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
       {/* Sessions tab — renders the paginated listening-sessions table */}
       {tab === 'sessions' && <ListeningSessionsSection st={st} />}
 
-      {/* Playback tab — existing speed/skip/sleep/auto-play controls, wrapped in a fragment */}
-      {tab === 'playback' && (<>
+      {/* Playback tab — existing speed/skip/sleep/auto-play controls, wrapped in a Panel */}
+      {tab === 'playback' && (
+        <Panel label="Playback" style={{ marginTop: 0 }}>
+          <Row label="Default playback speed" hint="Applied when you open a book for the first time. Per-book speed overrides this.">
+            <SegGroup>
+              {SPEEDS.map(s => (
+                <Seg key={s} active={s === speed} onClick={() => setSpeed(s)}>{s}×</Seg>
+              ))}
+            </SegGroup>
+          </Row>
 
-      <Row label="Default playback speed" hint="Applied when you open a book for the first time. Per-book speed overrides this.">
-        <div style={{ display: 'flex', gap: 6 }}>
-          {SPEEDS.map(s => (
-            <Pill key={s} active={s === speed} onClick={() => setSpeed(s)}>{s}×</Pill>
-          ))}
-        </div>
-      </Row>
+          <Row label="Skip duration" hint="Used by the −/+ skip buttons and ←/→ keys.">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <SegGroup>
+                {SKIP.map(v => <Seg key={v} active={v === skipDur} onClick={() => setSkipDur(v)}>{v}</Seg>)}
+              </SegGroup>
+              <WipBadge />
+            </div>
+          </Row>
 
-      <Row label="Skip duration" hint="Used by the −/+ skip buttons and ←/→ keys.">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {SKIP.map(v => <Pill key={v} active={v === skipDur} onClick={() => setSkipDur(v)}>{v}</Pill>)}
-          </div>
-          <WipBadge />
-        </div>
-      </Row>
+          <Row label="Auto-rewind on resume" hint="Step backwards a few seconds when you resume after a pause.">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <SegGroup>
+                {REWIND.map(v => <Seg key={v} active={v === rewindOnResume} onClick={() => setRewindOnResume(v)}>{v}</Seg>)}
+              </SegGroup>
+              <WipBadge />
+            </div>
+          </Row>
 
-      <Row label="Auto-rewind on resume" hint="Step backwards a few seconds when you resume after a pause.">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {REWIND.map(v => <Pill key={v} active={v === rewindOnResume} onClick={() => setRewindOnResume(v)}>{v}</Pill>)}
-          </div>
-          <WipBadge />
-        </div>
-      </Row>
+          <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends.">
+            <Toggle on={autoPlayNext} onChange={setAutoPlayNext} />
+          </Row>
 
-      <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends.">
-        <Toggle on={autoPlayNext} onChange={setAutoPlayNext} />
-      </Row>
-
-      <Row label="Sleep timer default" hint="Pre-fill when you open the sleep timer.">
-        <div style={{ display: 'flex', gap: 6 }}>
-          {SLEEP.map(v => <Pill key={v} active={v === sleepDefault} onClick={() => setSleepDefault(v)}>{v}</Pill>)}
-        </div>
-      </Row>
-      </>)} {/* end tab === 'playback' */}
+          <Row label="Sleep timer default" hint="Pre-fill when you open the sleep timer.">
+            <SegGroup>
+              {SLEEP.map(v => <Seg key={v} active={v === sleepDefault} onClick={() => setSleepDefault(v)}>{v}</Seg>)}
+            </SegGroup>
+          </Row>
+        </Panel>
+      )} {/* end tab === 'playback' */}
     </div>
   );
 }
