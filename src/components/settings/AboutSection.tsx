@@ -1,13 +1,9 @@
 import { useState } from 'react';
-import { getVersion } from '@tauri-apps/api/app';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { save } from '@tauri-apps/plugin-dialog';
 import lyreIcon from '../../assets/lyre.png';
-import { SectionHead, Row, Pill, SERIF, MONO } from './shared';
-import type { OnyxState } from '../../state/onyx';
-import { readSkaldLog, openLogDir, writeTextFile, getLoggerData } from '../../api/abs';
-import { log } from '../../lib/log';
-
-export interface AboutSectionProps { st: OnyxState; }
+import { SectionHead, Row, SERIF, MONO } from './shared';
+import { writeTextFile } from '../../api/abs';
 
 const ghostBtn = {
   padding: '6px 14px', fontSize: 11, fontFamily: MONO, letterSpacing: '0.06em',
@@ -15,89 +11,121 @@ const ghostBtn = {
   border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, color: 'var(--onyx-text-dim)', cursor: 'pointer',
 } as const;
 
-// Host-only server origin — keeps the URL out of the report but redacts any path/creds.
-function hostOnly(url: string): string {
-  try { return new URL(url).host || '(set)'; } catch { return url ? '(set)' : '(none)'; }
+// Canonical SPDX license text for an identifier.
+const spdx = (id: string) => `https://spdx.org/licenses/${id}.html`;
+
+// Bundled third-party components grouped by license, each linking to the SPDX
+// license text. Mirrored in the vault's "Open Source Licenses.md" backup — keep
+// both in sync when deps change.
+const LICENSE_GROUPS: { licenses: { id: string; url: string }[]; items: string[]; source?: { label: string; url: string } }[] = [
+  {
+    licenses: [{ id: 'LGPL-2.1-or-later', url: spdx('LGPL-2.1-or-later') }],
+    items: ['LibVLC — VLC media player runtime (audio engine)'],
+    source: { label: 'Source: videolan.org', url: 'https://www.videolan.org/vlc/download-sources.html' },
+  },
+  { licenses: [{ id: 'OFL-1.1 (SIL Open Font License)', url: spdx('OFL-1.1') }], items: ['Inter', 'JetBrains Mono', 'Source Serif 4'] },
+  { licenses: [{ id: 'Apache-2.0', url: spdx('Apache-2.0') }, { id: 'MIT', url: spdx('MIT') }], items: ['Tauri & official plugins', '@tauri-apps/api', 'serde / serde_json', 'reqwest', 'keyring', 'directories', 'chrono', 'futures-util', 'base64', 'log'] },
+  { licenses: [{ id: 'MIT', url: spdx('MIT') }], items: ['React, React DOM', '@tanstack/react-virtual', 'tokio / tokio-util', 'rust_socketio', 'vlc-rs (LibVLC bindings)', 'zip'] },
+];
+
+// Accent link that opens in the system browser via the opener plugin.
+function Lnk({ url, children }: { url: string; children: React.ReactNode }) {
+  return (
+    <span
+      onClick={() => { void openUrl(url).catch(() => {}); }}
+      style={{ color: 'var(--onyx-accent)', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 2 }}
+    >{children}</span>
+  );
 }
 
-// Assemble the diagnostic bundle: environment + settings + Skald app log + the
-// current-day Audiobookshelf server log, so a reader can correlate the two sides.
-async function buildDiagnosticReport(st: OnyxState): Promise<string> {
-  const L: string[] = [];
-  L.push('=== Skald Diagnostic Report ===');
-  L.push(`Generated: ${new Date().toISOString()}`);
-
-  let appVer = '0.1.0';
-  try { appVer = await getVersion(); } catch { /* non-tauri */ }
-
-  L.push('', '--- Environment ---');
-  L.push(`App version : ${appVer}`);
-  L.push(`User agent  : ${navigator.userAgent}`);
-  L.push(`Server      : ${hostOnly(st.serverUrl)}`);
-  L.push(`Live sync   : ${localStorage.getItem('onyx.sync.live') === 'true' ? 'on' : 'off'}`);
-  L.push(`Downloads   : ${st.downloads.length}`);
-  L.push(`Account     : ${st.user?.type ?? 'unknown'}${st.isAdmin ? ' (admin)' : ''}`);
-
-  L.push('', '--- Settings ---');
-  L.push(`theme=${st.theme} accent=${st.accentColor} scale=${st.scale} translucent=${st.translucent}`);
-  L.push(`librarySort=${st.librarySort} coverSize=${st.coverSize} groupBySeries=${st.groupBySeries}`);
-
-  L.push('', '--- Skald app log (skald.log) ---');
-  try {
-    const sk = await readSkaldLog();
-    L.push(sk.trim() === '' ? '(empty)' : sk.trimEnd());
-  } catch (e) { L.push(`(unavailable: ${String(e)})`); }
-
-  L.push('', '--- Audiobookshelf server log (current day, last 500) ---');
-  if (!st.isAdmin) {
-    L.push('(requires an admin account)');
-  } else {
-    try {
-      const data = await getLoggerData(st.serverUrl);
-      const rows = data.currentDailyLogs.slice(-500);
-      L.push(rows.length ? rows.map(l => `${l.timestamp} ${l.levelName} ${l.message}`).join('\n') : '(none)');
-    } catch (e) { L.push(`(unavailable: ${String(e)})`); }
-  }
-
-  return L.join('\n');
+// The full third-party notices are large (~3 MB of verbatim license texts), so
+// lazy-load them only when the user asks rather than bundling into the main chunk.
+async function loadNotices(): Promise<string> {
+  const mod = await import('../../assets/THIRD-PARTY-NOTICES.txt?raw');
+  return mod.default;
 }
 
-export default function AboutSection({ st }: AboutSectionProps) {
-  const [report, setReport] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+function LicensesModal({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState('');
 
-  const generate = async () => {
-    setBusy(true);
-    setStatus('');
+  const copyFull = async () => {
+    setStatus('Loading…');
     try {
-      const text = await buildDiagnosticReport(st);
-      setReport(text);
-      setStatus(`Report ready — ${text.length.toLocaleString()} chars`);
-      log.info('app', 'diagnostic report generated', { chars: text.length });
-    } catch (e) {
-      setStatus(`Failed to generate: ${String(e)}`);
-      log.error('app', 'diagnostic report failed', { err: String(e) });
-    } finally {
-      setBusy(false);
-    }
+      const text = await loadNotices();
+      await navigator.clipboard.writeText(text);
+      setStatus(`Copied full notices (${Math.round(text.length / 1024)} KB)`);
+    } catch (e) { setStatus(`Failed: ${String(e)}`); }
   };
 
-  const copy = async () => {
-    if (!report) return;
-    try { await navigator.clipboard.writeText(report); setStatus('Copied to clipboard'); }
-    catch { setStatus('Copy failed — use Save instead'); }
-  };
-
-  const saveFile = async () => {
-    if (!report) return;
+  const saveFull = async () => {
+    setStatus('Loading…');
     try {
-      const path = await save({ defaultPath: 'skald-diagnostics.txt', filters: [{ name: 'Text', extensions: ['txt'] }] });
-      if (!path) return;
-      await writeTextFile(path, report);
+      const text = await loadNotices();
+      const path = await save({ defaultPath: 'THIRD-PARTY-NOTICES.txt', filters: [{ name: 'Text', extensions: ['txt'] }] });
+      if (!path) { setStatus(''); return; }
+      await writeTextFile(path, text);
       setStatus('Saved');
-    } catch (e) { setStatus(`Save failed: ${String(e)}`); }
+    } catch (e) { setStatus(`Failed: ${String(e)}`); }
   };
+
+  return (
+    <div
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
+    >
+      <div style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 16, boxShadow: '0 40px 100px rgba(0,0,0,0.72), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), inset 0 1px 0 rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Header */}
+        <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em' }}>Open source licenses</div>
+            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>Components bundled with Skald</div>
+          </div>
+          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>✕</button>
+        </div>
+        <div style={{ flexShrink: 0, height: 1, background: 'var(--onyx-line)', margin: '14px 0 0' }} />
+
+        {/* Groups */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 22px 6px' }}>
+          {LICENSE_GROUPS.map((g, gi) => (
+            <div key={gi} style={{ marginBottom: 18 }}>
+              <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+                {g.licenses.map((l, i) => (
+                  <span key={l.id}>
+                    {i > 0 && <span style={{ color: 'var(--onyx-text-mute)' }}> OR </span>}
+                    <Lnk url={l.url}>{l.id}</Lnk>
+                  </span>
+                ))}
+              </div>
+              {g.items.map(it => (
+                <div key={it} style={{ fontSize: 12.5, color: 'var(--onyx-text-dim)', padding: '3px 0', lineHeight: 1.4 }}>{it}</div>
+              ))}
+              {g.source && (
+                <div style={{ fontFamily: MONO, fontSize: 10.5, marginTop: 4, letterSpacing: '0.03em' }}>
+                  <Lnk url={g.source.url}>{g.source.label}</Lnk>
+                </div>
+              )}
+            </div>
+          ))}
+          <div style={{ fontSize: 11.5, color: 'var(--onyx-text-mute)', lineHeight: 1.55, paddingTop: 4, paddingBottom: 8 }}>
+            License names link to the canonical SPDX text. The complete third-party notices below bundle the verbatim license text and copyright for every shipped Rust crate, npm package, LibVLC, and the fonts.
+          </div>
+        </div>
+
+        {/* Footer — the full bundled notices (verbatim texts), copy/save on demand */}
+        <div style={{ flexShrink: 0, borderTop: '1px solid var(--onyx-line)', padding: '12px 22px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', flex: 1 }}>
+            {status || 'Full third-party notices'}
+          </span>
+          <button style={{ ...ghostBtn, padding: '6px 12px' }} onClick={() => void copyFull()}>Copy all</button>
+          <button style={{ ...ghostBtn, padding: '6px 12px' }} onClick={() => void saveFull()}>Save…</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AboutSection() {
+  const [showLicenses, setShowLicenses] = useState(false);
 
   return (
     <div>
@@ -118,31 +146,12 @@ export default function AboutSection({ st }: AboutSectionProps) {
       <Row label="Check for updates" hint="Automatic checks run every 24h.">
         <button style={ghostBtn}>Check now</button>
       </Row>
-      <Row label="Release channel">
-        <div style={{ display: 'flex', gap: 6 }}>
-          {['Stable', 'Beta', 'Nightly'].map((v, i) => (
-            <Pill key={v} active={i === 1} onClick={() => {}}>{v}</Pill>
-          ))}
-        </div>
-      </Row>
-      <Row label="Open source licenses">
-        <button style={ghostBtn}>View</button>
+
+      <Row label="Open source licenses" hint="Third-party components bundled with Skald and their licenses.">
+        <button style={ghostBtn} onClick={() => setShowLicenses(true)}>View</button>
       </Row>
 
-      {/* Diagnostic report — bundles Skald + server logs and environment for support. */}
-      <Row label="Diagnostic report" hint="Bundles the Skald app log, the current-day server log, and environment/config — with secrets redacted — for sharing with support." align="top">
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={() => void generate()} disabled={busy}>
-              {busy ? 'Generating…' : 'Generate'}
-            </button>
-            <button style={{ ...ghostBtn, opacity: report ? 1 : 0.45 }} onClick={() => void copy()} disabled={!report}>Copy</button>
-            <button style={{ ...ghostBtn, opacity: report ? 1 : 0.45 }} onClick={() => void saveFile()} disabled={!report}>Save</button>
-            <button style={ghostBtn} onClick={() => { void openLogDir(); }}>Log folder</button>
-          </div>
-          {status && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>{status}</div>}
-        </div>
-      </Row>
+      {showLicenses && <LicensesModal onClose={() => setShowLicenses(false)} />}
     </div>
   );
 }

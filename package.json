@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "notices": "node scripts/generate-notices.mjs"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",

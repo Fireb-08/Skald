@@ -513,6 +513,9 @@ export function useOnyxState(): OnyxState {
       setCurrentLibraryId(target.id);
       const items = await fetchLibraryItems(serverUrl, target.id);
       setLibraryRaw(patchLibraryItems(items));
+      // A successful refresh means the server is reachable — clear the OFFLINE
+      // indicator (it may have been set if the app launched from disk cache).
+      setIsOffline(false);
     } catch (e) {
       console.error('[refreshLibrary] failed:', e);
     }
@@ -543,6 +546,10 @@ export function useOnyxState(): OnyxState {
   // True when the library loaded from the disk cache (server unreachable).
   // Reset to false on every successful server fetch.
   const [isOffline, setIsOffline] = useState(false);
+  // Mirror for once-mounted socket listeners that need the current value without
+  // re-subscribing (avoids a stale closure when deciding whether to resync).
+  const isOfflineRef = useRef(isOffline);
+  useEffect(() => { isOfflineRef.current = isOffline; }, [isOffline]);
   const [mediaProgress, setMediaProgress] = useState<MediaProgress[]>([]);
   const [listeningStats, setListeningStats] = useState<ListeningStats | null>(null);
   const [bookmarks, setBookmarks] = useState<AbsBookmark[]>([]);
@@ -1122,24 +1129,34 @@ export function useOnyxState(): OnyxState {
     const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
     if (!syncLive || !serverUrl || !authToken) return;
 
-    let unlisten: (() => void) | undefined;
+    let unlistenReconnect: (() => void) | undefined;
+    let unlistenAuth: (() => void) | undefined;
 
-    listen('socket-reconnected', async () => {
+    const resync = async () => {
       try {
-        console.log('[sync] socket reconnected — performing full resync');
-        // Refresh the library — re-fetches all items so additions, edits, and
-        // deletions that occurred during the outage are reflected immediately.
+        // Refresh the library — re-fetches all items (clears the OFFLINE flag on
+        // success) so additions/edits/deletions during the outage are reflected.
         await refreshLibrary();
         // Re-fetch /api/me to get the latest mediaProgress array so Pick it up
         // and cover progress overlays are correct without waiting for events.
         const me = await getMe(serverUrl);
         setMediaProgress(me.mediaProgress);
       } catch (e) {
-        console.error('[sync] resync after reconnect failed:', e);
+        console.error('[sync] resync failed:', e);
       }
-    }).then(fn => { unlisten = fn; });
+    };
 
-    return () => { unlisten?.(); };
+    // Reconnect after a drop — events fired during the outage were lost, so
+    // always resync to reflect current server state.
+    listen('socket-reconnected', () => { void resync(); }).then(fn => { unlistenReconnect = fn; });
+
+    // First successful auth — fires when the socket connects (including the first
+    // connect after an offline launch, where socket-reconnected does NOT fire).
+    // Only resync when we're actually offline so normal online launches don't
+    // trigger a redundant full library refetch right after the initial load.
+    listen('socket-authenticated', () => { if (isOfflineRef.current) void resync(); }).then(fn => { unlistenAuth = fn; });
+
+    return () => { unlistenReconnect?.(); unlistenAuth?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverUrl, authToken]);
 
