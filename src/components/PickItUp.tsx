@@ -22,11 +22,21 @@ export default function PickItUp({ st }: PickItUpProps) {
   const [continueItems, setContinueItems] = useState<LibraryItem[]>([]);
 
   useEffect(() => {
+    // Local libraries have no server continue-listening endpoint — derive the
+    // in-progress list from loaded items + local progress (newest first).
+    if (st.activeLibrary?.source === 'local') {
+      const prog = (id: string) => st.mediaProgress.find(p => p.libraryItemId === id);
+      const inProgress = st.library
+        .filter(b => { const mp = prog(b.id); return !!mp && mp.currentTime > 0 && !mp.isFinished; })
+        .sort((a, b) => (prog(b.id)?.lastUpdate ?? 0) - (prog(a.id)?.lastUpdate ?? 0));
+      setContinueItems(inProgress);
+      return;
+    }
     if (!st.serverUrl || !st.currentLibraryId) return;
     getContinueListening(st.serverUrl, st.currentLibraryId)
       .then(setContinueItems)
       .catch(console.error);
-  }, [st.serverUrl, st.currentLibraryId, st.mediaProgress]);
+  }, [st.serverUrl, st.currentLibraryId, st.mediaProgress, st.activeLibrary, st.library]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);

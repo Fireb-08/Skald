@@ -33,24 +33,44 @@ export interface SeriesViewProps {
 }
 
 export default function SeriesView({ st, inline = false }: SeriesViewProps) {
+  // Local libraries have no server series endpoint — derive series from the
+  // loaded items instead. ABS libraries use the dedicated endpoint (clean
+  // names/IDs + a books array per series).
+  const isLocal = st.activeLibrary?.source === 'local';
+
   // Fetch the canonical series list from the dedicated endpoint — gives clean names and IDs.
   const [fetchedSeries, setFetchedSeries] = useState<Series[]>([]);
   useEffect(() => {
-    if (!st.serverUrl || !st.currentLibraryId) return;
+    if (isLocal || !st.serverUrl || !st.currentLibraryId) return;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(setFetchedSeries)
       .catch(console.error);
-  }, [st.serverUrl, st.currentLibraryId]);
+  }, [isLocal, st.serverUrl, st.currentLibraryId]);
 
-  // Use the books array returned directly by the series endpoint.
-  // Each series from getLibrarySeries already includes its full books list —
-  // no client-side matching against st.library is needed or correct.
-  let seriesList: SeriesGroup[] = fetchedSeries.map(s => ({
-    id: s.id,
-    name: s.name,
-    // Sort by series sequence so volumes appear in reading order.
-    books: s.books.slice().sort((a, b) => seriesVolOf(a) - seriesVolOf(b)),
-  }));
+  let seriesList: SeriesGroup[];
+  if (isLocal) {
+    // Group loaded items by seriesName (set by the scanner from folder structure).
+    const map = new Map<string, LibraryItem[]>();
+    for (const b of st.library) {
+      const name = b.media?.metadata?.seriesName;
+      if (!name) continue;
+      const arr = map.get(name);
+      if (arr) arr.push(b); else map.set(name, [b]);
+    }
+    seriesList = Array.from(map.entries()).map(([name, books]) => ({
+      name,
+      books: books.slice().sort((a, b) => seriesVolOf(a) - seriesVolOf(b)),
+    }));
+  } else {
+    // Each series from getLibrarySeries already includes its full books list —
+    // no client-side matching against st.library is needed or correct.
+    seriesList = fetchedSeries.map(s => ({
+      id: s.id,
+      name: s.name,
+      // Sort by series sequence so volumes appear in reading order.
+      books: s.books.slice().sort((a, b) => seriesVolOf(a) - seriesVolOf(b)),
+    }));
+  }
 
   if (st.search) {
     const q = st.search.toLowerCase();
