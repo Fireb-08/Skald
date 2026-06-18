@@ -1077,6 +1077,46 @@ export async function deleteLocalBookmark(id: string): Promise<void> {
   return invoke('delete_local_bookmark', { id });
 }
 
+// ── Local Library match flow (Phase 5) ───────────────────────────────────────
+
+/** A metadata-provider candidate (server-free search). */
+export interface MetadataResult {
+  title?: string;
+  subtitle?: string;
+  author?: string;
+  narrator?: string;
+  publisher?: string;
+  publishedYear?: string;
+  description?: string;
+  cover?: string;
+  series?: string | null;
+  genres?: string[];
+  language?: string;
+  provider?: string;
+}
+
+/** Search a metadata provider directly (no server). provider: google|itunes|openlibrary. */
+export async function searchMetadata(query: string, provider: string, region?: string): Promise<MetadataResult[]> {
+  return invoke<MetadataResult[]>('search_metadata', { query, provider, region });
+}
+
+/** List a local library's _Unidentified books awaiting a match. */
+export async function getUnidentifiedItems(libraryId: string): Promise<ScannedItem[]> {
+  return invoke<ScannedItem[]>('get_unidentified_items', { libraryId });
+}
+
+/** Apply a match: file the quarantined book into Author/Series/Title, fetch cover, re-scan. */
+export async function applyLocalMatch(
+  libraryId: string,
+  sourcePath: string,
+  title: string,
+  author: string,
+  series?: string | null,
+  coverUrl?: string | null,
+): Promise<void> {
+  return invoke('apply_local_match', { libraryId, sourcePath, title, author, series, coverUrl });
+}
+
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.
  *  Replaces the old 5-minute updatedAt proxy; this is the authoritative open-sessions list.
  *  Sessions include all users' active playback, not just the authenticated caller's. */

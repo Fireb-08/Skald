@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
-import type { Library } from '../../api/abs';
-import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, ingestLocalPaths, setLocalLibraryConfig, type IngestOutcome } from '../../api/abs';
+import type { Library, ScannedItem } from '../../api/abs';
+import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, ingestLocalPaths, setLocalLibraryConfig, getUnidentifiedItems, type IngestOutcome } from '../../api/abs';
 import { log } from '../../lib/log';
 import Icon from '../Icon';
 import { SectionHead, Panel, Seg, MONO, DIM_GOLD } from './shared';
+import LocalMatchModal from './LocalMatchModal';
 
 // Local Library settings (Local Library & Split Libraries roadmap, Phase 2/3).
 // Create a local library from a folder on disk, (re)scan it into the catalog, and
@@ -17,8 +18,23 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
   // Busy id: the library currently scanning (or '__new__' while adding), so the
   // relevant button shows a spinner and is disabled.
   const [busy, setBusy] = useState<string | null>(null);
+  // Quarantined books per library (from <root>/_Unidentified), and the active
+  // match-modal target.
+  const [unidentified, setUnidentified] = useState<Record<string, ScannedItem[]>>({});
+  const [matchTarget, setMatchTarget] = useState<{ libId: string; item: ScannedItem } | null>(null);
 
   const locals: Library[] = st.libraries.filter(l => l.source === 'local');
+
+  const reloadUnidentified = useCallback(async () => {
+    const locs = st.libraries.filter(l => l.source === 'local');
+    const map: Record<string, ScannedItem[]> = {};
+    await Promise.all(locs.map(async l => {
+      try { map[l.id] = await getUnidentifiedItems(l.id); } catch { map[l.id] = []; }
+    }));
+    setUnidentified(map);
+  }, [st.libraries]);
+
+  useEffect(() => { void reloadUnidentified(); }, [reloadUnidentified]);
 
   // Folder name → default library name (last path segment).
   const folderName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || 'Local Library';
@@ -64,6 +80,7 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
       const outcomes = await ingestLocalPaths(lib.id, sources);
       if (st.currentLibraryId === lib.id) await st.setActiveLibrary(lib.id);
       else await st.refreshLibrary();
+      void reloadUnidentified();
       reportIngest(outcomes);
     } catch (e) {
       log.error('library', 'ingest failed', { err: String(e) });
@@ -80,6 +97,7 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
       const outcomes = await ingestLocalPaths(lib.id, [lib.stagingPath]);
       if (st.currentLibraryId === lib.id) await st.setActiveLibrary(lib.id);
       else await st.refreshLibrary();
+      void reloadUnidentified();
       reportIngest(outcomes);
     } catch (e) {
       log.error('library', 'staging import failed', { err: String(e) });
@@ -238,6 +256,42 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
           })
         )}
       </Panel>
+
+      {/* Needs attention — quarantined books awaiting a metadata match. */}
+      {locals.some(l => (unidentified[l.id]?.length ?? 0) > 0) && (
+        <Panel label="Needs attention">
+          {locals.flatMap(lib =>
+            (unidentified[lib.id] ?? []).map(item => (
+              <div
+                key={item.sourcePath}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '12px 0', borderBottom: '1px solid var(--onyx-line)' }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, color: 'var(--onyx-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.sourcePath.split(/[\\/]/).filter(Boolean).pop()}
+                  </div>
+                  <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--onyx-text-mute)', fontFamily: MONO }}>{lib.name} · unidentified</div>
+                </div>
+                <button onClick={() => setMatchTarget({ libId: lib.id, item })} style={btn()}>Match…</button>
+              </div>
+            )),
+          )}
+        </Panel>
+      )}
+
+      {matchTarget && (
+        <LocalMatchModal
+          st={st}
+          libraryId={matchTarget.libId}
+          item={matchTarget.item}
+          onClose={() => setMatchTarget(null)}
+          onApplied={async () => {
+            if (st.currentLibraryId === matchTarget.libId) await st.setActiveLibrary(matchTarget.libId);
+            else await st.refreshLibrary();
+            void reloadUnidentified();
+          }}
+        />
+      )}
     </div>
   );
 }

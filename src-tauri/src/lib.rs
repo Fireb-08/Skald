@@ -11,6 +11,7 @@ pub mod downloads; // Phase B: persistent registry of downloaded books
 pub mod scanner;   // Local Library: local folder scanner (emits ABS-shaped items)
 pub mod catalog;   // Local Library: SQLite catalog for local libraries + items
 pub mod ingest;    // Local Library: file-system organize layer (Author/Series/Title)
+pub mod providers; // Local Library: server-free metadata providers (match flow)
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -221,6 +222,10 @@ pub fn run() {
             commands::add_local_bookmark,
             commands::get_local_bookmarks,
             commands::delete_local_bookmark,
+            // Local Library — Phase 5: provider search + match flow
+            commands::search_metadata,
+            commands::get_unidentified_items,
+            commands::apply_local_match,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,

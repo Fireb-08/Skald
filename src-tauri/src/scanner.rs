@@ -255,8 +255,19 @@ fn build_item(dir: &Path, root: &Path, mut files: Vec<PathBuf>, library_id: &str
 }
 
 /// Scan `root` recursively and return one ScannedItem per directory that directly
-/// contains audio files. Blocking I/O — call from `spawn_blocking`.
+/// contains audio files, **skipping the `_Unidentified` quarantine folder**.
+/// Blocking I/O — call from `spawn_blocking`.
 pub fn scan_folder(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
+    scan_impl(root, library_id, true)
+}
+
+/// Scan the quarantine folder itself (does NOT skip `_Unidentified`). Used to
+/// list books awaiting a metadata match (Phase 5).
+pub fn scan_unidentified(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
+    scan_impl(root, library_id, false)
+}
+
+fn scan_impl(root: &str, library_id: &str, skip_unidentified: bool) -> Result<Vec<ScannedItem>, String> {
     let root_path = Path::new(root);
     if !root_path.exists() {
         return Err(format!("Scan path does not exist: {root}"));
@@ -275,7 +286,8 @@ pub fn scan_folder(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, Str
         }
         // Skip the quarantine folder — unidentified books awaiting a match
         // (ingest.rs) live under `_Unidentified/` and must not surface on the shelf.
-        if p.components().any(|c| c.as_os_str() == "_Unidentified") {
+        // Disabled when scanning the quarantine folder itself (scan_unidentified).
+        if skip_unidentified && p.components().any(|c| c.as_os_str() == "_Unidentified") {
             continue;
         }
         if is_audio(p) {

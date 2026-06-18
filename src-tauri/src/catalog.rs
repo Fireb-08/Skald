@@ -473,3 +473,39 @@ pub fn ingest(library_id: &str, sources: &[String]) -> Result<Vec<ingest::Ingest
     );
     Ok(outcomes)
 }
+
+// ── Unidentified queue + match-apply (Phase 5) ────────────────────────────────
+
+/// List the book units sitting in `<root>/_Unidentified` awaiting a match.
+/// Returns ScannedItems (seed metadata + source path) — not catalogued, since
+/// quarantined books are deliberately kept off the shelf.
+pub fn get_unidentified(library_id: &str) -> Result<Vec<scanner::ScannedItem>, String> {
+    let conn = open()?;
+    let root = library_root(&conn, library_id)?;
+    let un = Path::new(&root).join("_Unidentified");
+    if !un.exists() {
+        return Ok(Vec::new());
+    }
+    scanner::scan_unidentified(&un.to_string_lossy(), library_id)
+}
+
+/// Move a matched book out of `_Unidentified` into `<root>/Author/[Series/]Title`
+/// and return the new directory. The chosen author/title/series drive the folder
+/// names, so the subsequent catalog re-scan derives the right metadata via the
+/// folder-fallback path even when the files carry no tags. Cover download and the
+/// re-scan are done by the caller (async command).
+pub fn file_matched(
+    library_id: &str,
+    source_path: &str,
+    title: &str,
+    author: &str,
+    series: Option<&str>,
+) -> Result<String, String> {
+    let conn = open()?;
+    let root = library_root(&conn, library_id)?;
+    let target = ingest::unique_dir(ingest::book_target_dir(Path::new(&root), author, series, title));
+    // Move (not copy) — the book is leaving the quarantine folder.
+    ingest::place_book(Path::new(source_path), &target, true)?;
+    log::info!(target: "skald::metadata", "match filed {source_path} -> {}", target.display());
+    Ok(target.to_string_lossy().into_owned())
+}

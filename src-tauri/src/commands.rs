@@ -901,6 +901,61 @@ pub async fn delete_local_bookmark(id: String) -> Result<(), String> {
         .map_err(|e| format!("delete_local_bookmark task panicked: {e}"))?
 }
 
+// ── Local match flow (Local Library roadmap, Phase 5) ────────────────────────
+
+/// Search a metadata provider directly (server-free) for match candidates.
+#[tauri::command]
+pub async fn search_metadata(
+    query: String,
+    provider: String,
+    region: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    crate::providers::search(&query, &provider, region.as_deref()).await
+}
+
+/// List the books in a local library's `_Unidentified` folder awaiting a match.
+#[tauri::command]
+pub async fn get_unidentified_items(
+    library_id: String,
+) -> Result<Vec<crate::scanner::ScannedItem>, String> {
+    tokio::task::spawn_blocking(move || crate::catalog::get_unidentified(&library_id))
+        .await
+        .map_err(|e| format!("get_unidentified_items task panicked: {e}"))?
+}
+
+/// Apply a chosen match to a quarantined book: file it into Author/Series/Title,
+/// download the cover (best-effort), then re-scan so it joins the shelf.
+#[tauri::command]
+pub async fn apply_local_match(
+    library_id: String,
+    source_path: String,
+    title: String,
+    author: String,
+    series: Option<String>,
+    cover_url: Option<String>,
+) -> Result<(), String> {
+    // 1. Move out of _Unidentified into the named tree (blocking FS work).
+    let (lib, sp, t, a, s) = (library_id.clone(), source_path, title, author, series);
+    let target = tokio::task::spawn_blocking(move || {
+        crate::catalog::file_matched(&lib, &sp, &t, &a, s.as_deref())
+    })
+    .await
+    .map_err(|e| format!("file_matched task panicked: {e}"))??;
+
+    // 2. Best-effort cover download into the new folder (async HTTP).
+    if let Some(url) = cover_url {
+        let dest = std::path::Path::new(&target).join("cover.jpg");
+        let _ = crate::providers::download_cover(&url, &dest).await;
+    }
+
+    // 3. Re-scan so the now-identified book appears on the shelf.
+    let lib2 = library_id;
+    tokio::task::spawn_blocking(move || crate::catalog::scan_library(&lib2))
+        .await
+        .map_err(|e| format!("rescan task panicked: {e}"))??;
+    Ok(())
+}
+
 /// Scan a local folder and return ABS-shaped library items (Local Library
 /// roadmap, Phase 1). Runs on a blocking thread so a large scan never stalls the
 /// async runtime. `library_id` tags the emitted items so they slot into a local
