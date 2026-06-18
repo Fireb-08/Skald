@@ -481,6 +481,21 @@ export default function Login({ st }: LoginProps) {
               <span className="saga-arrow" style={{ display: 'flex', transition: 'transform 0.2s' }}>→</span>
             </button>
 
+            {/* Secondary path — use Skald with only on-disk local libraries, no
+                server. Opens the shell via the localMode gate in App.tsx. */}
+            <button
+              type="button"
+              onClick={() => { st.setLocalMode(true); st.setScreen('library'); }}
+              style={{
+                background: 'transparent', border: 'none', cursor: 'pointer',
+                fontFamily: SERIF, fontStyle: 'italic', fontSize: 13,
+                color: 'rgba(235,231,223,0.62)', padding: '6px 4px', textDecoration: 'underline',
+                textUnderlineOffset: 3, textDecorationColor: 'rgba(235,231,223,0.25)',
+              }}
+            >
+              Use Skald locally, without a server
+            </button>
+
           </div>
         </form>
     </div>

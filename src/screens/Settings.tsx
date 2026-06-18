@@ -63,6 +63,8 @@ export default function Settings({ st, onLogout }: SettingsProps) {
     localStorage.removeItem('skald.userId');
     localStorage.removeItem('skald.username');
     localStorage.removeItem('skald.sessionId');
+    // Also exit local-only mode so the auth gate shows the login screen again.
+    st.setLocalMode(false);
     onLogout();
   }
 

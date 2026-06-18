@@ -164,7 +164,7 @@ export default function App() {
   // st.authToken is initialised synchronously from localStorage, so this
   // check is instant and produces no flash. When Login succeeds it calls
   // st.setAuthToken which re-renders App and this condition becomes false.
-  if (!st.authToken) {
+  if (!st.authToken && !st.localMode) {
     return <Login st={st} />;
   }
 

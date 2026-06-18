@@ -248,6 +248,10 @@ export interface OnyxState {
   setUser: (user: User | null) => void;
   // True when the logged-in user is admin or root. Derived from user.type.
   isAdmin: boolean;
+  // True when running without a server (local-only mode). Opens the app shell
+  // just like an auth token does, so non-ABS users can use local libraries.
+  localMode: boolean;
+  setLocalMode: (on: boolean) => void;
   // Library
   library: LibraryItem[];
   // All libraries on the server (book + podcast), for the switcher. Populated
@@ -490,6 +494,14 @@ export function useOnyxState(): OnyxState {
   const setUser = useCallback((v: User | null) => {
     localStorage.setItem('skald.user', v ? JSON.stringify(v) : '');
     setUserRaw(v);
+  }, []);
+
+  // Local-only mode (no server). Persisted so the app re-opens straight into the
+  // shell on next launch without a login.
+  const [localMode, setLocalModeRaw] = useState(() => localStorage.getItem('skald.localMode') === 'true');
+  const setLocalMode = useCallback((on: boolean) => {
+    localStorage.setItem('skald.localMode', String(on));
+    setLocalModeRaw(on);
   }, []);
 
   // ── Library ─────────────────────────────────────────────────────────────────
@@ -1284,6 +1296,7 @@ export function useOnyxState(): OnyxState {
     authToken, setAuthToken,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
+    localMode, setLocalMode,
     library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
