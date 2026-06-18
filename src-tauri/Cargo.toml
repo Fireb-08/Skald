@@ -30,6 +30,11 @@ chrono = { version = "0.4", features = ["serde"] }
 vlc-rs = "0.3"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-dialog = "2"
+# Unified diagnostic logging — Rust `log::*` macros + the frontend
+# @tauri-apps/plugin-log API both write to one rotated file (app_log_dir) plus
+# stdout. The `log` facade crate provides the info!/warn!/error! macros.
+tauri-plugin-log = "2"
+log = "0.4"
 # Socket.IO client — async feature pulls in the tokio-backed async runtime.
 # Used in socket.rs for the live sync WebSocket transport (Phase B+).
 rust_socketio = { version = "0.6", features = ["async"] }

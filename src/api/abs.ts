@@ -990,6 +990,22 @@ export function flushOfflineProgress(serverUrl: string): Promise<number> {
   return invoke('flush_offline_progress', { serverUrl });
 }
 
+// ── Diagnostic logging (Diagnostic Logging roadmap) ──────────────────────────
+/** Reads the on-disk Skald log file (skald.log) for the Skald log viewer + report. */
+export function readSkaldLog(): Promise<string> {
+  return invoke('read_skald_log');
+}
+
+/** Reveals the Skald log folder (app_log_dir) in the OS file explorer. */
+export function openLogDir(): Promise<void> {
+  return invoke('open_log_dir');
+}
+
+/** Writes text to an absolute path (used to save the diagnostic report). */
+export function writeTextFile(path: string, contents: string): Promise<void> {
+  return invoke('write_text_file', { path, contents });
+}
+
 // Returns the offline progress queue entry for a book, or null if none exists.
 // Called by the offline playback path to restore the last saved position when
 // the server is unreachable and st.mediaProgress has no entry for the book.

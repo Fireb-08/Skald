@@ -42,6 +42,29 @@ pub fn run() {
         Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     tauri::Builder::default()
+        // Diagnostic logging — registered first so it captures startup and other
+        // plugins. Rust `log::*` and the frontend @tauri-apps/plugin-log API both
+        // write here: stdout (dev terminal) + a rotated file under app_log_dir
+        // (skald.log). The feature category rides in the log target (e.g.
+        // "skald::sync"). See the Diagnostic Logging roadmap.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir { file_name: Some("skald".into()) },
+                ))
+                // Webview target + the frontend attachConsole() surfaces Rust logs in
+                // devtools too (dev convenience). No console monkey-patching, so no loop.
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Webview,
+                ))
+                .level(log::LevelFilter::Info)
+                .max_file_size(5_000_000) // ~5 MB before rotation
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepOne)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -140,6 +163,9 @@ pub fn run() {
             commands::search_providers,
             commands::get_cache_dir,
             commands::reveal_cache_dir,
+            commands::read_skald_log,
+            commands::open_log_dir,
+            commands::write_text_file,
             // Library disk cache — read/write for offline launch fallback
             commands::save_library_cache,
             commands::load_library_cache,

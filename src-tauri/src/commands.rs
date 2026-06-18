@@ -1257,6 +1257,41 @@ pub fn reveal_cache_dir() -> Result<(), String> {
     Ok(())
 }
 
+/// Read the current Skald log file (skald.log under app_log_dir, where
+/// tauri-plugin-log writes) for the Logs → Skald subtab's "load full file" and
+/// the About diagnostic report. Returns "" if the file does not exist yet.
+#[tauri::command]
+pub fn read_skald_log(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let path = dir.join("skald.log");
+    match std::fs::read_to_string(&path) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("read log failed: {e}")),
+    }
+}
+
+/// Write text to a path chosen via the save dialog — used by the About tab to
+/// save the diagnostic report bundle.
+#[tauri::command]
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("write failed: {e}"))
+}
+
+/// Reveal the Skald log folder (app_log_dir) in the OS file explorer.
+#[tauri::command]
+pub fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(&dir)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Paginated listening sessions with optional server-side sorting.
 /// user_id=None → all sessions (admin); "__me__" → own; id → specific user.
 /// sort/desc are forwarded to ABS so it orders the full dataset, not just one page.
