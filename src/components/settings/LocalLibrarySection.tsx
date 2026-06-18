@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { listen } from '@tauri-apps/api/event';
 import type { OnyxState } from '../../state/onyx';
 import type { Library, ScannedItem } from '../../api/abs';
-import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, ingestLocalPaths, setLocalLibraryConfig, getUnidentifiedItems, type IngestOutcome } from '../../api/abs';
+import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, ingestLocalPaths, setLocalLibraryConfig, getUnidentifiedItems, startStagingWatch, type IngestOutcome } from '../../api/abs';
 import { log } from '../../lib/log';
 import Icon from '../Icon';
 import { SectionHead, Panel, Seg, MONO, DIM_GOLD } from './shared';
@@ -35,6 +36,30 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
   }, [st.libraries]);
 
   useEffect(() => { void reloadUnidentified(); }, [reloadUnidentified]);
+
+  // Watch the local libraries' staging folders. Re-armed when the set of staging
+  // paths changes (stagingKey). An empty list tears the Rust watcher down.
+  const stagingKey = st.libraries
+    .filter(l => l.source === 'local')
+    .map(l => l.stagingPath)
+    .filter(Boolean)
+    .join('|');
+  useEffect(() => {
+    const paths = stagingKey ? stagingKey.split('|') : [];
+    startStagingWatch(paths).catch(e => log.error('library', 'staging watch start failed', { err: String(e) }));
+  }, [stagingKey]);
+
+  // Coalesce bursty staging-changed events (a drop/copy fires many) into one
+  // refresh of the quarantine/needs-attention view.
+  const debounceRef = useRef<number | null>(null);
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    listen('staging-changed', () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      debounceRef.current = window.setTimeout(() => { void reloadUnidentified(); }, 2500);
+    }).then(fn => { un = fn; });
+    return () => { un?.(); if (debounceRef.current) window.clearTimeout(debounceRef.current); };
+  }, [reloadUnidentified]);
 
   // Folder name → default library name (last path segment).
   const folderName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() || 'Local Library';

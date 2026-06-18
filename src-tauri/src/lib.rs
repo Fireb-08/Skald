@@ -12,6 +12,7 @@ pub mod scanner;   // Local Library: local folder scanner (emits ABS-shaped item
 pub mod catalog;   // Local Library: SQLite catalog for local libraries + items
 pub mod ingest;    // Local Library: file-system organize layer (Author/Series/Title)
 pub mod providers; // Local Library: server-free metadata providers (match flow)
+pub mod watcher;   // Local Library: staging-folder file-system watcher
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -44,6 +45,10 @@ pub fn run() {
     // the token by item_id and calls token.cancel() to abort the stream loop.
     let cancel_registry: downloads::DownloadCancelRegistry =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
+
+    // Staging-folder watcher slot (Local Library) — None until the frontend calls
+    // start_staging_watch with the local libraries' staging paths.
+    let staging_watcher: watcher::StagingWatcher = Arc::new(std::sync::Mutex::new(None));
 
     tauri::Builder::default()
         // Diagnostic logging — registered first so it captures startup and other
@@ -92,6 +97,7 @@ pub fn run() {
         .manage(shortcut_map)
         .manage(socket_state) // Socket.IO client — accessed by connect/disconnect commands
         .manage(cancel_registry) // per-download CancellationTokens — accessed by cancel_download
+        .manage(staging_watcher) // Local Library staging-folder watcher slot
         .setup(|app| {
             use tauri::Manager;
 
@@ -226,6 +232,8 @@ pub fn run() {
             commands::search_metadata,
             commands::get_unidentified_items,
             commands::apply_local_match,
+            // Local Library — Phase 7: staging-folder watcher
+            commands::start_staging_watch,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,

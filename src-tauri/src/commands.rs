@@ -901,6 +901,17 @@ pub async fn delete_local_bookmark(id: String) -> Result<(), String> {
         .map_err(|e| format!("delete_local_bookmark task panicked: {e}"))?
 }
 
+/// (Re)start watching the given staging folders; emits `staging-changed` events.
+/// Pass an empty list to stop watching. (Local Library roadmap, Phase 7.)
+#[tauri::command]
+pub fn start_staging_watch(
+    paths: Vec<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::watcher::StagingWatcher>,
+) -> Result<(), String> {
+    crate::watcher::start(paths, app, &state)
+}
+
 // ── Local match flow (Local Library roadmap, Phase 5) ────────────────────────
 
 /// Search a metadata provider directly (server-free) for match candidates.

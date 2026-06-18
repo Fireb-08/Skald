@@ -1105,6 +1105,11 @@ export async function getUnidentifiedItems(libraryId: string): Promise<ScannedIt
   return invoke<ScannedItem[]>('get_unidentified_items', { libraryId });
 }
 
+/** (Re)start watching local staging folders; emits `staging-changed` events. Empty list stops it. */
+export async function startStagingWatch(paths: string[]): Promise<void> {
+  return invoke('start_staging_watch', { paths });
+}
+
 /** Apply a match: file the quarantined book into Author/Series/Title, fetch cover, re-scan. */
 export async function applyLocalMatch(
   libraryId: string,
