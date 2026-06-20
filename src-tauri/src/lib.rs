@@ -182,6 +182,7 @@ pub fn run() {
             commands::set_speed,
             commands::set_volume,
             commands::get_cover,
+            commands::cache_remote_image,
             commands::get_audio_devices,
             commands::set_audio_device,
             commands::delete_progress,

@@ -335,3 +335,44 @@ fn scan_impl(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
     );
     Ok(items)
 }
+
+/// Cheap presence scan: the set of book-unit directories under `root`, as absolute
+/// path strings, WITHOUT probing any file. A book unit is a directory that directly
+/// contains audio. The catalog reconcile uses this to diff disk against the catalog
+/// so it never pays an ffprobe spawn per file for books it already knows — only
+/// genuinely-new directories get probed (via `scan_dir`). Blocking I/O.
+pub fn list_book_dirs(root: &str) -> Result<Vec<String>, String> {
+    let root_path = Path::new(root);
+    if !root_path.exists() {
+        return Ok(Vec::new());
+    }
+    // BTreeSet de-duplicates parents (many files share one) and keeps a stable order.
+    let mut dirs: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path();
+        if p.is_file() && is_audio(p) {
+            if let Some(parent) = p.parent() {
+                dirs.insert(parent.to_path_buf());
+            }
+        }
+    }
+    Ok(dirs.into_iter().map(|d| d.to_string_lossy().into_owned()).collect())
+}
+
+/// Build one ScannedItem for a single newly-discovered book-unit directory,
+/// probing ONLY this directory's audio files. Used by the reconcile to catalogue a
+/// new book without re-probing the whole library. `root` is the library's
+/// Audiobooks root (used for the folder-name fallback). None if it holds no audio.
+pub fn scan_dir(dir: &str, root: &str, library_id: &str) -> Option<ScannedItem> {
+    let dir_path = Path::new(dir);
+    let files: Vec<PathBuf> = std::fs::read_dir(dir_path)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| is_audio(p))
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    Some(build_item(dir_path, Path::new(root), files, library_id))
+}

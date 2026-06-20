@@ -4,7 +4,7 @@ import { useState, useEffect, type CSSProperties } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookPalette, bookTpl, bookTitle, bookAuthor, bookSeries } from '../state/onyx';
-import { getCover, getLocalCover } from '../api/abs';
+import { getCover, getLocalCover, cacheRemoteImage } from '../api/abs';
 import { subscribeCover } from '../lib/coverBust';
 
 export interface CoverProps {
@@ -32,26 +32,39 @@ export default function Cover({ item, size = 180, scale = 1, fill = false, class
 
   useEffect(() => {
     let cancelled = false;
-    // Local-library item: load its embedded/sidecar cover from the catalog folder
-    // (resized + cached by the backend). Skip when the scan found no cover so we
-    // fall straight through to the generated template — and note this path needs
-    // no serverUrl, so it works in standalone mode too.
-    if (item.localPath) {
-      if (!item.hasLocalCover) return;
-      getLocalCover(item.id, bust)
+    // Remote fallback (podcast feed art the ABS server doesn't store): cache the
+    // bytes to disk once, then render from the asset:// path like any other cover.
+    // This turns repeated remote <img> loads — the cause of the slow, "uncached"
+    // podcast grid — into a one-time fetch. On failure we leave coverSrc null so
+    // the raw-URL <img> fallback below still shows something.
+    const useRemoteFallback = () => {
+      if (!fallbackImageUrl) return;
+      cacheRemoteImage(fallbackImageUrl)
         .then(path => { if (!cancelled) setCoverSrc(path); })
         .catch(() => {});
+    };
+    // Local-library item: load its embedded/sidecar cover from the catalog folder
+    // (resized + cached by the backend). Skip when the scan found no cover so we
+    // fall through to the remote fallback / generated template — and note this
+    // path needs no serverUrl, so it works in standalone mode too.
+    if (item.localPath) {
+      if (!item.hasLocalCover) { useRemoteFallback(); return () => { cancelled = true; }; }
+      getLocalCover(item.id, bust)
+        .then(path => { if (!cancelled) setCoverSrc(path); })
+        .catch(() => { useRemoteFallback(); });
       return () => { cancelled = true; };
     }
-    if (!serverUrl) return;
+    // No server configured (standalone) — go straight to the remote fallback.
+    if (!serverUrl) { useRemoteFallback(); return () => { cancelled = true; }; }
     // get_cover returns an absolute file path; convertFileSrc turns it into an
     // asset:// URL at render. 400px gives ~2× headroom for high-DPI shelves.
+    // If the server has no cover (common for older podcast subscriptions), cache
+    // the remote feed image instead of re-downloading it on every render.
     getCover(serverUrl, item.id, 400, bust)
       .then(path => { if (!cancelled) setCoverSrc(path); })
-      // Cover may be absent (podcasts w/o art); fallbackImageUrl / template cover it.
-      .catch(() => {});
+      .catch(() => { useRemoteFallback(); });
     return () => { cancelled = true; };
-  }, [serverUrl, item.id, item.localPath, item.hasLocalCover, bust]);
+  }, [serverUrl, item.id, item.localPath, item.hasLocalCover, bust, fallbackImageUrl]);
 
   const [bg, mid, accent] = bookPalette(item);
   const tpl = bookTpl(item);

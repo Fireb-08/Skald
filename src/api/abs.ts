@@ -572,6 +572,13 @@ export function getCover(serverUrl: string, itemId: string, width?: number, bust
   return invoke('get_cover', { serverUrl, itemId, width: width ?? null, bust: bust ?? null });
 }
 
+// Download+cache a remote image URL once (podcast feed art the ABS server doesn't
+// store), returning a disk path to convert via convertFileSrc. Turns repeated
+// remote <img> loads into a one-time fetch + asset:// reads.
+export function cacheRemoteImage(url: string): Promise<string> {
+  return invoke('cache_remote_image', { url });
+}
+
 export function getAudioDevices(): Promise<AudioDevice[]> {
   return invoke('get_audio_devices');
 }

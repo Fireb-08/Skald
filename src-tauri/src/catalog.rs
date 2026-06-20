@@ -304,7 +304,16 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
     // The shelf catalog is everything under Audiobooks/ — Staging/Unidentified/
     // Podcasts are siblings and are scanned (or not) separately.
     let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
-    let scanned = scanner::scan_folder(&books_root.to_string_lossy(), library_id)?;
+    let books_root_str = books_root.to_string_lossy().into_owned();
+
+    // Cheap presence scan — directory paths only, NO ffprobe. Re-probing every
+    // file of every book on each load (then discarding the result for books we
+    // already know) was the dominant cost of switching to a local library; we now
+    // probe only genuinely-new directories below, so an unchanged library costs
+    // just a directory walk + a DB diff.
+    let present_dirs = scanner::list_book_dirs(&books_root_str)?;
+    let present: std::collections::HashSet<&str> =
+        present_dirs.iter().map(|s| s.as_str()).collect();
 
     // Existing rows keyed by on-disk path.
     let mut existing: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -324,17 +333,20 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
             }
         }
     }
-    let present: std::collections::HashSet<&str> =
-        scanned.iter().map(|s| s.source_path.as_str()).collect();
 
     let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
     let now = now_ms();
 
-    // ADD folders not yet catalogued (derive metadata once; catalog assigns id).
-    for s in &scanned {
-        if existing.contains_key(&s.source_path) {
-            continue; // already catalogued — preserve its metadata
+    // ADD folders not yet catalogued — probe ONLY these (derive metadata once).
+    let mut added = 0usize;
+    for dir in &present_dirs {
+        if existing.contains_key(dir) {
+            continue; // already catalogued — no probe, preserve its metadata
         }
+        let s = match scanner::scan_dir(dir, &books_root_str, library_id) {
+            Some(s) => s,
+            None => continue, // raced away / no audio
+        };
         let id = new_item_id(&s.source_path);
         let mut item = s.item.clone();
         if let Some(obj) = item.as_object_mut() {
@@ -352,6 +364,7 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
             params![id, library_id, s.source_path, item_str, s.confidence as i64, s.identified as i64, now],
         )
         .map_err(|e| format!("insert item: {e}"))?;
+        added += 1;
     }
 
     // REMOVE rows whose folder is gone; clear their progress/bookmarks too.
@@ -367,7 +380,7 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
     let count = conn
         .query_row("SELECT COUNT(*) FROM items WHERE library_id = ?1", params![library_id], |r| r.get::<_, i64>(0))
         .map_err(|e| format!("count: {e}"))? as usize;
-    log::info!(target: "skald::library", "catalog: reconciled library {library_id} present={} items={count}", present.len());
+    log::info!(target: "skald::library", "catalog: reconciled library {library_id} present={} added={added} items={count}", present.len());
     Ok(count)
 }
 

@@ -44,6 +44,36 @@ pub fn load_cover(item_id: &str, width: Option<u32>, version: u32) -> Result<Vec
     std::fs::read(&path).map_err(|e| format!("cover not cached for {item_id}: {e}"))
 }
 
+/// Cache path for an arbitrary remote image URL (e.g. podcast feed artwork the
+/// ABS server doesn't store), keyed by a hash of the URL so the same art is only
+/// fetched once. Saved with a `.jpg` extension: `<img>` sniffs the real format on
+/// load, so the extension only needs to be image-ish for the asset protocol — the
+/// actual bytes may be PNG/WebP and still render. Lives in the same covers dir,
+/// which the asset protocol is already allowed to serve.
+pub fn remote_cache_path(url: &str) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut h);
+    cache_dir()
+        .unwrap_or_else(|| PathBuf::from("covers"))
+        .join(format!("remote_{:016x}.jpg", h.finish()))
+}
+
+/// Returns `true` if this remote image URL is already cached on disk.
+pub fn remote_is_cached(url: &str) -> bool {
+    remote_cache_path(url).exists()
+}
+
+/// Write a downloaded remote image to the cache, returning its path.
+pub fn save_remote(url: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let path = remote_cache_path(url);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Delete every cached cover variant for `item_id` (any width/version). Called
 /// after a cover changes so the next fetch re-downloads the new art. Item ids are
 /// fixed-length UUIDs, so a `starts_with(id)` prefix match is unambiguous.

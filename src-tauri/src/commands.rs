@@ -613,6 +613,29 @@ pub async fn get_cover(
     Ok(cover_cache::cache_path(&item_id, width, version).to_string_lossy().into_owned())
 }
 
+/// Download a remote image URL once and cache it on disk, returning the cached
+/// file path (which the frontend turns into an asset:// URL). Used for podcast
+/// feed artwork the ABS server doesn't store: instead of re-loading the remote
+/// `<img src>` on every render, the bytes are fetched a single time and then
+/// served from disk, mirroring how server/local covers behave.
+#[tauri::command]
+pub async fn cache_remote_image(url: String) -> Result<String, String> {
+    if cover_cache::remote_is_cached(&url) {
+        return Ok(cover_cache::remote_cache_path(&url).to_string_lossy().into_owned());
+    }
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("remote image fetch failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("remote image fetch HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("remote image read failed: {e}"))?;
+    let path = cover_cache::save_remote(&url, &bytes)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn update_media(
     server_url: String,
