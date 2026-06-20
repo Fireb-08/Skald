@@ -1,5 +1,6 @@
 import type { OnyxState } from '../../state/onyx';
 import { bookTitle, bookAuthor, fmtTime } from '../../state/onyx';
+import { asPodcastItem } from '../../api/abs';
 // togglePlayback pairs the LibVLC command with st.setPlaying so the icon
 // updates immediately instead of waiting for the next playback-tick event.
 import { togglePlayback } from '../../api/playbook';
@@ -12,24 +13,63 @@ const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 
 const BARS = 64;
 
-export interface MiniPlayerProps { st: OnyxState; }
+export interface MiniPlayerProps {
+  st: OnyxState;
+  // When true, render regardless of the focused-vs-playing relationship — used by
+  // the Library "In focus" column to keep playback controllable after the user
+  // navigates to another library (where the now-playing item leaves the shelf).
+  // When false/absent (the Player screen), only show once focus differs from the
+  // playing item, so it doesn't duplicate the main transport.
+  force?: boolean;
+}
 
-export default function MiniPlayer({ st }: MiniPlayerProps) {
+export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
   const playing = st.playing;
-  const currentBook = st.currentBook;
+  // Prefer the stable snapshot so the card survives a library switch; fall back to
+  // the active library's derived currentBook for the in-library Player case.
+  const item = st.playingItem ?? st.currentBook;
 
-  if (!currentBook || !st.currentBookId) return null;
-  if (!st.focusedBookId || st.focusedBookId === st.currentBookId) return null;
+  if (!item || !st.currentBookId) return null;
+  // Player-screen behaviour: hide until the user is looking at a *different* item.
+  if (!force && (!st.focusedBookId || st.focusedBookId === st.currentBookId)) return null;
+
+  // Podcast episodes carry their own title/duration; books use the item.
+  const ep = st.currentEpisode;
+  const isPodcast = !!ep;
 
   const progress = st.bookSecs > 0 ? Math.min(1, st.position / st.bookSecs) : 0;
   const playedTo = Math.floor(BARS * progress);
 
-  // Current chapter (if the playing book has chapter data) → "Ch. N" + its title.
-  const chapters = currentBook.media?.chapters ?? [];
-  const curChapter = chapters.find(c => st.position >= c.start && st.position < c.end) ?? null;
-  const chapterNum = curChapter ? chapters.indexOf(curChapter) + 1 : 0;
-  const eyebrow = chapterNum ? `Now Playing · Ch. ${chapterNum}` : 'Now Playing';
-  const subtitle = curChapter?.title || bookAuthor(currentBook) || '';
+  // Title/subtitle/eyebrow differ for books vs podcast episodes.
+  let title: string;
+  let subtitle: string;
+  let eyebrow = 'Now Playing';
+  if (isPodcast) {
+    title = ep!.title || bookTitle(item);
+    subtitle = asPodcastItem(item).media?.metadata?.title ?? '';
+  } else {
+    const chapters = item.media?.chapters ?? [];
+    const curChapter = chapters.find(c => st.position >= c.start && st.position < c.end) ?? null;
+    const chapterNum = curChapter ? chapters.indexOf(curChapter) + 1 : 0;
+    eyebrow = chapterNum ? `Now Playing · Ch. ${chapterNum}` : 'Now Playing';
+    title = bookTitle(item);
+    subtitle = curChapter?.title || bookAuthor(item) || '';
+  }
+
+  // Cover fallback art for podcasts (feed imageUrl) so the thumb isn't blank.
+  const podMeta = isPodcast ? (asPodcastItem(item).media?.metadata as unknown as Record<string, unknown>) : undefined;
+  const fallbackImageUrl = podMeta ? ((podMeta.imageUrl as string) || (podMeta.image as string) || undefined) : undefined;
+
+  // Return to the now-playing item: switch back to its library if we wandered
+  // off, focus it, and open the full player.
+  const returnToNowPlaying = async () => {
+    const lib = st.playingItem?.libraryId;
+    if (lib && lib !== st.currentLibraryId) {
+      try { await st.setActiveLibrary(lib); } catch (e) { console.error('[MiniPlayer] switch library failed:', e); }
+    }
+    st.setFocusedBookId(st.currentBookId);
+    st.setScreen('player');
+  };
 
   // Click-to-seek on the waveform (absolute seconds, mirroring the full player).
   const onSeek = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -41,8 +81,8 @@ export default function MiniPlayer({ st }: MiniPlayerProps) {
 
   return (
     <div style={{
-      // In-flow at the bottom of the Player's left column (not an overlay), so it
-      // never covers the title/synopsis. Fills the column's full width.
+      // In-flow at the bottom of the host column (not an overlay), so it never
+      // covers the title/synopsis. Fills the column's full width.
       width: '100%',
       flexShrink: 0,
       marginTop: 14,
@@ -61,18 +101,18 @@ export default function MiniPlayer({ st }: MiniPlayerProps) {
       {/* Header — cover + chapter eyebrow + title + subtitle */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
         <button
-          onClick={() => st.setFocusedBookId(st.currentBookId)}
+          onClick={returnToNowPlaying}
           title="Return to now playing"
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, lineHeight: 0 }}
         >
-          <Cover item={currentBook} size={40} serverUrl={st.serverUrl} style={{ borderRadius: 6 }} />
+          <Cover item={item} size={40} serverUrl={st.serverUrl} style={{ borderRadius: 6 }} fallbackImageUrl={fallbackImageUrl} />
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: MONO, fontSize: 8.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.14em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {eyebrow}
           </div>
           <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: 'var(--onyx-text)', lineHeight: 1.15, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {bookTitle(currentBook)}
+            {title}
           </div>
           {subtitle && (
             <div style={{ fontSize: 11.5, color: 'var(--onyx-text-dim)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

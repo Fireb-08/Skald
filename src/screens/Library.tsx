@@ -15,6 +15,7 @@ import { PlaylistsView } from '../components/shelf/tabs';
 import { GenresView } from '../components/shelf/tabs';
 import { PublishersView } from '../components/shelf/tabs';
 import PodcastBrowse from '../components/podcast/PodcastBrowse';
+import MiniPlayer from '../components/player/MiniPlayer';
 import { prefetchReviews } from '../api/reviewCache';
 
 export interface LibraryProps {
@@ -31,14 +32,48 @@ export default function Library({ st }: LibraryProps) {
     return cancel;
   }, [st.library, st.serverUrl, st.enableOpenLibrary, isPodcast]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Podcast libraries use a dedicated full-width browse grid instead of the
-  // book-centric Focus/Greeting + shelf-tabs layout (those components assume
-  // book media). The library switcher in TopNav toggles between the two.
+  // ── The "In focus" left column (shared by the book + podcast views) ──────────
+  // Top: FocusPanel when a *book* is playing in the active library, else the
+  // GreetingPane (FocusPanel is book-specific, so podcasts always use Greeting).
+  // Bottom: the MiniPlayer, docked whenever the user has navigated away from the
+  // now-playing item — into another library, or into a podcast library where the
+  // Focus panel can't represent the playing episode — so playback stays
+  // controllable without returning to the original library.
+  const playingIsPodcast = !!st.currentEpisode;
+  const playingBookInLib = !!st.currentBookId && st.library.some(b => b.id === st.currentBookId);
+  const showFocus = playingBookInLib && !playingIsPodcast;
+  const showMini = !!st.playingItem && !!st.currentBookId && !showFocus;
+
+  const focusColumn = (
+    <div style={{
+      alignSelf: 'stretch',     // fill the cross-axis height of the Library flex container
+      display: 'flex',
+      flexDirection: 'column',
+      flexShrink: 0,            // prevent width compression (same constraint as FocusPanel)
+      minHeight: 0,
+    }}>
+      {/* Host stretches the Focus/Greeting card to the available height; the
+          MiniPlayer (when shown) docks below it at the column's width. */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        {showFocus
+          ? <FocusPanel st={st} />
+          : <GreetingPane st={st} name={st.user?.username ?? 'Reader'} />}
+      </div>
+      {showMini && <MiniPlayer st={st} force />}
+    </div>
+  );
+
+  // Podcast libraries use a dedicated browse grid instead of the book-centric
+  // shelf-tabs, but share the same Focus/Greeting + MiniPlayer left column for
+  // consistency. The library switcher in TopNav toggles between the two.
   if (isPodcast) {
     return (
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>
-        <TopNav st={st} />
-        <PodcastBrowse st={st} />
+      <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>
+        {focusColumn}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+          <TopNav st={st} />
+          <PodcastBrowse st={st} />
+        </div>
       </div>
     );
   }
@@ -46,28 +81,7 @@ export default function Library({ st }: LibraryProps) {
   return (
     <div style={{ flex: 1, display: 'flex', gap: 24, padding: '8px 24px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'visible' }}>
       {/* overflow: visible required — TopNav active tab indicator protrudes below nav bar via position:absolute */}
-      {/* Left slot: GreetingPane until the user starts playback, then FocusPanel.
-          currentBookId is '' on cold launch and only set by playBook(), so
-          clicking a shelf book (which sets focusedBookId only) leaves the pane intact.
-          FocusPanel is the now-playing pane, so it only shows when the playing book
-          belongs to the active library — browsing another library while a foreign
-          book plays falls back to the Greeting pane (the playing book stays
-          controllable from the Player screen and its pane returns on switch-back).
-          The wrapper div gives GreetingPane an explicit containing block so that
-          height: '100%' on its Glass card resolves correctly against the column height. */}
-      {st.currentBookId && st.library.some(b => b.id === st.currentBookId)
-        ? <FocusPanel st={st} />
-        : (
-          <div style={{
-            alignSelf: 'stretch',     // fill the cross-axis height of the Library flex container
-            display: 'flex',          // make this a flex column so the child can use height: '100%'
-            flexDirection: 'column',  // vertical so GreetingPane stretches to fill the wrapper
-            flexShrink: 0,            // prevent width compression (same constraint as FocusPanel)
-          }}>
-            <GreetingPane st={st} name={st.user?.username ?? 'Reader'} />
-          </div>
-        )
-      }
+      {focusColumn}
 
       {/* RIGHT — shelf column */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>

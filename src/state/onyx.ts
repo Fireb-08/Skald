@@ -302,6 +302,10 @@ export interface OnyxState {
   // episode title/description/date/duration without re-fetching the item.
   currentEpisode: PodcastEpisode | null;
   setCurrentEpisode: (e: PodcastEpisode | null) => void;
+  // Stable snapshot of the now-playing item (book, or the episode's parent
+  // podcast), persisted across library switches for the cross-library MiniPlayer.
+  playingItem: LibraryItem | undefined;
+  setPlayingItem: (i: LibraryItem | undefined) => void;
   currentBook: LibraryItem | undefined;
   focusedBook: LibraryItem | undefined;
   focusedBookId: string | null;
@@ -805,6 +809,12 @@ export function useOnyxState(): OnyxState {
   const [podcastDetailId, setPodcastDetailId] = useState<string | null>(null);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [currentEpisode, setCurrentEpisode] = useState<PodcastEpisode | null>(null);
+  // A stable snapshot of the item currently loaded into the player (book OR the
+  // parent podcast of the playing episode), set when playback starts. Unlike
+  // `currentBook` — which is derived from the ACTIVE library's items and goes
+  // stale the moment you switch libraries — this persists across library
+  // switches so the cross-library MiniPlayer can always render the playing item.
+  const [playingItem, setPlayingItem] = useState<LibraryItem | undefined>(undefined);
   // Focused book is scoped per library so switching libraries restores each
   // one's own focus instead of carrying the other's. focusedByLib maps a
   // library id → its focused item id; focusedBookId below derives the slot for
@@ -1073,7 +1083,10 @@ export function useOnyxState(): OnyxState {
   }, [serverUrl, library.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-  const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
+  // Prefer the active library's copy; fall back to the playing-item snapshot when
+  // the playing item lives in another library (so the player/mini stay correct
+  // after a library switch), then to the first item as a last resort.
+  const currentBook  = library.find(b => b.id === currentBookId) ?? playingItem ?? library[0];
   const focusedBook  = library.find(b => b.id === focusedBookId) ?? library[0];
   // Total duration for the transport. Books carry an authoritative media.duration.
   // Podcast items do not (duration is per-episode), so use the playing episode's
@@ -1092,11 +1105,13 @@ export function useOnyxState(): OnyxState {
   // state without stale-closure issues. The sync effect runs after every
   // render (no dep array) so handlers always see the latest values.
   const currentBookIdRef    = useRef(currentBookId);
+  const currentEpisodeIdRef = useRef(currentEpisodeId);
   const playingRef          = useRef(playing);
   const currentLibraryIdRef = useRef(currentLibraryId);
   const isLocalPlaybackRef  = useRef(isLocalPlayback);
   useEffect(() => {
     currentBookIdRef.current    = currentBookId;
+    currentEpisodeIdRef.current = currentEpisodeId;
     playingRef.current          = playing;
     currentLibraryIdRef.current = currentLibraryId;
     isLocalPlaybackRef.current  = isLocalPlayback;
@@ -1115,16 +1130,19 @@ export function useOnyxState(): OnyxState {
         // in-memory progress store, so mirror the catalog write the Rust tick is
         // making — keeps Pick-it-up and cover overlays current for local books.
         const id = currentBookIdRef.current;
+        const epId = currentEpisodeIdRef.current; // non-null while a local episode plays
         if (isLocalPlaybackRef.current && id) {
           setMediaProgress(prev => {
-            const idx = prev.findIndex(p => p.libraryItemId === id);
+            // Key by (item, episode) so a podcast's episodes don't overwrite each
+            // other and a book row (episodeId null) stays distinct from episodes.
+            const idx = prev.findIndex(p => p.libraryItemId === id && (p.episodeId ?? null) === (epId ?? null));
             const duration = payload.duration > 0
               ? payload.duration
               : (idx >= 0 ? prev[idx].duration : 0);
             const rec: MediaProgress = {
-              id: idx >= 0 ? prev[idx].id : id,
+              id: idx >= 0 ? prev[idx].id : (epId ? `${id}-${epId}` : id),
               libraryItemId: id,
-              episodeId: idx >= 0 ? prev[idx].episodeId : null,
+              episodeId: epId ?? (idx >= 0 ? prev[idx].episodeId : null),
               duration,
               currentTime: payload.currentTime,
               progress: duration > 0 ? payload.currentTime / duration : 0,
@@ -1394,6 +1412,7 @@ export function useOnyxState(): OnyxState {
     podcastDetailId, setPodcastDetailId,
     currentEpisodeId, setCurrentEpisodeId,
     currentEpisode, setCurrentEpisode,
+    playingItem, setPlayingItem,
     currentBook, currentBookId, setCurrentBookId, currentBookChapters,
     focusedBook, focusedBookId, setFocusedBookId,
     playing, setPlaying,

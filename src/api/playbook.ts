@@ -42,6 +42,9 @@ export async function playBook(
     // A local-library item (scanned from disk, not a downloaded ABS book) keeps
     // its progress in the catalog, never the server-bound offline queue.
     const isLocalLibrary = !localDownload && !!libItem?.localPath;
+    // Snapshot the now-playing item so the cross-library MiniPlayer can render it
+    // after the user switches to a different library (where it leaves st.library).
+    if (libItem) st.setPlayingItem(libItem);
     log.info('playback', 'playBook', { bookId, offline: !!localFilePath, local: isLocalLibrary, override: startTimeOverride !== undefined });
     if (localFilePath) {
       // Clear any stale online session state — there is no server session in the
@@ -180,6 +183,10 @@ export async function playEpisode(
   }
   playBookInFlight = true;
   try {
+    // Snapshot the parent podcast so the cross-library MiniPlayer can render the
+    // playing episode even after the user switches to a different library.
+    const podItem = st.library.find(b => b.id === podcastItemId);
+    if (podItem) st.setPlayingItem(podItem);
     // ── Local podcast path: play a downloaded episode from disk (no server) ──────
     // A local podcast episode carries `localPath` (the downloaded audio file) and
     // its progress lives in the catalog keyed per (podcast, episode).
