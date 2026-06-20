@@ -375,6 +375,9 @@ pub struct AdminUser {
     /// Unix ms when the account was created.
     pub created_at: Option<i64>,
     pub is_active: Option<bool>,
+    /// Optional email address (admin user-management). Absent on older servers.
+    #[serde(default)]
+    pub email: Option<String>,
     /// Library-item ID the user is currently reading, if any.
     pub current_book_id: Option<String>,
     // ── Access control (cluster H) ───────────────────────────────────────────

@@ -1682,21 +1682,45 @@ impl AbsClient {
         username: &str,
         password: &str,
         user_type: &str,
+        email: Option<&str>,
+        is_active: bool,
+        // Full permissions blob (carries librariesAccessible/itemTagsSelected
+        // nested); None lets the server apply its defaults.
+        permissions: Option<serde_json::Value>,
     ) -> Result<AdminUser, String> {
         // Wrapper to match the ABS response envelope: { "user": { ... } }
         #[derive(serde::Deserialize)]
         struct CreateUserResponse { user: AdminUser }
 
+        // Build the body so optional fields are only sent when provided.
+        let mut body = serde_json::Map::new();
+        body.insert("username".into(), username.into());
+        body.insert("password".into(), password.into());
+        // The ABS field name is "type"; do not rename.
+        body.insert("type".into(), user_type.into());
+        body.insert("isActive".into(), is_active.into());
+        if let Some(e) = email.filter(|s| !s.is_empty()) {
+            body.insert("email".into(), e.into());
+        }
+        if let Some(p) = permissions {
+            // ABS stores librariesAccessible/itemTagsSelected as TOP-LEVEL user
+            // keys (not inside permissions); mirror update_user by lifting them out
+            // so access control applies on create regardless of how the server
+            // reads the body. They stay in `permissions` too for completeness.
+            if let Some(libs) = p.get("librariesAccessible").cloned() {
+                body.insert("librariesAccessible".into(), libs);
+            }
+            if let Some(tags) = p.get("itemTagsSelected").cloned() {
+                body.insert("itemTagsSelected".into(), tags);
+            }
+            body.insert("permissions".into(), p);
+        }
+
         let resp = self
             .http
             .post(format!("{}/api/users", self.root()))
             .header("Authorization", self.auth_header()?)
-            .json(&serde_json::json!({
-                "username": username,
-                "password": password,
-                // The ABS field name is "type"; do not rename.
-                "type": user_type,
-            }))
+            .json(&body)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -1719,6 +1743,8 @@ impl AbsClient {
         username: Option<&str>,
         password: Option<&str>,
         user_type: Option<&str>,
+        email: Option<&str>,
+        is_active: Option<bool>,
         permissions: Option<serde_json::Value>,
     ) -> Result<AdminUser, String> {
         // Build a sparse JSON body with only the fields that were provided.
@@ -1726,6 +1752,8 @@ impl AbsClient {
         if let Some(u) = username  { body.insert("username".into(), u.into()); }
         if let Some(p) = password  { body.insert("password".into(), p.into()); }
         if let Some(t) = user_type { body.insert("type".into(), t.into()); }
+        if let Some(e) = email     { body.insert("email".into(), e.into()); }
+        if let Some(a) = is_active { body.insert("isActive".into(), a.into()); }
         // The permissions blob carries librariesAccessible/itemTagsSelected nested;
         // the ABS PATCH handler extracts them either nested or top-level.
         if let Some(p) = permissions { body.insert("permissions".into(), p); }

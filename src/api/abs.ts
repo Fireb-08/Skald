@@ -716,6 +716,7 @@ export interface AdminUser {
   // Unix ms when the account was created.
   createdAt: number | null;
   isActive: boolean | null;
+  email?: string | null;
   currentBookId: string | null;
   // ── Access control (cluster H); present on getUser, may be absent in the list.
   permissions?: UserPermissions | null;
@@ -881,14 +882,18 @@ export function getAllUsers(serverUrl: string): Promise<AdminUser[]> {
   return invoke('get_all_users', { serverUrl });
 }
 
-/** POST /api/users — creates a new user account. */
+/** POST /api/users — creates a new user account, with optional email, the enable
+ *  flag, and a full permissions blob (download/update/…, library + tag access). */
 export function createUser(
   serverUrl: string,
   username: string,
   password: string,
   userType: string,
+  email: string | null = null,
+  isActive = true,
+  permissions: UserPermissions | null = null,
 ): Promise<AdminUser> {
-  return invoke('create_user', { serverUrl, username, password, userType });
+  return invoke('create_user', { serverUrl, username, password, userType, email, isActive, permissions });
 }
 
 /** PATCH /api/users/{id} — partially updates a user account.
@@ -900,9 +905,11 @@ export function updateUser(
   username: string | null,
   password: string | null,
   userType: string | null,
+  email: string | null = null,
+  isActive: boolean | null = null,
   permissions: UserPermissions | null = null,
 ): Promise<AdminUser> {
-  return invoke('update_user', { serverUrl, userId, username, password, userType, permissions });
+  return invoke('update_user', { serverUrl, userId, username, password, userType, email, isActive, permissions });
 }
 
 /** DELETE /api/users/{id} — permanently removes a user account. */

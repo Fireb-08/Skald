@@ -336,10 +336,43 @@ interface UserModalProps {
   libraries?: Array<{ id: string; name: string }>;
   /** Tags available to assign (derived from the loaded library). */
   availableTags?: string[];
-  /** Called with the validated field values + permissions (null = leave default).
-   *  Should throw on server errors. */
-  onSubmit: (username: string, password: string, type: 'user' | 'admin', permissions: UserPermissions | null) => Promise<void>;
+  /** Called with the validated field values, email, the enable flag, and the full
+   *  permissions blob. Should throw on server errors. */
+  onSubmit: (username: string, password: string, type: 'user' | 'admin', email: string, enable: boolean, permissions: UserPermissions) => Promise<void>;
   onCancel: () => void;
+}
+
+/** A pill switch used inside the UserModal form. Sets type="button" so toggling
+ *  a permission never submits the surrounding <form>. */
+function PermToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      role="switch"
+      aria-checked={on}
+      style={{
+        width: 36, height: 20, borderRadius: 10, padding: 0, flexShrink: 0,
+        background: on ? 'var(--onyx-accent)' : 'rgba(255,255,255,0.12)',
+        border: 'none', cursor: 'pointer', position: 'relative', transition: 'background 0.15s',
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: 8,
+        background: on ? 'var(--onyx-bg)' : '#ebe7df', transition: 'left 0.15s',
+      }} />
+    </button>
+  );
+}
+
+/** A labelled permission row: name on the left, toggle on the right. */
+function PermRow({ label, on, onChange }: { label: string; on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+      <span style={{ fontSize: 12.5, color: 'var(--onyx-text)' }}>{label}</span>
+      <PermToggle on={on} onChange={onChange} />
+    </div>
+  );
 }
 
 /** Glass-panel modal for creating or editing a user account. */
@@ -363,10 +396,21 @@ function UserModal({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
 
-  // ── Access-control state (edit mode only); seeded from the full user. ──
+  // Email + the account-enable flag (both add and edit).
+  const [email, setEmail] = useState(editUser?.email ?? '');
+  const [enable, setEnable] = useState(editUser?.isActive ?? true);
+
+  // ── Permissions state — seeded from the user when editing, else ABS defaults
+  // (only download + access-all-libraries/tags default on). Shown in both add and
+  // edit so a new account can be fully configured at creation time. ──
   const seed = editUser?.permissions;
   const seedLibs = editUser?.librariesAccessible ?? seed?.librariesAccessible ?? [];
   const seedTags = editUser?.itemTagsSelected ?? seed?.itemTagsSelected ?? [];
+  const [canDownload, setCanDownload] = useState(seed?.download ?? true);
+  const [canUpdate, setCanUpdate] = useState(seed?.update ?? false);
+  const [canDelete, setCanDelete] = useState(seed?.delete ?? false);
+  const [canUpload, setCanUpload] = useState(seed?.upload ?? false);
+  const [canCreateEreader, setCanCreateEreader] = useState(seed?.createEreader ?? false);
   const [accessAllLibraries, setAccessAllLibraries] = useState(seed?.accessAllLibraries ?? true);
   const [librariesAccessible, setLibrariesAccessible] = useState<string[]>(seedLibs);
   const [accessAllTags, setAccessAllTags] = useState(seed?.accessAllTags ?? true);
@@ -385,22 +429,23 @@ function UserModal({
     setError('');
     setPending(true);
     try {
-      // Build the permissions blob only in edit mode (add uses server defaults).
-      // Spread the existing permissions so non-edited flags (download/update/…)
-      // are preserved; override the access-control fields the editor exposes.
-      let permissions: UserPermissions | null = null;
-      if (isEdit && seed) {
-        permissions = {
-          ...seed,
-          accessAllLibraries,
-          librariesAccessible: accessAllLibraries ? [] : librariesAccessible,
-          accessAllTags,
-          itemTagsSelected: accessAllTags ? [] : itemTagsSelected,
-          selectedTagsNotAccessible: tagsExclusive,
-          accessExplicitContent: accessExplicit,
-        };
-      }
-      await onSubmit(username.trim(), password, userType, permissions);
+      // Build the full permissions blob from the editor state (both add + edit),
+      // so a new account is created exactly as configured rather than relying on
+      // server defaults.
+      const permissions: UserPermissions = {
+        download: canDownload,
+        update: canUpdate,
+        delete: canDelete,
+        upload: canUpload,
+        createEreader: canCreateEreader,
+        accessAllLibraries,
+        librariesAccessible: accessAllLibraries ? [] : librariesAccessible,
+        accessAllTags,
+        itemTagsSelected: accessAllTags ? [] : itemTagsSelected,
+        selectedTagsNotAccessible: tagsExclusive,
+        accessExplicitContent: accessExplicit,
+      };
+      await onSubmit(username.trim(), password, userType, email.trim(), enable, permissions);
     } catch (err) {
       setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'An error occurred.');
       setPending(false);
@@ -431,6 +476,16 @@ function UserModal({
     fontFamily: 'inherit',
   };
 
+  // Two-column field/permission grid — the wider modal lets fields and the
+  // permission toggles sit side by side, matching Skald's roomier settings panes.
+  const twoCol: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 28, rowGap: 16 };
+  // Indented detail box that holds the per-library / per-tag pickers.
+  const pickerBox: React.CSSProperties = {
+    display: 'flex', flexDirection: 'column', gap: 8,
+    padding: '12px 14px', borderRadius: 8,
+    background: 'rgba(0,0,0,0.18)', border: '1px solid var(--onyx-glass-edge)',
+  };
+
   return (
     // Backdrop — clicking outside the panel cancels the modal.
     <div
@@ -449,8 +504,8 @@ function UserModal({
       <form
         onSubmit={handleSubmit}
         style={{
-          width: 400,
-          maxWidth: '90vw',
+          width: 560,
+          maxWidth: '92vw',
           background: 'var(--onyx-panel2)',
           backdropFilter: 'blur(40px) saturate(120%)',
           WebkitBackdropFilter: 'blur(40px) saturate(120%)',
@@ -470,120 +525,132 @@ function UserModal({
           {title}
         </div>
 
-        {/* Username field */}
+        {/* Identity — username + password side by side */}
+        <div style={twoCol}>
+          <div>
+            <div style={fieldLabel}>Username</div>
+            <input
+              style={fieldInput}
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder="username"
+              spellCheck={false}
+              // Auto-focus the first field when the modal opens.
+              autoFocus
+            />
+          </div>
+          <div>
+            <div style={fieldLabel}>
+              Password
+              {/* Show the "optional" hint only in edit mode. */}
+              {isEdit && (
+                <span style={{
+                  fontFamily: MONO, fontSize: 9, color: 'var(--onyx-text-mute)',
+                  marginLeft: 8, letterSpacing: '0.04em', textTransform: 'none', fontWeight: 400,
+                }}>
+                  leave blank to keep existing
+                </span>
+              )}
+            </div>
+            <input
+              style={fieldInput}
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
+        </div>
+
+        {/* Email — full width */}
         <div>
-          <div style={fieldLabel}>Username</div>
+          <div style={fieldLabel}>Email <span style={{ textTransform: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>(optional)</span></div>
           <input
             style={fieldInput}
-            value={username}
-            onChange={e => setUsername(e.target.value)}
-            placeholder="username"
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="email@example.com"
             spellCheck={false}
-            // Auto-focus the first field when the modal opens.
-            autoFocus
           />
         </div>
 
-        {/* Password field — optional when editing (leave blank to keep existing) */}
-        <div>
-          <div style={fieldLabel}>
-            Password
-            {/* Show the "optional" hint only in edit mode. */}
-            {isEdit && (
-              <span style={{
-                fontFamily: MONO,
-                fontSize: 9,
-                color: 'var(--onyx-text-mute)',
-                marginLeft: 8,
-                letterSpacing: '0.04em',
-                textTransform: 'none',
-                fontWeight: 400,
-              }}>
-                leave blank to keep existing
-              </span>
-            )}
+        {/* Account type + enable, side by side */}
+        <div style={twoCol}>
+          <div>
+            <div style={fieldLabel}>Account type</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Pill active={userType === 'user'} onClick={() => setUserType('user')}>user</Pill>
+              <Pill active={userType === 'admin'} onClick={() => setUserType('admin')}>admin</Pill>
+            </div>
           </div>
-          <input
-            style={fieldInput}
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••"
-          />
-        </div>
-
-        {/* Account type pill selector — only "user" and "admin" are creatable via UI */}
-        <div>
-          <div style={fieldLabel}>Account type</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Pill active={userType === 'user'} onClick={() => setUserType('user')}>user</Pill>
-            <Pill active={userType === 'admin'} onClick={() => setUserType('admin')}>admin</Pill>
+          <div>
+            <div style={fieldLabel}>Enabled</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 30 }}>
+              <PermToggle on={enable} onChange={setEnable} />
+              <span style={{ fontSize: 12, color: 'var(--onyx-text-dim)' }}>{enable ? 'Account active' : 'Account disabled'}</span>
+            </div>
           </div>
         </div>
 
-        {/* ── Access control (edit mode only) ── */}
-        {isEdit && seed && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4, borderTop: '1px solid var(--onyx-line)' }}>
-            <div style={fieldLabel}>Access control</div>
+        {/* ── Permissions (shown for both add + edit) — two columns of toggles ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 8, borderTop: '1px solid var(--onyx-line)' }}>
+          <div style={fieldLabel}>Permissions</div>
 
-            {/* Explicit content */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={accessExplicit} onChange={e => setAccessExplicit(e.target.checked)} />
-              Allow explicit content
-            </label>
-
-            {/* Library access */}
-            <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={accessAllLibraries} onChange={e => setAccessAllLibraries(e.target.checked)} />
-                Access all libraries
-              </label>
-              {!accessAllLibraries && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingLeft: 24, maxHeight: 120, overflowY: 'auto' }}>
-                  {libraries.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No libraries found.</div>}
-                  {libraries.map(lib => (
-                    <label key={lib.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--onyx-text-dim)', cursor: 'pointer' }}>
-                      <input type="checkbox" checked={librariesAccessible.includes(lib.id)} onChange={() => setLibrariesAccessible(prev => toggleInArray(prev, lib.id))} />
-                      {lib.name}
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Tag access */}
-            <div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--onyx-text)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={accessAllTags} onChange={e => setAccessAllTags(e.target.checked)} />
-                Access all tags
-              </label>
-              {!accessAllTags && (
-                <div style={{ marginTop: 8, paddingLeft: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {/* Inclusive vs exclusive */}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Pill active={!tagsExclusive} onClick={() => setTagsExclusive(false)}>only selected</Pill>
-                    <Pill active={tagsExclusive} onClick={() => setTagsExclusive(true)}>all except</Pill>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflowY: 'auto' }}>
-                    {availableTags.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No tags in the loaded library.</div>}
-                    {availableTags.map(tag => {
-                      const on = itemTagsSelected.includes(tag);
-                      return (
-                        <button key={tag} type="button" onClick={() => setItemTagsSelected(prev => toggleInArray(prev, tag))}
-                          style={{ padding: '4px 10px', borderRadius: 999, fontFamily: MONO, fontSize: 10.5, cursor: 'pointer',
-                            background: on ? 'var(--onyx-accent-dim)' : 'transparent',
-                            border: `1px solid ${on ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
-                            color: on ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
-                          {tag}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 28, rowGap: 13 }}>
+            <PermRow label="Can Download"                on={canDownload}        onChange={setCanDownload} />
+            <PermRow label="Can Update"                  on={canUpdate}          onChange={setCanUpdate} />
+            <PermRow label="Can Delete"                  on={canDelete}          onChange={setCanDelete} />
+            <PermRow label="Can Upload"                  on={canUpload}          onChange={setCanUpload} />
+            <PermRow label="Can Create Ereader"          on={canCreateEreader}   onChange={setCanCreateEreader} />
+            <PermRow label="Can Access Explicit Content" on={accessExplicit}     onChange={setAccessExplicit} />
+            <PermRow label="Can Access All Libraries"    on={accessAllLibraries} onChange={setAccessAllLibraries} />
+            <PermRow label="Can Access All Tags"         on={accessAllTags}      onChange={setAccessAllTags} />
           </div>
-        )}
+
+          {/* Library picker — shown when access-all is off (full width, 2-col list). */}
+          {!accessAllLibraries && (
+            <div style={pickerBox}>
+              <div style={fieldLabel}>Accessible libraries</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '7px 20px', maxHeight: 150, overflowY: 'auto' }}>
+                {libraries.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No libraries found.</div>}
+                {libraries.map(lib => (
+                  <label key={lib.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--onyx-text-dim)', cursor: 'pointer' }}>
+                    <input type="checkbox" style={{ accentColor: 'var(--onyx-accent)' }} checked={librariesAccessible.includes(lib.id)} onChange={() => setLibrariesAccessible(prev => toggleInArray(prev, lib.id))} />
+                    {lib.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tag picker — shown when access-all is off: inclusive/exclusive mode
+              plus the selectable tag chips. */}
+          {!accessAllTags && (
+            <div style={pickerBox}>
+              <div style={fieldLabel}>Accessible tags</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Pill active={!tagsExclusive} onClick={() => setTagsExclusive(false)}>only selected</Pill>
+                <Pill active={tagsExclusive} onClick={() => setTagsExclusive(true)}>all except</Pill>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 150, overflowY: 'auto' }}>
+                {availableTags.length === 0 && <div style={{ fontFamily: MONO, fontSize: 10.5, color: 'var(--onyx-text-mute)' }}>No tags in the loaded library.</div>}
+                {availableTags.map(tag => {
+                  const on = itemTagsSelected.includes(tag);
+                  return (
+                    <button key={tag} type="button" onClick={() => setItemTagsSelected(prev => toggleInArray(prev, tag))}
+                      style={{ padding: '4px 10px', borderRadius: 999, fontFamily: MONO, fontSize: 10.5, cursor: 'pointer',
+                        background: on ? 'var(--onyx-accent-dim)' : 'transparent',
+                        border: `1px solid ${on ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+                        color: on ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)' }}>
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Inline validation / server error */}
         {error && (
@@ -700,7 +767,9 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   // Library list + tags for the permissions editor (tags derived from the loaded
   // library, mirroring FilterPopover; covers the active library's tags). Empty
   // ids/tags are filtered out so React list keys stay unique.
-  const libraryOptions = st.libraries.filter(l => l.id).map(l => ({ id: l.id, name: l.name }));
+  // Exclude local libraries — they're a client-side concept with no server-side
+  // user/permission counterpart, so a managed server user can never access them.
+  const libraryOptions = st.libraries.filter(l => l.id && l.source !== 'local').map(l => ({ id: l.id, name: l.name }));
   const availableTags = [...new Set(st.library.flatMap(b => b.media.tags ?? []))].filter(Boolean).sort((a, b) => a.localeCompare(b));
 
   // Admin-only: read whether OIDC/SSO is configured (read-only indicator).
@@ -816,10 +885,10 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
     }
   }
 
-  /** POSTs a new user and inserts it into the sorted list. (Permissions are left
-   *  at the server defaults on create; edit the user to refine access.) */
-  async function handleCreate(username: string, password: string, type: 'user' | 'admin') {
-    const created = await createUser(st.serverUrl, username, password, type);
+  /** POSTs a new user (with email, enable flag, and full permissions) and inserts
+   *  it into the sorted list. */
+  async function handleCreate(username: string, password: string, type: 'user' | 'admin', email: string, enable: boolean, permissions: UserPermissions) {
+    const created = await createUser(st.serverUrl, username, password, type, email || null, enable, permissions);
     setUsers(prev =>
       [...prev, created].sort((a, b) => {
         if (a.id === st.userId) return -1;
@@ -830,8 +899,9 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
     setShowAdd(false);
   }
 
-  /** PATCHes an existing user (incl. permissions) and replaces its cached row. */
-  async function handleEdit(username: string, password: string, type: 'user' | 'admin', permissions: UserPermissions | null) {
+  /** PATCHes an existing user (incl. email, enable flag, permissions) and replaces
+   *  its cached row. */
+  async function handleEdit(username: string, password: string, type: 'user' | 'admin', email: string, enable: boolean, permissions: UserPermissions) {
     if (!editTarget) return;
     const updated = await updateUser(
       st.serverUrl,
@@ -840,6 +910,8 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
       // Empty string → null so the server keeps the existing password hash.
       password || null,
       type,
+      email,
+      enable,
       permissions,
     );
     setUsers(prev => prev.map(u => (u.id === updated.id ? updated : u)));
@@ -1189,6 +1261,8 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
       {showAdd && (
         <UserModal
           title="Add User"
+          libraries={libraryOptions}
+          availableTags={availableTags}
           onSubmit={handleCreate}
           onCancel={() => setShowAdd(false)}
         />

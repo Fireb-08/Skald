@@ -1726,12 +1726,25 @@ pub async fn create_user(
     username: String,
     password: String,
     user_type: String,
+    // Admin user-management extras: optional email, the enable flag, and a full
+    // permissions blob (download/update/…, library + tag access). None/absent
+    // permissions lets the server apply its defaults.
+    email: Option<String>,
+    is_active: Option<bool>,
+    permissions: Option<serde_json::Value>,
 ) -> Result<models::AdminUser, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     AbsClient::new(server_url)
         .with_token(token)
-        .create_user(&username, &password, &user_type)
+        .create_user(
+            &username,
+            &password,
+            &user_type,
+            email.as_deref(),
+            is_active.unwrap_or(true),
+            permissions,
+        )
         .await
 }
 
@@ -1746,6 +1759,9 @@ pub async fn update_user(
     username: Option<String>,
     password: Option<String>,
     user_type: Option<String>,
+    // Optional email + enable flag (admin user-management); None leaves each unchanged.
+    email: Option<String>,
+    is_active: Option<bool>,
     // cluster H: optional permissions blob (carries librariesAccessible /
     // itemTagsSelected nested); None leaves access control untouched.
     permissions: Option<serde_json::Value>,
@@ -1762,6 +1778,8 @@ pub async fn update_user(
             username.as_deref(),
             pw,
             user_type.as_deref(),
+            email.as_deref(),
+            is_active,
             permissions,
         )
         .await
