@@ -54,6 +54,9 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const [newParent, setNewParent] = useState<string | null>(null);
+  // Media type of the library to create: audiobooks (folder-scanned) or podcasts
+  // (RSS-subscribed). Podcast libraries route to the podcast browse UI.
+  const [newType, setNewType] = useState<'book' | 'podcast'>('book');
 
   const locals: Library[] = st.libraries.filter(l => l.source === 'local');
 
@@ -83,14 +86,18 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
     if (!newName.trim() || !newParent) return;
     try {
       setBusy('__new__');
-      log.info('library', 'create local library', { name: newName.trim() });
-      await createLocalLibrary(newName.trim(), newParent);
+      log.info('library', 'create local library', { name: newName.trim(), mediaType: newType });
+      await createLocalLibrary(newName.trim(), newParent, newType);
       await st.refreshLibrary();
       void reloadUnidentified();
       setCreating(false);
       setNewName('');
       setNewParent(null);
-      st.setToast({ message: `Created "${newName.trim()}" — drop books into its staging folder, then Import`, type: 'success' });
+      const msg = newType === 'podcast'
+        ? `Created "${newName.trim()}" — open it and Subscribe to a podcast by RSS or OPML`
+        : `Created "${newName.trim()}" — drop books into its staging folder, then Import`;
+      st.setToast({ message: msg, type: 'success' });
+      setNewType('book');
     } catch (e) {
       log.error('library', 'create local library failed', { err: String(e) });
       st.setToast({ message: 'Could not create library', type: 'error' });
@@ -163,7 +170,22 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
         {creating && (
           <div style={{ padding: '14px 0', borderBottom: '1px solid var(--onyx-line)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <TextInput value={newName} onChange={setNewName} placeholder="Library name (e.g. Audiobooks)" />
+              <TextInput value={newName} onChange={setNewName} placeholder={newType === 'podcast' ? 'Library name (e.g. Podcasts)' : 'Library name (e.g. Audiobooks)'} />
+              {/* Media type — segmented Audiobooks / Podcasts toggle. */}
+              <div style={{ display: 'flex', border: '1px solid var(--onyx-glass-edge)', borderRadius: 6, overflow: 'hidden' }}>
+                {(['book', 'podcast'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setNewType(t)}
+                    style={{
+                      padding: '6px 11px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+                      cursor: 'pointer', border: 'none',
+                      background: newType === t ? 'var(--onyx-accent-dim)' : 'transparent',
+                      color: newType === t ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
+                    }}
+                  >{t === 'book' ? 'Audiobooks' : 'Podcasts'}</button>
+                ))}
+              </div>
               <button onClick={chooseLocation} style={btn()}>{newParent ? 'Change location' : 'Choose location…'}</button>
               <button
                 onClick={createLibrary}

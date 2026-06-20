@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { fmtRemaining, fmtTime } from '../../state/onyx';
-import { asPodcastItem, getRecentEpisodes, type RecentEpisode } from '../../api/abs';
+import { asPodcastItem, getRecentEpisodes, getLocalRecentEpisodes, type RecentEpisode } from '../../api/abs';
 import { resolvePodcastFeed, cachedPodcastImage, episodeKey } from '../../lib/podcastCover';
 import { playEpisode, togglePlayback } from '../../api/playbook';
 import Cover from '../Cover';
@@ -69,6 +69,8 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [filesItem, setFilesItem] = useState<LibraryItem | null>(null);
   // Carousel cover size follows the global cover-size preference (Settings → Library).
   const coverPx = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
+  // Local podcast libraries resolve feeds + downloaded episodes server-free.
+  const isLocal = st.activeLibrary?.source === 'local';
 
   // Click-drag-to-swipe for the carousel (mirrors the Pick it up shelf). A drag
   // of >5px is flagged so the trailing click doesn't select/open a podcast.
@@ -112,7 +114,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
       const meta = (it.media?.metadata ?? {}) as unknown as Record<string, unknown>;
       const feedUrl = meta.feedUrl as string | undefined;
       if (!feedUrl) return;
-      resolvePodcastFeed(st.serverUrl, it.id, feedUrl).then(data => {
+      resolvePodcastFeed(st.serverUrl, it.id, feedUrl, isLocal).then(data => {
         if (!data) return;
         if (data.image) setFeedImages(prev => (prev[it.id] ? prev : { ...prev, [it.id]: data.image! }));
         if (data.episodes.length) setFeedEpisodes(prev => ({ ...prev, [it.id]: data.episodes }));
@@ -124,9 +126,13 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   // be matched to a playable downloaded counterpart. Re-fetched when the library
   // changes (e.g. after a download lands).
   useEffect(() => {
-    if (!st.currentLibraryId || !st.serverUrl) return;
+    if (!st.currentLibraryId) return;
+    if (!isLocal && !st.serverUrl) return; // ABS needs a server; local does not
     let cancelled = false;
-    getRecentEpisodes(st.serverUrl, st.currentLibraryId, 200)
+    const fetchDownloaded = isLocal
+      ? getLocalRecentEpisodes(st.currentLibraryId).then(episodes => ({ episodes }))
+      : getRecentEpisodes(st.serverUrl, st.currentLibraryId, 200);
+    fetchDownloaded
       .then(res => {
         if (cancelled) return;
         const m = new Map<string, RecentEpisode>();
@@ -135,7 +141,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
       })
       .catch(e => console.error('[Podcast] recent-episodes failed:', e));
     return () => { cancelled = true; };
-  }, [st.currentLibraryId, st.serverUrl, st.library]);
+  }, [st.currentLibraryId, st.serverUrl, st.library, isLocal]);
 
   // Drop cached feed episodes/images for podcasts that have left the library
   // (e.g. after unsubscribe) so the caches don't grow stale. Returns the previous

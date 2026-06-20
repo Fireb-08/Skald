@@ -4,7 +4,7 @@
 import { useState, useMemo } from 'react';
 import ReactDOM from 'react-dom';
 import type { OnyxState } from '../../state/onyx';
-import { downloadEpisodes, type RecentEpisode } from '../../api/abs';
+import { downloadEpisodes, downloadLocalEpisode, type RecentEpisode } from '../../api/abs';
 import { episodeKey } from '../../lib/podcastCover';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -48,7 +48,13 @@ export default function PodcastDownloadModal({ st, itemId, episodes, onClose, on
     if (chosen.length === 0) return;
     setBusy(true); setError('');
     try {
-      await downloadEpisodes(st.serverUrl, itemId, chosen);
+      if (st.activeLibrary?.source === 'local') {
+        // Local: download each enclosure directly (no server queue). Sequential so
+        // the progress toast tracks one episode at a time.
+        for (const ep of chosen) await downloadLocalEpisode(itemId, ep);
+      } else {
+        await downloadEpisodes(st.serverUrl, itemId, chosen);
+      }
       st.setToast({ message: `Queued ${chosen.length} episode${chosen.length === 1 ? '' : 's'} for download`, type: 'success' });
       onQueued();
       onClose();

@@ -53,14 +53,19 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     () => (st.podcastDetailId ? cachedFeedEpisodes(st.podcastDetailId) ?? [] : []),
   );
 
+  // Local podcast libraries embed the full episode list in the library item, so
+  // there is no server item to expand — render from libEntry directly.
+  const isLocal = st.activeLibrary?.source === 'local';
+
   useEffect(() => {
+    if (isLocal) { setFull(null); return; }
     if (!st.podcastDetailId || !st.serverUrl) { setFull(null); return; }
     let cancelled = false;
     fetchItem(st.serverUrl, st.podcastDetailId)
       .then(it => { if (!cancelled) setFull(it); })
       .catch(e => console.error('[Podcast] fetchItem detail failed:', e));
     return () => { cancelled = true; };
-  }, [st.podcastDetailId, st.serverUrl, libEpisodeCount, refreshTick]);
+  }, [st.podcastDetailId, st.serverUrl, libEpisodeCount, refreshTick, isLocal]);
 
   // Auto "find episodes": resolve the live feed on open (cached) so the screen
   // shows the latest published episodes, not just the downloaded ones.
@@ -69,13 +74,13 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     const id = st.podcastDetailId;
     if (!id || !metaFeedUrl) return;
     let cancelled = false;
-    resolvePodcastFeed(st.serverUrl, id, metaFeedUrl).then(d => {
+    resolvePodcastFeed(st.serverUrl, id, metaFeedUrl, isLocal).then(d => {
       if (cancelled || !d) return;
       if (d.episodes.length) setFeedEps(d.episodes);
       if (d.image) setFeedImg(prev => prev ?? d.image ?? undefined);
     });
     return () => { cancelled = true; };
-  }, [st.podcastDetailId, st.serverUrl, metaFeedUrl]);
+  }, [st.podcastDetailId, st.serverUrl, metaFeedUrl, isLocal]);
 
   const item = full ?? libEntry;
 

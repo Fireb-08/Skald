@@ -203,8 +203,8 @@ export async function scanFolder(path: string, libraryId?: string): Promise<Scan
 
 /** Create a managed local library: makes `<parentPath>/<name>/` plus its staging/
  *  and _Unidentified/ subfolders, with staging pre-configured. */
-export async function createLocalLibrary(name: string, parentPath: string): Promise<Library> {
-  return invoke<Library>('create_local_library', { name, parentPath });
+export async function createLocalLibrary(name: string, parentPath: string, mediaType: 'book' | 'podcast' = 'book'): Promise<Library> {
+  return invoke<Library>('create_local_library', { name, parentPath, mediaType });
 }
 
 /** List all local libraries from the catalog. */
@@ -1074,15 +1074,15 @@ export function cancelDownload(itemId: string): Promise<void> {
  *  Starts the 1-second playback-tick loop so all transport controls remain live.
  *  itemId is the ABS library item ID — stored so progress can be queued offline.
  *  Does NOT open a server session — no network access is required. */
-export function playLocalFile(filePath: string, itemId: string, startTime: number, localLibrary = false): Promise<void> {
-  return invoke('play_local_file', { filePath, itemId, startTime, localLibrary });
+export function playLocalFile(filePath: string, itemId: string, startTime: number, localLibrary = false, episodeId?: string): Promise<void> {
+  return invoke('play_local_file', { filePath, itemId, startTime, localLibrary, episodeId: episodeId ?? null });
 }
 
 // ── Local Library progress & bookmarks (Phase 4) ─────────────────────────────
 
 /** Local playback progress for one item (MediaProgress-shaped), or null. */
-export async function getLocalProgress(itemId: string): Promise<MediaProgress | null> {
-  return invoke<MediaProgress | null>('get_local_progress', { itemId });
+export async function getLocalProgress(itemId: string, episodeId?: string): Promise<MediaProgress | null> {
+  return invoke<MediaProgress | null>('get_local_progress', { itemId, episodeId: episodeId ?? null });
 }
 
 /** All local progress for a library — merges into the shelf's mediaProgress. */
@@ -1091,8 +1091,85 @@ export async function getLocalLibraryProgress(libraryId: string): Promise<MediaP
 }
 
 /** Write local-library progress to the catalog (e.g. Mark as Finished). */
-export async function setLocalProgress(itemId: string, currentTime: number, duration: number, isFinished: boolean): Promise<void> {
-  return invoke('set_local_progress', { itemId, currentTime, duration, isFinished });
+export async function setLocalProgress(itemId: string, currentTime: number, duration: number, isFinished: boolean, episodeId?: string): Promise<void> {
+  return invoke('set_local_progress', { itemId, episodeId: episodeId ?? null, currentTime, duration, isFinished });
+}
+
+// ── Local podcasts (Local Podcasts roadmap) ──────────────────────────────────
+// Server-free counterparts of the ABS podcast wrappers. The active library's
+// `source` decides which set the podcast components call (see podcastSource.ts).
+
+/** A discovery result from the iTunes podcast directory (search_local_podcasts). */
+export interface PodcastSearchResult {
+  title: string | null;
+  author: string | null;
+  feedUrl: string;
+  cover: string | null;
+  genres: string[];
+  trackCount: number | null;
+  itunesId: number | null;
+}
+
+/** Fetch + parse a feed locally for the subscribe preview. Returns PodcastMedia. */
+export function getLocalPodcastFeed(feedUrl: string): Promise<PodcastMedia> {
+  return invoke('get_local_podcast_feed', { feedUrl });
+}
+
+/** Subscribe a local podcast library to a feed; returns the new podcast item. */
+export function subscribeLocalPodcast(libraryId: string, feedUrl: string, autoDownload = false): Promise<LibraryItem> {
+  return invoke('subscribe_local_podcast', { libraryId, feedUrl, autoDownload });
+}
+
+/** A local podcast library's subscriptions (ABS-shaped LibraryItems). */
+export function getLocalPodcastItems(libraryId: string): Promise<LibraryItem[]> {
+  return invoke('get_local_podcast_items', { libraryId });
+}
+
+/** Downloaded episodes across a local podcast library (recent-episodes equivalent). */
+export function getLocalRecentEpisodes(libraryId: string): Promise<RecentEpisode[]> {
+  return invoke('get_local_recent_episodes', { libraryId });
+}
+
+/** Download one episode's enclosure; resolves with the on-disk audio path. */
+export function downloadLocalEpisode(podcastId: string, episode: PodcastEpisode): Promise<string> {
+  return invoke('download_local_episode', { podcastId, episode });
+}
+
+/** Update a local podcast's auto-download settings; returns the updated item. */
+export function updateLocalPodcastSettings(
+  podcastId: string, autoDownload: boolean, schedule: string | null, maxNew: number, maxKeep: number,
+): Promise<LibraryItem> {
+  return invoke('update_local_podcast_settings', { podcastId, autoDownload, schedule, maxNew, maxKeep });
+}
+
+/** Re-poll a local podcast's feed now; upserts new episodes, returns the feed list. */
+export function checkLocalNewEpisodes(podcastId: string): Promise<{ episodes: PodcastEpisode[] }> {
+  return invoke('check_local_new_episodes', { podcastId });
+}
+
+/** Unsubscribe a local podcast (rows + files + folder). */
+export function deleteLocalPodcast(podcastId: string): Promise<void> {
+  return invoke('delete_local_podcast', { podcastId });
+}
+
+/** Search the iTunes podcast directory for discovery. */
+export function searchLocalPodcasts(query: string, region?: string): Promise<PodcastSearchResult[]> {
+  return invoke('search_local_podcasts', { query, region: region ?? null });
+}
+
+/** Parse OPML text into a feed list (local). */
+export function parseLocalOpml(opmlText: string): Promise<{ feeds: OpmlFeed[] }> {
+  return invoke('parse_local_opml', { opmlText });
+}
+
+/** Bulk-subscribe a local library to OPML feed URLs; returns the success count. */
+export function subscribeLocalOpml(libraryId: string, feeds: string[], autoDownload = false): Promise<number> {
+  return invoke('subscribe_local_opml', { libraryId, feeds, autoDownload });
+}
+
+/** Export a local podcast library's subscriptions as OPML XML text. */
+export function exportLocalOpml(libraryId: string): Promise<string> {
+  return invoke('export_local_opml', { libraryId });
 }
 
 /** Add a local bookmark; returns the stored bookmark (with its catalog id). */

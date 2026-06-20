@@ -26,7 +26,7 @@ fn percent_encode(s: &str) -> String {
 
 /// Strip HTML tags + decode the common entities from a provider blurb (Audible's
 /// `publisher_summary` is HTML). Paragraph/line breaks become newlines.
-fn strip_html(s: &str) -> String {
+pub(crate) fn strip_html(s: &str) -> String {
     let pre = s
         .replace("</p>", "\n")
         .replace("<br>", "\n")
@@ -321,6 +321,41 @@ async fn openlibrary(query: &str) -> Result<Vec<Value>, String> {
                 "language": d.get("language").and_then(|l| l.as_array()).and_then(|l| l.first()).and_then(|x| x.as_str()),
                 "provider": "openlibrary",
             })
+        })
+        .collect())
+}
+
+/// Search the iTunes podcast directory (keyless). Returns discovery results whose
+/// `feedUrl` seeds the local subscribe flow. (Local Podcasts roadmap, Phase 5.)
+/// Field names verified against the iTunes Search API podcast response.
+pub async fn search_podcasts(query: &str, country: Option<&str>) -> Result<Vec<Value>, String> {
+    let url = format!(
+        "https://itunes.apple.com/search?media=podcast&limit=25&country={}&term={}",
+        percent_encode(country.unwrap_or("us")),
+        percent_encode(query)
+    );
+    log::info!(target: "skald::metadata", "podcast discovery q={query}");
+    let v = get_json(&url).await?;
+    let results = v.get("results").and_then(|r| r.as_array()).cloned().unwrap_or_default();
+    Ok(results
+        .iter()
+        .filter_map(|r| {
+            // A result with no feedUrl can't be subscribed to — drop it.
+            let feed_url = r.get("feedUrl").and_then(|u| u.as_str())?;
+            let cover = r
+                .get("artworkUrl600")
+                .or_else(|| r.get("artworkUrl100"))
+                .and_then(|a| a.as_str())
+                .map(|s| s.to_string());
+            Some(json!({
+                "title": r.get("collectionName").or_else(|| r.get("trackName")).and_then(|t| t.as_str()),
+                "author": r.get("artistName").and_then(|t| t.as_str()),
+                "feedUrl": feed_url,
+                "cover": cover,
+                "genres": r.get("genres").cloned().unwrap_or_else(|| json!([])),
+                "trackCount": r.get("trackCount").and_then(|t| t.as_i64()),
+                "itunesId": r.get("collectionId").and_then(|t| t.as_i64()),
+            }))
         })
         .collect())
 }

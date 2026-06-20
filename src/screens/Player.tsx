@@ -4,7 +4,7 @@ import {
   seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
   recordStopPoint, getStopPoints,
-  asPodcastItem, downloadEpisodes,
+  asPodcastItem, downloadEpisodes, downloadLocalEpisode, getLocalPodcastItems,
   addLocalBookmark, getLocalBookmarks,
 } from '../api/abs';
 import type { LocalStopPoint } from '../api/abs';
@@ -269,7 +269,34 @@ export default function Player({ st }: PlayerProps) {
     const ep = st.currentEpisode;
     const pid = st.currentBookId;
     if (!ep || !pid) return;
+    const key = episodeKey(ep);
     setDlState('downloading');
+
+    // ── Local podcast: the download command resolves when the file lands, so we
+    // re-list the podcast's episodes and play the now-downloaded match directly. ──
+    if (st.activeLibrary?.source === 'local') {
+      try {
+        await downloadLocalEpisode(pid, ep);
+        const items = await getLocalPodcastItems(st.currentLibraryId);
+        const eps = items.find(i => i.id === pid)
+          ? asPodcastItem(items.find(i => i.id === pid)!).media.episodes ?? []
+          : [];
+        const match = eps.find(e => episodeKey(e) === key) ?? eps.find(e => e.title === ep.title);
+        setDlState('idle');
+        if (match?.id) {
+          await st.refreshLibrary().catch(() => {});
+          playEpisode(st, pid, match).catch(err => console.error('[Podcast] play after download failed:', err));
+        } else {
+          st.setToast({ message: 'Downloaded — open the episode to play', type: 'info' });
+        }
+      } catch (e) {
+        console.error('[Podcast] local download failed:', e);
+        st.setToast({ message: 'Download failed', type: 'error' });
+        setDlState('idle');
+      }
+      return;
+    }
+
     try {
       await downloadEpisodes(st.serverUrl, pid, [ep]);
     } catch (e) {
@@ -278,7 +305,6 @@ export default function Player({ st }: PlayerProps) {
       setDlState('idle');
       return;
     }
-    const key = episodeKey(ep);
     for (let i = 0; i < 40; i++) {
       await new Promise(r => setTimeout(r, 3000));
       try {

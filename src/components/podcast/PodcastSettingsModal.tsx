@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import ReactDOM from 'react-dom';
 import type { OnyxState } from '../../state/onyx';
-import { updateMedia, validateCron, asPodcastItem, type LibraryItem } from '../../api/abs';
+import { updateMedia, validateCron, updateLocalPodcastSettings, asPodcastItem, type LibraryItem } from '../../api/abs';
 import CronEditor from '../settings/CronEditor';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -27,20 +27,32 @@ export default function PodcastSettingsModal({ st, item, onClose, onSaved }: Pod
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const isLocal = st.activeLibrary?.source === 'local';
+
   async function save() {
     setSaving(true); setError('');
     try {
-      // Validate the cron only when auto-download is on (otherwise schedule is moot).
-      if (autoDownload) {
+      // Validate the cron only when auto-download is on (otherwise schedule is
+      // moot). Local libraries have no server validator — accept any 5-field
+      // expression (the scheduler evaluates it locally; the CronEditor only emits
+      // valid shapes anyway).
+      if (autoDownload && !isLocal) {
         const ok = await validateCron(st.serverUrl, schedule).catch(() => false);
         if (!ok) { setError('Schedule is not a valid cron expression.'); setSaving(false); return; }
       }
-      await updateMedia(st.serverUrl, item.id, {
-        autoDownloadEpisodes: autoDownload,
-        autoDownloadSchedule: schedule,
-        maxEpisodesToKeep: Number(maxKeep) || 0,
-        maxNewEpisodesToDownload: Number(maxNew) || 0,
-      });
+      if (isLocal) {
+        await updateLocalPodcastSettings(
+          item.id, autoDownload, autoDownload ? schedule : null,
+          Number(maxNew) || 0, Number(maxKeep) || 0,
+        );
+      } else {
+        await updateMedia(st.serverUrl, item.id, {
+          autoDownloadEpisodes: autoDownload,
+          autoDownloadSchedule: schedule,
+          maxEpisodesToKeep: Number(maxKeep) || 0,
+          maxNewEpisodesToDownload: Number(maxNew) || 0,
+        });
+      }
       st.setToast({ message: 'Auto-download settings saved', type: 'success' });
       onSaved();
       onClose();

@@ -180,6 +180,31 @@ export async function playEpisode(
   }
   playBookInFlight = true;
   try {
+    // ── Local podcast path: play a downloaded episode from disk (no server) ──────
+    // A local podcast episode carries `localPath` (the downloaded audio file) and
+    // its progress lives in the catalog keyed per (podcast, episode).
+    const localPath = (episode as unknown as { localPath?: string }).localPath;
+    if (st.activeLibrary?.source === 'local' && localPath) {
+      st.setSessionReady(false);
+      st.setSessionId('');
+      let startTime = startTimeOverride;
+      if (startTime === undefined) {
+        try {
+          const lp = await getLocalProgress(podcastItemId, episodeId);
+          startTime = lp && !lp.isFinished ? lp.currentTime : 0;
+        } catch { startTime = 0; }
+      }
+      await playLocalFile(localPath, podcastItemId, startTime, true, episodeId);
+      st.setIsLocalPlayback(true);
+      st.setPosition(startTime);
+      st.setCurrentEpisodeId(episodeId);
+      st.setCurrentEpisode(episode);
+      st.setCurrentBookId(podcastItemId);
+      st.setFocusedBookId(podcastItemId);
+      st.setPlaying(true);
+      return;
+    }
+
     st.setIsLocalPlayback(false);
     await closeActiveSession().catch(e =>
       console.error('[playbook] closeActiveSession failed:', e)

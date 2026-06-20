@@ -15,6 +15,8 @@ pub mod catalog;   // Local Library: SQLite catalog for local libraries + items
 pub mod ingest;    // Local Library: file-system organize layer (Author/Series/Title)
 pub mod providers; // Local Library: server-free metadata providers (match flow)
 pub mod watcher;   // Local Library: staging-folder file-system watcher
+pub mod podcast_feed; // Local Podcasts: server-free RSS/Atom feed + OPML parsing
+pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -156,6 +158,10 @@ pub fn run() {
             // [DND-DIAG] Confirm the handler was disabled at startup.
             eprintln!("[DND-DIAG] Window '{}' created with file-drop handler disabled", win.label());
 
+            // Start the local-podcast auto-download scheduler (launch catch-up +
+            // per-minute cron evaluation). No-op until a podcast enables it.
+            crate::podcast_scheduler::start(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -267,6 +273,19 @@ pub fn run() {
             commands::start_staging_watch,
             // Local Library — Phase 8: local cover (sidecar/embedded, resized)
             commands::get_local_cover,
+            // Local Podcasts — server-free RSS subscribe / browse / download / play
+            commands::get_local_podcast_feed,
+            commands::subscribe_local_podcast,
+            commands::get_local_podcast_items,
+            commands::get_local_recent_episodes,
+            commands::download_local_episode,
+            commands::update_local_podcast_settings,
+            commands::check_local_new_episodes,
+            commands::delete_local_podcast,
+            commands::search_local_podcasts,
+            commands::parse_local_opml,
+            commands::subscribe_local_opml,
+            commands::export_local_opml,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,
@@ -408,8 +427,9 @@ pub fn run() {
                                         p.as_ref().map(|pl| pl.duration()).unwrap_or(0.0)
                                     };
                                     if guard.is_local_library {
-                                        // Local-library item — final position to the catalog.
-                                        let _ = catalog::set_progress(item_id, pos, dur, false);
+                                        // Local-library item — final position to the catalog
+                                        // (keyed per episode for podcasts).
+                                        let _ = catalog::set_progress(item_id, guard.local_episode_id.as_deref(), pos, dur, false);
                                     } else if let Ok(dl_dir) = downloads::downloads_dir() {
                                         // Downloaded ABS book — offline queue (flushes later).
                                         let entry = downloads::OfflineProgressEntry {

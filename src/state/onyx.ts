@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 
 export type { ServerSettings };
@@ -84,6 +84,11 @@ function patchLibraryItems(items: LibraryItem[]): LibraryItem[] {
 // the state layer is source-agnostic.
 async function loadItemsForLibrary(lib: Library, serverUrl: string): Promise<LibraryItem[]> {
   if (lib.source === 'local') {
+    // Local podcast libraries come from the podcasts/episodes tables, not a
+    // folder-walk — list them directly (no book reconcile).
+    if (lib.mediaType === 'podcast') {
+      return getLocalPodcastItems(lib.id);
+    }
     // Reconcile presence first (catalog is the source of truth for metadata, but
     // disk is authoritative for *existence*): this drops books deleted on disk and
     // picks up folders added outside Skald, without touching existing metadata.

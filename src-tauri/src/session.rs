@@ -30,6 +30,10 @@ pub struct SessionManager {
     // to the SQLite catalog; downloaded-book progress goes to the offline queue
     // (which later flushes to the server). Set by play_local().
     pub is_local_library: bool,
+    // For a local *podcast episode*, the episode id whose progress is written to
+    // the catalog (keyed per (item, episode)). Empty/None for a whole-item book.
+    // Set by play_local(); used by the tick loop and the shutdown handler.
+    pub local_episode_id: Option<String>,
 }
 
 impl SessionManager {
@@ -44,6 +48,7 @@ impl SessionManager {
             is_local: false,
             local_item_id: None,
             is_local_library: false,
+            local_episode_id: None,
         }
     }
 
@@ -192,6 +197,9 @@ impl SessionManager {
         item_id: &str,
         start_time: f64,
         local_library: bool,
+        // For a local podcast episode, its id (progress keyed per episode). None
+        // for a downloaded ABS book or a whole-item local book.
+        episode_id: Option<&str>,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
         // Kill any background tasks from a previous online or local session so
@@ -210,6 +218,8 @@ impl SessionManager {
         // Store the ABS item ID so the tick task and shutdown handler can key
         // offline progress queue entries to the correct library item.
         self.local_item_id = Some(item_id.to_string());
+        // Remember the episode (if any) so catalog progress is written per episode.
+        self.local_episode_id = episode_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
 
         // Initialize the audio player on first call (deferred init matches start_session).
         let player_newly_created = {
@@ -291,6 +301,8 @@ impl SessionManager {
         let app_tick        = app;
         // Clone the item_id string into the task — it outlives this method call.
         let item_id_tick    = item_id.to_string();
+        // Episode id (if any) for per-episode catalog progress writes.
+        let episode_id_tick = self.local_episode_id.clone();
         // Resolve the downloads dir once before spawning; propagate None if it
         // fails (unlikely) so the tick loop still runs without queue writes.
         let dl_dir_tick     = crate::downloads::downloads_dir().ok();
@@ -329,7 +341,7 @@ impl SessionManager {
                 // synced to a server); downloaded ABS books → offline queue (which
                 // flushes to the server on reconnect).
                 if local_library_tick {
-                    let _ = crate::catalog::set_progress(&item_id_tick, pos, dur, false);
+                    let _ = crate::catalog::set_progress(&item_id_tick, episode_id_tick.as_deref(), pos, dur, false);
                 } else if let Some(ref dl_dir) = dl_dir_tick {
                     let entry = crate::downloads::OfflineProgressEntry {
                         item_id: item_id_tick.clone(),

@@ -2,7 +2,7 @@
 // the cover art and the published episode list from it. Older subscriptions
 // store no cover/imageUrl and the library item list omits unpublished episodes,
 // so the feed is the source for both artwork and the "latest published" feed.
-import { getPodcastFeed, type RecentEpisode } from '../api/abs';
+import { getPodcastFeed, getLocalPodcastFeed, type PodcastMedia, type RecentEpisode } from '../api/abs';
 
 interface FeedData { image: string | null; episodes: RecentEpisode[] }
 
@@ -10,21 +10,27 @@ const cache = new Map<string, FeedData>();                 // itemId -> feed dat
 const inflight = new Map<string, Promise<FeedData | null>>();
 
 /** Fetch (once) and cache a podcast's feed, tagging episodes with the parent
- *  item id + metadata so they can render and play like recent-episodes entries. */
-export function resolvePodcastFeed(serverUrl: string, itemId: string, feedUrl: string): Promise<FeedData | null> {
+ *  item id + metadata so they can render and play like recent-episodes entries.
+ *  `local` routes to the server-free feed parser (no serverUrl needed). */
+export function resolvePodcastFeed(serverUrl: string, itemId: string, feedUrl: string, local = false): Promise<FeedData | null> {
   const hit = cache.get(itemId);
   if (hit) return Promise.resolve(hit);
   const pending = inflight.get(itemId);
   if (pending) return pending;
 
-  const p = getPodcastFeed(serverUrl, feedUrl)
-    .then(res => {
-      const m = (res.podcast?.metadata ?? {}) as unknown as Record<string, unknown>;
+  // Both paths resolve to the same PodcastMedia shape ({ metadata, episodes }).
+  const fetchMedia: Promise<PodcastMedia> = local
+    ? getLocalPodcastFeed(feedUrl)
+    : getPodcastFeed(serverUrl, feedUrl).then(res => res.podcast);
+
+  const p = fetchMedia
+    .then(podcast => {
+      const m = (podcast?.metadata ?? {}) as unknown as Record<string, unknown>;
       const image = (m.image as string) || (m.imageUrl as string) || null;
-      const episodes: RecentEpisode[] = (res.podcast?.episodes ?? []).map(ep => ({
+      const episodes: RecentEpisode[] = (podcast?.episodes ?? []).map(ep => ({
         ...ep,
         libraryItemId: itemId,
-        podcast: { metadata: res.podcast?.metadata },
+        podcast: { metadata: podcast?.metadata },
       }));
       const data: FeedData = { image, episodes };
       cache.set(itemId, data);

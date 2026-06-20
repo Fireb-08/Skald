@@ -66,4 +66,8 @@ walkdir = "2"
 notify = "6"
 # image: decode + resize embedded/sidecar cover art locally (no server resizer; Phase 8).
 image = "0.25"
+# quick-xml: event-based RSS/Atom + OPML parsing for local podcasts. Chosen over
+# feed-rs for full control of the iTunes/podcast: namespaced tags ABS extracts
+# (Local Podcasts roadmap — see podcast_feed.rs).
+quick-xml = "0.36"
 
