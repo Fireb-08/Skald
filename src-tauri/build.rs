@@ -10,17 +10,27 @@ fn main() {
     // Copy the bundled VLC runtime (libvlc.dll, libvlccore.dll, plugins/)
     // from vlc-dist/ into the binary output directory so the app runs without
     // requiring VLC to be installed on the user's machine.
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    // OUT_DIR = target/{profile}/build/{pkg}-{hash}/out  →  climb 3 levels
+    let binary_dir = PathBuf::from(&out_dir)
+        .ancestors()
+        .nth(3)
+        .expect("cannot determine binary output directory")
+        .to_path_buf();
+
     let vlc_dist = PathBuf::from(&manifest_dir).join("vlc-dist");
     if vlc_dist.exists() {
-        let out_dir = std::env::var("OUT_DIR").unwrap();
-        // OUT_DIR = target/{profile}/build/{pkg}-{hash}/out  →  climb 3 levels
-        let binary_dir = PathBuf::from(&out_dir)
-            .ancestors()
-            .nth(3)
-            .expect("cannot determine binary output directory")
-            .to_path_buf();
         copy_dir_all(&vlc_dist, &binary_dir);
         println!("cargo:rerun-if-changed={}", vlc_dist.display());
+    }
+
+    // Bundled helper executables — ffprobe (read metadata + chapters) and tone
+    // (write tags + chapters). Copied next to the binary so they resolve at
+    // runtime, exactly like the VLC runtime above.
+    let bin_dir = PathBuf::from(&manifest_dir).join("bin");
+    if bin_dir.exists() {
+        copy_dir_all(&bin_dir, &binary_dir);
+        println!("cargo:rerun-if-changed={}", bin_dir.display());
     }
 
     tauri_build::build()

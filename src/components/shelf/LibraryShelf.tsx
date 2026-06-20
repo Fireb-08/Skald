@@ -13,7 +13,7 @@ import SortIndicator from './SortIndicator';
 import ContextMenu from '../ContextMenu';
 import { buildItemContextMenu } from './buildItemContextMenu';
 import { advFilterActive, bookMatchesAdvFilter, naturalTitleCompare, searchScopeMatch } from '../../lib/shelfFilters';
-import MatchModal from '../MatchModal';
+import MatchModal, { makeLocalShelfAdapter } from '../MatchModal';
 import MetadataEditor from '../MetadataEditor';
 import CoverPicker from '../CoverPicker';
 import CollectionPicker from '../CollectionPicker';
@@ -521,10 +521,14 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
           onClose={() => setContextMenu(null)}
         />
       )}
+      {/* The same MatchModal drives both flows; the adapter routes by the active
+          library's source. Local items write the catalog + re-file on disk; ABS
+          items use the server-backed default adapter. */}
       {matchItem && (
         <MatchModal
           item={matchItem}
           serverUrl={st.serverUrl}
+          adapter={st.activeLibrary?.source === 'local' ? makeLocalShelfAdapter(matchItem) : undefined}
           onClose={() => setMatchItem(null)}
           onComplete={updated => {
             st.updateLibraryItem(updated);

@@ -1,6 +1,6 @@
 import { bookAuthor, type LibraryItem, type OnyxState, type MediaProgress } from '../../state/onyx';
 import type { ContextMenuItem, ContextMenuSection } from '../ContextMenu';
-import { updateProgress, deleteProgress, closeActiveSession, rescanItem, deleteItem, downloadItem, removeDownload } from '../../api/abs';
+import { updateProgress, deleteProgress, closeActiveSession, rescanItem, deleteItem, downloadItem, removeDownload, deleteLocalItem, setLocalProgress } from '../../api/abs';
 // Canonical play function — routes through shared resume and UI-sync logic
 import { playBook } from '../../api/playbook';
 
@@ -35,6 +35,9 @@ export function buildItemContextMenu(
     setEditItem, setCoverItem, setShareItem, fromPickItUp,
   } = opts;
   const isAdmin = st.user?.type === 'root' || st.user?.type === 'admin';
+  // Local-library items live on disk already (carry a localPath) — they get no
+  // Download action, and their own Delete (files + catalog row) in Library tools.
+  const isLocal = !!item.localPath;
   // Used to toggle the first menu item between Download and Delete Download.
   const existingDownload = st.downloads.find(d => d.itemId === item.id);
 
@@ -56,48 +59,52 @@ export function buildItemContextMenu(
         }
       },
     },
-    existingDownload
-      ? {
-          // Already downloaded — offer deletion so the user can free up space directly
-          // from the shelf without navigating to Settings → Downloads.
-          label: 'Delete Download',
-          icon: 'trash',
-          danger: true,
-          onClick: () => {
-            const title = item.media?.metadata?.title ?? item.id;
-            st.setConfirmDialog({
-              title: `Delete downloaded copy of "${title}"?`,
-              message: 'This will remove the local audio file from your device. The book will still be available for streaming from your server.',
-              confirmLabel: 'Delete',
-              onConfirm: async () => {
-                try {
-                  await removeDownload(item.id);
-                  st.setDownloads(prev => prev.filter(d => d.itemId !== item.id));
-                  st.setToast({ message: `Downloaded copy of "${title}" removed`, type: 'success' });
-                } catch (e) {
-                  st.setToast({ message: `Delete failed: ${String(e)}`, type: 'error' });
-                }
-              },
-            });
-          },
-        }
-      : {
-          // Not yet downloaded — fires the Rust streaming command.
-          label: 'Download',
-          icon: 'download',
-          onClick: () => {
-            const title = item.media?.metadata?.title ?? item.id;
-            const author = bookAuthor(item);
-            // ABS serves multi-file audiobooks as a zip archive at this endpoint.
-            const fileName = `${title}.zip`;
-            downloadItem(st.serverUrl, item.id, fileName, title, author)
-              .then(path => console.log('[download] completed:', path))
-              .catch(e => {
-                console.error('[download] failed:', e);
-                st.setToast({ message: `Download failed: ${String(e)}`, type: 'error' });
+    // Download/Delete-Download only applies to server items — local books are
+    // already on disk, so the action is omitted for them.
+    ...(isLocal ? [] : [
+      existingDownload
+        ? {
+            // Already downloaded — offer deletion so the user can free up space directly
+            // from the shelf without navigating to Settings → Downloads.
+            label: 'Delete Download',
+            icon: 'trash',
+            danger: true,
+            onClick: () => {
+              const title = item.media?.metadata?.title ?? item.id;
+              st.setConfirmDialog({
+                title: `Delete downloaded copy of "${title}"?`,
+                message: 'This will remove the local audio file from your device. The book will still be available for streaming from your server.',
+                confirmLabel: 'Delete',
+                onConfirm: async () => {
+                  try {
+                    await removeDownload(item.id);
+                    st.setDownloads(prev => prev.filter(d => d.itemId !== item.id));
+                    st.setToast({ message: `Downloaded copy of "${title}" removed`, type: 'success' });
+                  } catch (e) {
+                    st.setToast({ message: `Delete failed: ${String(e)}`, type: 'error' });
+                  }
+                },
               });
+            },
+          }
+        : {
+            // Not yet downloaded — fires the Rust streaming command.
+            label: 'Download',
+            icon: 'download',
+            onClick: () => {
+              const title = item.media?.metadata?.title ?? item.id;
+              const author = bookAuthor(item);
+              // ABS serves multi-file audiobooks as a zip archive at this endpoint.
+              const fileName = `${title}.zip`;
+              downloadItem(st.serverUrl, item.id, fileName, title, author)
+                .then(path => console.log('[download] completed:', path))
+                .catch(e => {
+                  console.error('[download] failed:', e);
+                  st.setToast({ message: `Download failed: ${String(e)}`, type: 'error' });
+                });
+            },
           },
-        },
+    ] as ContextMenuItem[]),
     {
       label: 'Mark as Finished',
       icon: 'check-circle',
@@ -122,12 +129,18 @@ export function buildItemContextMenu(
               ? st.mediaProgress.map(p => p.libraryItemId === item.id ? optimistic : p)
               : [...st.mediaProgress, optimistic],
           );
-          await closeActiveSession().catch(() => {}); // no-op if no session open
-          st.setSessionReady(false); // force fresh session on next play
-          st.setSessionId('');
-          st.setPlaying(false);
-          updateProgress(st.serverUrl, item.id, item.media.duration, item.media.duration, true)
-            .catch(console.error);
+          if (item.localPath) {
+            // Local-library item — persist to the catalog (no server session).
+            setLocalProgress(item.id, item.media.duration, item.media.duration, true)
+              .catch(console.error);
+          } else {
+            await closeActiveSession().catch(() => {}); // no-op if no session open
+            st.setSessionReady(false); // force fresh session on next play
+            st.setSessionId('');
+            st.setPlaying(false);
+            updateProgress(st.serverUrl, item.id, item.media.duration, item.media.duration, true)
+              .catch(console.error);
+          }
         } catch (e) {
           console.error('[ctx] mark finished failed:', e);
         } finally {
@@ -174,8 +187,49 @@ export function buildItemContextMenu(
     { label: 'Organize', items: organize },
   ];
 
-  // ── MANAGE (admin only) ───────────────────────────────────────────────────
-  if (isAdmin) {
+  // ── MANAGE ─────────────────────────────────────────────────────────────────
+  // Local-library items carry a localPath. Their manage tools differ from ABS:
+  // Match and Edit Metadata are wired (both write the catalog + re-file on disk);
+  // the rest (Cover/Re-Scan/Share/Delete) are still server-coupled, so they're
+  // omitted for local items rather than shown broken. These are offered for local
+  // items regardless of server-admin status, since a standalone local session has
+  // no server user.
+  if (isLocal) {
+    sections.push({
+      label: 'Manage',
+      items: [
+        {
+          label: 'Library tools',
+          icon: 'sliders',
+          submenu: [
+            { label: 'Edit Metadata', icon: 'edit', onClick: () => setEditItem?.(item), disabled: !setEditItem },
+            { label: 'Match', icon: 'target', onClick: () => setMatchItem?.(item), disabled: !setMatchItem },
+            {
+              label: 'Delete',
+              icon: 'trash',
+              danger: true,
+              onClick: () => {
+                const title = item.media?.metadata?.title ?? 'this book';
+                st.setConfirmDialog({
+                  title: `Delete "${title}"?`,
+                  message: 'This permanently deletes the book and its files from this device. This cannot be undone.',
+                  confirmLabel: 'Delete',
+                  onConfirm: () => {
+                    deleteLocalItem(item.id)
+                      .then(() => {
+                        st.removeLibraryItem(item.id);
+                        st.setToast({ message: `"${title}" deleted`, type: 'success' });
+                      })
+                      .catch(e => st.setToast({ message: `Delete failed: ${String(e)}`, type: 'error' }));
+                  },
+                });
+              },
+            },
+          ],
+        },
+      ],
+    });
+  } else if (isAdmin) {
     sections.push({
       label: 'Manage',
       items: [

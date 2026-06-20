@@ -3,7 +3,8 @@ import type { CSSProperties, FocusEvent } from 'react';
 import ReactDOM from 'react-dom';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor, bookNarrator } from '../state/onyx';
-import { updateMedia, updateChapters, fetchItem } from '../api/abs';
+import { updateMedia, updateChapters, fetchItem, applyLocalMetadata, scanFolder } from '../api/abs';
+import type { LocalMetadataFields } from '../api/abs';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -117,6 +118,11 @@ function seriesDisplay(item: LibraryItem): string {
 }
 
 export default function MetadataEditor({ item, serverUrl, onClose, onComplete, onRefresh }: MetadataEditorProps) {
+  // Local items are catalog-backed (no server). They seed from the item directly
+  // and save via the catalog. Chapter write-back isn't built for local yet, so the
+  // Chapters tab is hidden for them.
+  const isLocal = !!item.localPath;
+  const tabs = isLocal ? (['details'] as const) : (['details', 'chapters'] as const);
   const [tab, setTab] = useState<'details' | 'chapters'>('details');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -145,6 +151,61 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
   // Seed from a fresh fetch so the form reflects current server state and the
   // (shelf-omitted) chapter data is present.
   useEffect(() => {
+    // Local items: re-scan the book's files on open so the form reflects the
+    // *actual* embedded tags, not just the (possibly stale) catalog snapshot.
+    // File tags take precedence; the catalog fills anything the files lack —
+    // folder-derived author/series, or fields set via an online Match that aren't
+    // written back to the files. Chapters/duration come from the fresh read.
+    if (isLocal) {
+      let cancelled = false;
+      (async () => {
+        let fresh: Record<string, unknown> = {};
+        let freshChapters: EditChapter[] | null = null;
+        let freshDuration: number | null = null;
+        try {
+          const scanned = await scanFolder(item.localPath ?? '', item.libraryId);
+          const f = scanned[0]?.item;
+          if (f) {
+            fresh = (f.media?.metadata ?? {}) as unknown as Record<string, unknown>;
+            freshChapters = (f.media?.chapters ?? []).map(c => ({ start: c.start, title: c.title }));
+            freshDuration = f.media?.duration ?? null;
+          }
+        } catch (e) {
+          console.error('[edit] local file rescan failed, falling back to catalog:', e);
+        }
+        if (cancelled) return;
+        const cat = item.media.metadata as unknown as Record<string, unknown>;
+        // File value wins when present and non-empty; else the catalog value.
+        const pick = (k: string): string => {
+          const fv = fresh[k];
+          if (typeof fv === 'string' && fv.trim()) return fv;
+          const cv = cat[k];
+          return typeof cv === 'string' ? cv : '';
+        };
+        setTitle(pick('title'));
+        setSubtitle(pick('subtitle'));
+        setAuthors(pick('authorName'));
+        setNarrators(pick('narratorName'));
+        const sName = pick('seriesName');
+        const sSeq = pick('seriesSequence');
+        setSeries(sName && sSeq ? `${sName} #${sSeq}` : sName);
+        setPublisher(pick('publisher'));
+        setYear(pick('publishedYear'));
+        const fg = Array.isArray(fresh.genres) ? (fresh.genres as string[]) : [];
+        const cg = Array.isArray(cat.genres) ? (cat.genres as string[]) : [];
+        setGenres((fg.length ? fg : cg).join(', '));
+        setTags((item.media.tags ?? []).join(', '));
+        setLanguage(pick('language'));
+        setIsbn(pick('isbn'));
+        setAsin(pick('asin'));
+        setDescription(pick('description'));
+        setExplicit(!!cat.explicit);
+        setChapters(freshChapters ?? (item.media.chapters ?? []).map(c => ({ start: c.start, title: c.title })));
+        setDuration(freshDuration ?? item.media.duration ?? 0);
+        setLoading(false);
+      })();
+      return () => { cancelled = true; };
+    }
     let cancelled = false;
     fetchItem(serverUrl, item.id)
       .then(full => {
@@ -188,6 +249,31 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
     setSaving(true);
     setError(null);
     try {
+      // Local: write the catalog (source of truth) + re-file on identity change.
+      if (isLocal) {
+        const { name, sequence } = splitSeries(series.trim());
+        const fields: LocalMetadataFields = {
+          title: title.trim(),
+          subtitle: subtitle.trim(),
+          authorName: authors.split(',').map(s => s.trim()).filter(Boolean).join(', '),
+          narratorName: narrators.split(',').map(s => s.trim()).filter(Boolean).join(', '),
+          seriesName: name,
+          seriesSequence: sequence,
+          publisher: publisher.trim(),
+          publishedYear: year.trim(),
+          genres: genres.split(',').map(g => g.trim()).filter(Boolean),
+          tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+          language: language.trim(),
+          isbn: isbn.trim(),
+          asin: asin.trim(),
+          description,
+        };
+        const updated = await applyLocalMetadata(item.libraryId, item.id, fields, null);
+        onComplete(updated);
+        onRefresh();
+        onClose();
+        return;
+      }
       const metadata: Record<string, unknown> = {
         title: title.trim(),
         subtitle: subtitle.trim(),
@@ -270,7 +356,7 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
 
         {/* Tabs (pills) */}
         <div style={{ flexShrink: 0, display: 'flex', gap: 5, padding: '16px 24px 0' }}>
-          {(['details', 'chapters'] as const).map(t => {
+          {tabs.map(t => {
             const active = tab === t;
             return (
               <button key={t} onClick={() => setTab(t)} style={{

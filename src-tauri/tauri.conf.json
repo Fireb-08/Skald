@@ -35,7 +35,9 @@
       "vlc-dist/libvlc.dll": "libvlc.dll",
       "vlc-dist/libvlccore.dll": "libvlccore.dll",
       "vlc-dist/vlc-cache-gen.exe": "vlc-cache-gen.exe",
-      "vlc-dist/plugins/**/*": "plugins/"
+      "vlc-dist/plugins/**/*": "plugins/",
+      "bin/ffprobe.exe": "ffprobe.exe",
+      "bin/tone.exe": "tone.exe"
     },
     "windows": {
       "digestAlgorithm": "sha256",

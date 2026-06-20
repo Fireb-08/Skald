@@ -8,6 +8,8 @@ pub mod session;
 pub mod cover_cache;
 pub mod socket;    // Phase B: Socket.IO transport for live sync
 pub mod downloads; // Phase B: persistent registry of downloaded books
+pub mod probe;     // Local Library: ffprobe-based metadata + chapter reader
+pub mod tone;      // Local Library: tone-based metadata writer
 pub mod scanner;   // Local Library: local folder scanner (emits ABS-shaped items)
 pub mod catalog;   // Local Library: SQLite catalog for local libraries + items
 pub mod ingest;    // Local Library: file-system organize layer (Author/Series/Title)
@@ -109,6 +111,27 @@ pub fn run() {
                 std::env::set_var("VLC_PLUGIN_PATH", resource_dir.join("plugins"));
             }
 
+            // Resolve the bundled helper binaries (ffprobe = read metadata/chapters,
+            // tone = write). build.rs copies them next to the exe in dev; Tauri
+            // bundles them into the resource dir. Prefer whichever actually has them,
+            // and let the modules fall back to PATH if neither is found.
+            let bin_dir = app
+                .path()
+                .resource_dir()
+                .ok()
+                .filter(|d| d.join("ffprobe.exe").exists())
+                .or_else(|| std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())));
+            if let Some(dir) = bin_dir {
+                let ffprobe = dir.join("ffprobe.exe");
+                if ffprobe.exists() {
+                    crate::probe::set_ffprobe_path(ffprobe);
+                }
+                let tone = dir.join("tone.exe");
+                if tone.exists() {
+                    crate::tone::set_tone_path(tone);
+                }
+            }
+
             // The main window is created here instead of in tauri.conf.json so we
             // can call disable_file_drop_handler(). Tauri 2.x removed fileDropEnabled
             // from the JSON config schema — the option only exists on the builder.
@@ -173,6 +196,7 @@ pub fn run() {
             commands::search_providers,
             commands::get_cache_dir,
             commands::reveal_cache_dir,
+            commands::reveal_path,
             commands::read_skald_log,
             commands::open_log_dir,
             commands::write_text_file,
@@ -226,13 +250,16 @@ pub fn run() {
             // Local Library — Phase 4: local progress + bookmarks
             commands::get_local_progress,
             commands::get_local_library_progress,
+            commands::set_local_progress,
             commands::add_local_bookmark,
             commands::get_local_bookmarks,
             commands::delete_local_bookmark,
             // Local Library — Phase 5: provider search + match flow
             commands::search_metadata,
             commands::get_unidentified_items,
-            commands::apply_local_match,
+            commands::apply_local_metadata,
+            commands::file_and_insert_local_match,
+            commands::delete_local_item,
             // Local Library — Phase 7: staging-folder watcher
             commands::start_staging_watch,
             // Local Library — Phase 8: local cover (sidecar/embedded, resized)

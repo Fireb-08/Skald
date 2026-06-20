@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress } from '../api/abs';
+import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary } from '../api/abs';
 import { log } from '../lib/log';
 
 export type { ServerSettings };
@@ -83,7 +83,14 @@ function patchLibraryItems(items: LibraryItem[]): LibraryItem[] {
 // (SQLite catalog, no server). All item loads route through here so the rest of
 // the state layer is source-agnostic.
 async function loadItemsForLibrary(lib: Library, serverUrl: string): Promise<LibraryItem[]> {
-  if (lib.source === 'local') return getLocalLibraryItems(lib.id);
+  if (lib.source === 'local') {
+    // Reconcile presence first (catalog is the source of truth for metadata, but
+    // disk is authoritative for *existence*): this drops books deleted on disk and
+    // picks up folders added outside Skald, without touching existing metadata.
+    // Cheap — a directory walk + diff, no metadata re-derive for known items.
+    await scanLocalLibrary(lib.id).catch(e => console.error('[library] local reconcile failed:', e));
+    return getLocalLibraryItems(lib.id);
+  }
   return fetchLibraryItems(serverUrl, lib.id);
 }
 
@@ -270,6 +277,8 @@ export interface OnyxState {
   refreshLibrary: () => Promise<void>;
   mediaProgress: MediaProgress[];
   setMediaProgress: (progress: MediaProgress[]) => void;
+  // Apply a server mediaProgress payload while preserving local-library progress.
+  applyServerProgress: (serverProgress: MediaProgress[]) => void;
   listeningStats: ListeningStats | null;
   bookmarks: AbsBookmark[];
   setBookmarks: (bookmarks: AbsBookmark[]) => void;
@@ -291,7 +300,7 @@ export interface OnyxState {
   currentBook: LibraryItem | undefined;
   focusedBook: LibraryItem | undefined;
   focusedBookId: string | null;
-  setFocusedBookId: (id: string | null) => void;
+  setFocusedBookId: Dispatch<SetStateAction<string | null>>;
   currentBookId: string;
   setCurrentBookId: (id: string) => void;
   currentBookChapters: Chapter[];
@@ -599,6 +608,29 @@ export function useOnyxState(): OnyxState {
   const [listeningStats, setListeningStats] = useState<ListeningStats | null>(null);
   const [bookmarks, setBookmarks] = useState<AbsBookmark[]>([]);
 
+  // Live ref so applyServerProgress (stable, used from listener closures) always
+  // sees the current library list when deciding which local progress to re-merge.
+  const librariesRef = useRef<Library[]>([]);
+  librariesRef.current = libraries;
+  // Apply a server /api/me mediaProgress payload WITHOUT dropping local-library
+  // progress. The server payload only covers ABS items, so a wholesale replace
+  // wipes catalog-backed local progress — which makes local "Pick it up" entries
+  // appear on load and then vanish a couple seconds later when /api/me returns.
+  // This bites any time server creds are present (even while browsing a local
+  // library), so all server-progress writes route through here. Re-merge each
+  // local library's catalog progress on top of the server set to preserve it.
+  const applyServerProgress = useCallback((serverProgress: MediaProgress[]) => {
+    setMediaProgress(serverProgress);
+    const locals = librariesRef.current.filter(l => l.source === 'local');
+    if (locals.length === 0) return;
+    Promise.all(locals.map(l => getLocalLibraryProgress(l.id).catch(() => [] as MediaProgress[])))
+      .then(lps => {
+        const flat = lps.flat();
+        if (flat.length) setMediaProgress(prev => mergeProgress(prev, flat));
+      })
+      .catch(e => console.error('[progress] local re-merge after server replace failed:', e));
+  }, []);
+
   // ── Downloads registry ──────────────────────────────────────────────────────
   // Which books are stored on disk for offline playback. Loaded from the
   // persistent JSON registry once on mount and refreshed after each completed
@@ -732,7 +764,7 @@ export function useOnyxState(): OnyxState {
       try {
         const me = await getMe(serverUrl);
         if (cancelled) return;
-        setMediaProgress(me.mediaProgress);
+        applyServerProgress(me.mediaProgress);
         setBookmarks(me.bookmarks);
         // Refresh user type from server — merge into stored user record and persist.
         if (me.type !== undefined) {
@@ -768,10 +800,31 @@ export function useOnyxState(): OnyxState {
   const [podcastDetailId, setPodcastDetailId] = useState<string | null>(null);
   const [currentEpisodeId, setCurrentEpisodeId] = useState<string | null>(null);
   const [currentEpisode, setCurrentEpisode] = useState<PodcastEpisode | null>(null);
-  // focusedBookId intentionally starts null — seeded from library on load by the
-  // effect below. No localStorage read: we want a clean state each session so
-  // the GreetingPane is the true default until the user starts playback.
-  const [focusedBookId, setFocusedBookId] = useState<string | null>(null);
+  // Focused book is scoped per library so switching libraries restores each
+  // one's own focus instead of carrying the other's. focusedByLib maps a
+  // library id → its focused item id; focusedBookId below derives the slot for
+  // the active library. Each slot starts unset and is seeded from that
+  // library's items on load by the effect below. No localStorage read: we want
+  // a clean state each session so the GreetingPane is the true default until
+  // the user starts playback.
+  const [focusedByLib, setFocusedByLib] = useState<Record<string, string | null>>({});
+  // Live ref so the stable setFocusedBookId below always writes the active
+  // library's slot, even from long-lived listener closures.
+  const focusedLibRef = useRef(currentLibraryId);
+  focusedLibRef.current = currentLibraryId;
+  const focusedBookId = focusedByLib[currentLibraryId] ?? null;
+  // Stable setter (value or updater form) that writes the active library's slot.
+  const setFocusedBookId = useCallback((value: SetStateAction<string | null>) => {
+    const lib = focusedLibRef.current;
+    setFocusedByLib(prev => {
+      const cur = prev[lib] ?? null;
+      const next = typeof value === 'function'
+        ? (value as (p: string | null) => string | null)(cur)
+        : value;
+      if (next === cur) return prev;
+      return { ...prev, [lib]: next };
+    });
+  }, []);
   const [currentBookChapters, setCurrentBookChapters] = useState<Chapter[]>([]);
 
   useEffect(() => {
@@ -994,12 +1047,15 @@ export function useOnyxState(): OnyxState {
   // until the user explicitly starts playback via playBook(), which causes the
   // GreetingPane to give way to FocusPanel.
   useEffect(() => {
-    if (library.length > 0 && !currentBookId) {
-      setFocusedBookId(prev => prev ?? library[0].id);
-    } else if (library.length > 0 && !focusedBookId) {
-      setFocusedBookId(currentBookId || library[0].id);
+    // Seed the active library's focus to its first item when unset. Never seed
+    // from currentBookId — the playing book may belong to a different library.
+    // Guard on library[0] actually belonging to the active library: during a
+    // switch, currentLibraryId updates before `library` reloads, so without this
+    // we'd briefly seed the new library's slot with the old library's first item.
+    if (library.length > 0 && !focusedBookId && library[0].libraryId === currentLibraryId) {
+      setFocusedBookId(library[0].id);
     }
-  }, [library, currentBookId]); // focusedBookId intentionally excluded
+  }, [library, focusedBookId, currentLibraryId]); // setFocusedBookId is stable
 
   // On first authenticated load, close any ghost sessions left from the
   // previous run so the server's session list stays consistent. Runs once
@@ -1013,7 +1069,7 @@ export function useOnyxState(): OnyxState {
 
 
   const currentBook  = library.find(b => b.id === currentBookId)  ?? library[0];
-  const focusedBook  = library.find(b => b.id === (focusedBookId ?? currentBookId)) ?? currentBook;
+  const focusedBook  = library.find(b => b.id === focusedBookId) ?? library[0];
   // Total duration for the transport. Books carry an authoritative media.duration.
   // Podcast items do not (duration is per-episode), so use the playing episode's
   // duration, falling back to the duration LibVLC reports via playback-tick once
@@ -1026,6 +1082,21 @@ export function useOnyxState(): OnyxState {
   // The active library object, derived from the list + the active id.
   const activeLibrary = libraries.find(l => l.id === currentLibraryId);
 
+  // ── Live progress sync ──────────────────────────────────────────────────────
+  // Refs that let the event handlers read the current playback and library
+  // state without stale-closure issues. The sync effect runs after every
+  // render (no dep array) so handlers always see the latest values.
+  const currentBookIdRef    = useRef(currentBookId);
+  const playingRef          = useRef(playing);
+  const currentLibraryIdRef = useRef(currentLibraryId);
+  const isLocalPlaybackRef  = useRef(isLocalPlayback);
+  useEffect(() => {
+    currentBookIdRef.current    = currentBookId;
+    playingRef.current          = playing;
+    currentLibraryIdRef.current = currentLibraryId;
+    isLocalPlaybackRef.current  = isLocalPlayback;
+  });
+
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     listen<{ currentTime: number; duration: number; isPlaying: boolean }>(
@@ -1034,23 +1105,35 @@ export function useOnyxState(): OnyxState {
         setPosition(payload.currentTime);
         setPlaying(payload.isPlaying);
         if (payload.duration > 0) setTickDuration(payload.duration);
+
+        // Local playback has no server `progress-updated` echo to refresh the
+        // in-memory progress store, so mirror the catalog write the Rust tick is
+        // making — keeps Pick-it-up and cover overlays current for local books.
+        const id = currentBookIdRef.current;
+        if (isLocalPlaybackRef.current && id) {
+          setMediaProgress(prev => {
+            const idx = prev.findIndex(p => p.libraryItemId === id);
+            const duration = payload.duration > 0
+              ? payload.duration
+              : (idx >= 0 ? prev[idx].duration : 0);
+            const rec: MediaProgress = {
+              id: idx >= 0 ? prev[idx].id : id,
+              libraryItemId: id,
+              episodeId: idx >= 0 ? prev[idx].episodeId : null,
+              duration,
+              currentTime: payload.currentTime,
+              progress: duration > 0 ? payload.currentTime / duration : 0,
+              isFinished: idx >= 0 ? prev[idx].isFinished : false,
+              lastUpdate: Date.now(),
+            };
+            if (idx >= 0) { const c = [...prev]; c[idx] = rec; return c; }
+            return [...prev, rec];
+          });
+        }
       },
     ).then(fn => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
-
-  // ── Live progress sync ──────────────────────────────────────────────────────
-  // Refs that let the event handlers read the current playback and library
-  // state without stale-closure issues. The sync effect runs after every
-  // render (no dep array) so handlers always see the latest values.
-  const currentBookIdRef    = useRef(currentBookId);
-  const playingRef          = useRef(playing);
-  const currentLibraryIdRef = useRef(currentLibraryId);
-  useEffect(() => {
-    currentBookIdRef.current    = currentBookId;
-    playingRef.current          = playing;
-    currentLibraryIdRef.current = currentLibraryId;
-  });
 
   // Subscribe to progress-updated events forwarded from the Rust socket layer.
   // Re-arms when serverUrl/authToken change so reconnects after logout/login
@@ -1211,7 +1294,7 @@ export function useOnyxState(): OnyxState {
         // Re-fetch /api/me to get the latest mediaProgress array so Pick it up
         // and cover progress overlays are correct without waiting for events.
         const me = await getMe(serverUrl);
-        setMediaProgress(me.mediaProgress);
+        applyServerProgress(me.mediaProgress);
       } catch (e) {
         console.error('[sync] resync failed:', e);
       }
@@ -1297,7 +1380,7 @@ export function useOnyxState(): OnyxState {
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
     localMode, setLocalMode,
-    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
+    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
     serverSettings, setServerSettings,

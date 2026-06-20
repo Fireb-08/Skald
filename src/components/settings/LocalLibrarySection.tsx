@@ -2,11 +2,39 @@ import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
 import type { Library, ScannedItem } from '../../api/abs';
-import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, ingestLocalPaths, autoIngestStaging, setLocalLibraryConfig, getUnidentifiedItems, type IngestOutcome } from '../../api/abs';
+import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, getUnidentifiedItems, revealPath } from '../../api/abs';
 import { log } from '../../lib/log';
 import Icon from '../Icon';
-import { SectionHead, Panel, Seg, MONO, DIM_GOLD, TextInput } from './shared';
-import LocalMatchModal from './LocalMatchModal';
+import { SectionHead, Panel, MONO, DIM_GOLD, TextInput } from './shared';
+import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
+
+// A glass chip showing a folder path; clicking opens it in the OS file explorer.
+// Used for the library root and staging paths so they align and are actionable.
+function PathChip({ label, hint, path }: { label: string; hint?: string; path: string }) {
+  return (
+    <button
+      onClick={() => revealPath(path).catch(console.error)}
+      title={`Open ${path}`}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3,
+        width: '100%', boxSizing: 'border-box', textAlign: 'left', cursor: 'pointer',
+        padding: '8px 11px', borderRadius: 8,
+        background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
+        transition: 'background 0.12s, border-color 0.12s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'var(--onyx-accent-edge)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'var(--onyx-glass)'; e.currentTarget.style.borderColor = 'var(--onyx-glass-edge)'; }}
+    >
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>{label}</span>
+        {hint && <span style={{ fontSize: 10, color: 'var(--onyx-text-mute)', opacity: 0.85 }}>{hint}</span>}
+      </span>
+      <span style={{ fontFamily: MONO, fontSize: 11.5, color: 'var(--onyx-text-dim)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {path}
+      </span>
+    </button>
+  );
+}
 
 // Local Library settings (Local Library & Split Libraries roadmap, Phase 2/3).
 // Create a local library from a folder on disk, (re)scan it into the catalog, and
@@ -72,64 +100,6 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
   }
 
   // Summarize an ingest run into a single toast.
-  function reportIngest(outcomes: IngestOutcome[]) {
-    const filed = outcomes.filter(o => o.outcome === 'filed').length;
-    const quar = outcomes.filter(o => o.outcome === 'quarantined').length;
-    const err = outcomes.filter(o => o.outcome === 'error').length;
-    if (outcomes.length === 0) { st.setToast({ message: 'No books found to import', type: 'info' }); return; }
-    const parts = [`${filed} filed`];
-    if (quar) parts.push(`${quar} need attention`);
-    if (err) parts.push(`${err} failed`);
-    st.setToast({ message: `Imported — ${parts.join(', ')}`, type: err ? 'error' : 'success' });
-  }
-
-  async function importInto(lib: Library) {
-    try {
-      const picked = await open({ directory: true, multiple: true, title: 'Choose folder(s) to import' });
-      const sources = Array.isArray(picked) ? picked : typeof picked === 'string' ? [picked] : [];
-      if (sources.length === 0) return; // cancelled
-      setBusy(lib.id);
-      log.info('library', 'ingest into library', { count: sources.length });
-      const outcomes = await ingestLocalPaths(lib.id, sources);
-      if (st.currentLibraryId === lib.id) await st.setActiveLibrary(lib.id);
-      else await st.refreshLibrary();
-      void reloadUnidentified();
-      reportIngest(outcomes);
-    } catch (e) {
-      log.error('library', 'ingest failed', { err: String(e) });
-      st.setToast({ message: 'Import failed', type: 'error' });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function importStaging(lib: Library) {
-    if (!lib.stagingPath) return;
-    try {
-      setBusy(lib.id);
-      // Same path the watcher uses — always MOVES, so staging empties.
-      const outcomes = await autoIngestStaging(lib.id);
-      if (st.currentLibraryId === lib.id) await st.setActiveLibrary(lib.id);
-      else await st.refreshLibrary();
-      void reloadUnidentified();
-      reportIngest(outcomes);
-    } catch (e) {
-      log.error('library', 'staging import failed', { err: String(e) });
-      st.setToast({ message: 'Import failed', type: 'error' });
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function setMode(lib: Library, mode: 'copy' | 'move') {
-    try {
-      await setLocalLibraryConfig(lib.id, undefined, mode);
-      await st.refreshLibrary();
-    } catch (e) {
-      log.error('library', 'set organize mode failed', { err: String(e) });
-    }
-  }
-
   async function rescan(lib: Library) {
     try {
       setBusy(lib.id);
@@ -169,7 +139,7 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
     <div>
       <SectionHead
         title="Local Library"
-        subtitle="Build a library from audiobooks on this computer — no server required. Skald scans the folder, reads embedded metadata, and adds the books alongside any Audiobookshelf libraries."
+        subtitle="Build a library from audiobooks on this computer — no server required. Skald reads each book's embedded tags and chapters, sorts them into Author / Series / Title folders, and tracks playback progress locally. Use Match or Edit Metadata on a book to fill in or correct details — changes are written back to the files."
       />
 
       <Panel
@@ -225,51 +195,44 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
                 style={{ padding: '14px 0', borderBottom: '1px solid var(--onyx-line)' }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--onyx-text)' }}>{lib.name}</span>
-                      {active && (
-                        <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: DIM_GOLD }}>
-                          Active
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ marginTop: 3, fontSize: 11.5, color: 'var(--onyx-text-mute)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {rootPath(lib)}
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--onyx-text)' }}>{lib.name}</span>
+                    {active && (
+                      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: DIM_GOLD }}>
+                        Active
+                      </span>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                     {!active && (
-                      <button onClick={() => st.setActiveLibrary(lib.id)} style={btn()}>Open</button>
+                      <button onClick={() => st.setActiveLibrary(lib.id)} style={btn()} title="Switch to this library">Open</button>
                     )}
-                    <button onClick={() => rescan(lib)} disabled={scanning} style={btn(scanning)}>
+                    <button
+                      onClick={() => rescan(lib)}
+                      disabled={scanning}
+                      style={btn(scanning)}
+                      title="Sync with disk — adds books found in the folder and drops ones that were deleted. Your saved metadata is preserved."
+                    >
                       {scanning ? 'Scanning…' : 'Rescan'}
                     </button>
-                    <button onClick={() => removeLibrary(lib)} style={btn(false, true)}>Remove</button>
+                    <button
+                      onClick={() => removeLibrary(lib)}
+                      style={btn(false, true)}
+                      title="Remove from Skald only — your files on disk are left untouched."
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
 
-                {/* Ingest controls — import into the Author/Series/Title tree. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
-                  <button onClick={() => importInto(lib)} disabled={scanning} style={btn(scanning)}>
-                    {scanning ? 'Working…' : 'Import…'}
-                  </button>
-                  {/* Copy vs move organize mode */}
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                    <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>On import</span>
-                    <Seg active={(lib.organizeMode ?? 'copy') === 'copy'} onClick={() => setMode(lib, 'copy')}>Copy</Seg>
-                    <Seg active={lib.organizeMode === 'move'} onClick={() => setMode(lib, 'move')}>Move</Seg>
-                  </div>
-                  {/* Staging folder — auto-created with the library. */}
+                {/* Folder paths — aligned glass buttons that open the location.
+                    Staging is auto-organized by the app-wide watcher on drop. */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                  <PathChip label="Library folder" path={rootPath(lib)} />
                   {lib.stagingPath && (
-                    <button onClick={() => importStaging(lib)} disabled={scanning} style={btn(scanning)}>Import staging</button>
+                    <PathChip label="Staging" hint="drop files here to auto-import" path={lib.stagingPath} />
                   )}
                 </div>
-                {lib.stagingPath && (
-                  <div style={{ marginTop: 6, fontSize: 10.5, color: 'var(--onyx-text-mute)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    staging · {lib.stagingPath}
-                  </div>
-                )}
               </div>
             );
           })
@@ -299,16 +262,18 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
       )}
 
       {matchTarget && (
-        <LocalMatchModal
-          st={st}
-          libraryId={matchTarget.libId}
-          item={matchTarget.item}
+        <MatchModal
+          item={matchTarget.item.item}
+          adapter={makeLocalQuarantineAdapter(matchTarget.libId, matchTarget.item)}
           onClose={() => setMatchTarget(null)}
-          onApplied={async () => {
+          onComplete={async () => {
+            // Filed out of quarantine into the shelf — refresh the active library
+            // (if it's the one we matched in) and the "Needs attention" queue.
             if (st.currentLibraryId === matchTarget.libId) await st.setActiveLibrary(matchTarget.libId);
-            else await st.refreshLibrary();
             void reloadUnidentified();
+            setMatchTarget(null);
           }}
+          onRefresh={() => {}}
         />
       )}
     </div>

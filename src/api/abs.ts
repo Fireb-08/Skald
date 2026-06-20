@@ -795,6 +795,11 @@ export function revealCacheDir(): Promise<void> {
   return invoke('reveal_cache_dir');
 }
 
+/** Open an arbitrary local folder in the OS file explorer. */
+export function revealPath(path: string): Promise<void> {
+  return invoke('reveal_path', { path });
+}
+
 export function searchBooks(
   serverUrl: string,
   title: string,
@@ -1068,6 +1073,11 @@ export async function getLocalLibraryProgress(libraryId: string): Promise<MediaP
   return invoke<MediaProgress[]>('get_local_library_progress', { libraryId });
 }
 
+/** Write local-library progress to the catalog (e.g. Mark as Finished). */
+export async function setLocalProgress(itemId: string, currentTime: number, duration: number, isFinished: boolean): Promise<void> {
+  return invoke('set_local_progress', { itemId, currentTime, duration, isFinished });
+}
+
 /** Add a local bookmark; returns the stored bookmark (with its catalog id). */
 export async function addLocalBookmark(itemId: string, title: string, time: number): Promise<Bookmark> {
   return invoke<Bookmark>('add_local_bookmark', { itemId, title, time });
@@ -1097,6 +1107,8 @@ export interface MetadataResult {
   cover?: string;
   series?: string | null;
   genres?: string[];
+  tags?: string[];
+  asin?: string;
   language?: string;
   provider?: string;
 }
@@ -1121,16 +1133,54 @@ export async function startStagingWatch(paths: string[]): Promise<void> {
   return invoke('start_staging_watch', { paths });
 }
 
-/** Apply a match: file the quarantined book into Author/Series/Title, fetch cover, re-scan. */
-export async function applyLocalMatch(
+/** Editable local metadata — the field set the Match/Edit review screens expose.
+ *  All keys optional; only the present, non-null ones are written. The catalog is
+ *  the source of truth, so these persist across rescans. */
+export interface LocalMetadataFields {
+  title?: string;
+  subtitle?: string;
+  authorName?: string;
+  narratorName?: string;
+  seriesName?: string;
+  seriesSequence?: string;
+  publisher?: string;
+  publishedYear?: string;
+  genres?: string[];
+  tags?: string[];
+  language?: string;
+  isbn?: string;
+  asin?: string;
+  description?: string;
+}
+
+/** Write user-edited metadata to an existing catalogued local item (Match review
+ *  or Edit Metadata). Re-files the folder when title/author/series change, swaps
+ *  the cover if given, and returns the updated item to patch in place. */
+export async function applyLocalMetadata(
+  libraryId: string,
+  itemId: string,
+  fields: LocalMetadataFields,
+  coverUrl?: string | null,
+): Promise<LibraryItem> {
+  return invoke<LibraryItem>('apply_local_metadata', { libraryId, itemId, fields, coverUrl });
+}
+
+/** Apply a chosen match to a quarantined (Unidentified) book: file it into
+ *  Author/Series/Title, insert a catalogued item with the chosen metadata, fetch
+ *  the cover, and return the new item. `sourcePath` is the quarantine folder. */
+export async function fileAndInsertLocalMatch(
   libraryId: string,
   sourcePath: string,
-  title: string,
-  author: string,
-  series?: string | null,
+  fields: LocalMetadataFields,
   coverUrl?: string | null,
-): Promise<void> {
-  return invoke('apply_local_match', { libraryId, sourcePath, title, author, series, coverUrl });
+): Promise<LibraryItem> {
+  return invoke<LibraryItem>('file_and_insert_local_match', { libraryId, sourcePath, fields, coverUrl });
+}
+
+/** Permanently delete a local item: removes its book folder from disk, the catalog
+ *  row, and its progress/bookmarks, then prunes the vacated parent dirs. */
+export async function deleteLocalItem(itemId: string): Promise<void> {
+  return invoke('delete_local_item', { itemId });
 }
 
 /** GET /api/users/online → openSessions — returns all currently active playback sessions.

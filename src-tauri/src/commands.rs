@@ -867,6 +867,22 @@ pub async fn get_local_progress(item_id: String) -> Result<Option<serde_json::Va
         .map_err(|e| format!("get_local_progress task panicked: {e}"))?
 }
 
+/// Set local-library playback progress for an item — used by user actions like
+/// "Mark as Finished" that write the catalog outside the playback tick loop.
+#[tauri::command]
+pub async fn set_local_progress(
+    item_id: String,
+    current_time: f64,
+    duration: f64,
+    is_finished: bool,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        crate::catalog::set_progress(&item_id, current_time, duration, is_finished)
+    })
+    .await
+    .map_err(|e| format!("set_local_progress task panicked: {e}"))?
+}
+
 #[tauri::command]
 pub async fn get_local_library_progress(
     library_id: String,
@@ -967,37 +983,72 @@ pub async fn get_unidentified_items(
         .map_err(|e| format!("get_unidentified_items task panicked: {e}"))?
 }
 
-/// Apply a chosen match to a quarantined book: file it into Author/Series/Title,
-/// download the cover (best-effort), then re-scan so it joins the shelf.
+/// Apply user-edited metadata to an existing catalogued local item (Match review
+/// or Edit Metadata). Writes the catalog (the source of truth), re-files the
+/// folder when the identity changed, downloads the chosen cover (best-effort),
+/// then returns the updated item so the frontend can patch it in place — no
+/// re-scan. `fields` is an optional-keyed metadata object (title, subtitle,
+/// authorName, narratorName, seriesName, seriesSequence, publisher, publishedYear,
+/// genres, tags, language, isbn, asin, description).
 #[tauri::command]
-pub async fn apply_local_match(
+pub async fn apply_local_metadata(
     library_id: String,
-    source_path: String,
-    title: String,
-    author: String,
-    series: Option<String>,
+    item_id: String,
+    fields: serde_json::Value,
     cover_url: Option<String>,
-) -> Result<(), String> {
-    // 1. Move out of _Unidentified into the named tree (blocking FS work).
-    let (lib, sp, t, a, s) = (library_id.clone(), source_path, title, author, series);
-    let target = tokio::task::spawn_blocking(move || {
-        crate::catalog::file_matched(&lib, &sp, &t, &a, s.as_deref())
+) -> Result<serde_json::Value, String> {
+    let has_cover = cover_url.is_some();
+    let id_for_clear = item_id.clone();
+    let (lib, id, f) = (library_id, item_id, fields);
+    let (item, target) = tokio::task::spawn_blocking(move || {
+        crate::catalog::apply_metadata(&lib, &id, &f, has_cover)
     })
     .await
-    .map_err(|e| format!("file_matched task panicked: {e}"))??;
+    .map_err(|e| format!("apply_metadata task panicked: {e}"))??;
 
-    // 2. Best-effort cover download into the new folder (async HTTP).
     if let Some(url) = cover_url {
         let dest = std::path::Path::new(&target).join("cover.jpg");
         let _ = crate::providers::download_cover(&url, &dest).await;
+        // Drop the stale cached thumbnail so the next fetch re-extracts the new art.
+        crate::cover_cache::clear(&id_for_clear);
     }
+    Ok(item)
+}
 
-    // 3. Re-scan so the now-identified book appears on the shelf.
-    let lib2 = library_id;
-    tokio::task::spawn_blocking(move || crate::catalog::scan_library(&lib2))
+/// Apply a chosen match to a quarantined (Unidentified) book: file it into
+/// Author/Series/Title, insert a catalogued item carrying the chosen metadata,
+/// download the cover (best-effort), then return the new item. No re-scan.
+#[tauri::command]
+pub async fn file_and_insert_local_match(
+    library_id: String,
+    source_path: String,
+    fields: serde_json::Value,
+    cover_url: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let has_cover = cover_url.is_some();
+    let (lib, sp, f) = (library_id, source_path, fields);
+    let (item, target) = tokio::task::spawn_blocking(move || {
+        crate::catalog::file_and_insert(&lib, &sp, &f, has_cover)
+    })
+    .await
+    .map_err(|e| format!("file_and_insert task panicked: {e}"))??;
+
+    if let Some(url) = cover_url {
+        let dest = std::path::Path::new(&target).join("cover.jpg");
+        let _ = crate::providers::download_cover(&url, &dest).await;
+        if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+            crate::cover_cache::clear(id);
+        }
+    }
+    Ok(item)
+}
+
+/// Permanently delete a local item (files + catalog row + progress/bookmarks).
+#[tauri::command]
+pub async fn delete_local_item(item_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || crate::catalog::delete_item(&item_id))
         .await
-        .map_err(|e| format!("rescan task panicked: {e}"))??;
-    Ok(())
+        .map_err(|e| format!("delete_local_item task panicked: {e}"))?
 }
 
 /// Scan a local folder and return ABS-shaped library items (Local Library
@@ -1496,6 +1547,20 @@ pub async fn get_auth_settings(server_url: String) -> Result<models::AuthSetting
 pub fn reveal_cache_dir() -> Result<(), String> {
     let path = get_cache_dir()?;
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Open an arbitrary local folder in the OS file explorer. Used by the Local
+/// Library path buttons; mirrors reveal_cache_dir but takes a caller-supplied path.
+#[tauri::command]
+pub fn reveal_path(path: String) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("path does not exist: {path}"));
+    }
     std::process::Command::new("explorer")
         .arg(&path)
         .spawn()

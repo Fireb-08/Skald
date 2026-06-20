@@ -54,25 +54,32 @@ export async function playBook(
       // Fall back to the offline progress queue which persists locally between launches.
       let startTime = startTimeOverride;
       if (startTime === undefined) {
-        const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
-        if (saved) {
-          // Progress already in state (server cache, or local progress merged in).
-          startTime = saved.currentTime;
-        } else if (isLocalLibrary) {
-          // Local-library item — resume from the catalog progress store.
+        if (isLocalLibrary) {
+          // The catalog is the source of truth for local progress (the role the
+          // server plays for ABS items), so read it directly rather than trusting
+          // the in-memory mediaProgress cache — that cache is only refreshed at
+          // library load and would resume from a stale position within a session.
           try {
             const lp = await getLocalProgress(bookId);
-            startTime = lp?.currentTime ?? 0;
+            // A finished book restarts from the beginning on replay (mirrors how
+            // ABS treats a completed item); otherwise resume where we left off.
+            startTime = lp && !lp.isFinished ? lp.currentTime : 0;
           } catch {
             startTime = 0;
           }
         } else {
-          // Downloaded ABS book — query the local offline queue written by the tick task.
-          try {
-            const offlineProgress = await getOfflineProgress(bookId);
-            startTime = offlineProgress?.currentTime ?? 0;
-          } catch {
-            startTime = 0;
+          const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
+          if (saved) {
+            // Progress already in state (server cache).
+            startTime = saved.currentTime;
+          } else {
+            // Downloaded ABS book — query the local offline queue written by the tick task.
+            try {
+              const offlineProgress = await getOfflineProgress(bookId);
+              startTime = offlineProgress?.currentTime ?? 0;
+            } catch {
+              startTime = 0;
+            }
           }
         }
       }

@@ -100,8 +100,9 @@ export default function App() {
             type: 'success',
           });
           // Refresh mediaProgress so cover overlays and Pick it up reflect the synced values.
+          // applyServerProgress preserves local-library progress (server payload omits it).
           const me = await getMe(st.serverUrl);
-          st.setMediaProgress(me.mediaProgress);
+          st.applyServerProgress(me.mediaProgress);
         }
       } catch (e) {
         log.error('downloads', 'offline progress flush failed', { err: String(e) });

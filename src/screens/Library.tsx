@@ -49,9 +49,13 @@ export default function Library({ st }: LibraryProps) {
       {/* Left slot: GreetingPane until the user starts playback, then FocusPanel.
           currentBookId is '' on cold launch and only set by playBook(), so
           clicking a shelf book (which sets focusedBookId only) leaves the pane intact.
+          FocusPanel is the now-playing pane, so it only shows when the playing book
+          belongs to the active library — browsing another library while a foreign
+          book plays falls back to the Greeting pane (the playing book stays
+          controllable from the Player screen and its pane returns on switch-back).
           The wrapper div gives GreetingPane an explicit containing block so that
           height: '100%' on its Glass card resolves correctly against the column height. */}
-      {st.currentBookId
+      {st.currentBookId && st.library.some(b => b.id === st.currentBookId)
         ? <FocusPanel st={st} />
         : (
           <div style={{

@@ -54,6 +54,7 @@ fn open() -> Result<Connection, String> {
 fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
+         PRAGMA busy_timeout=5000;
          CREATE TABLE IF NOT EXISTS libraries (
             id                TEXT PRIMARY KEY,
             name              TEXT NOT NULL,
@@ -79,7 +80,9 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
          CREATE TABLE IF NOT EXISTS progress (
             item_id      TEXT PRIMARY KEY,
             library_id   TEXT NOT NULL DEFAULT '',
-            current_time REAL NOT NULL DEFAULT 0,
+            -- Quoted: current_time collides with the SQLite CURRENT_TIME keyword,
+            -- so it must be quoted as an identifier wherever it appears in SQL.
+            \"current_time\" REAL NOT NULL DEFAULT 0,
             duration     REAL NOT NULL DEFAULT 0,
             is_finished  INTEGER NOT NULL DEFAULT 0,
             updated_at   INTEGER NOT NULL
@@ -94,7 +97,31 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
          );
          CREATE INDEX IF NOT EXISTS idx_bookmarks_item ON bookmarks(item_id);",
     )
-    .map_err(|e| format!("init schema: {e}"))
+    .map_err(|e| format!("init schema: {e}"))?;
+
+    // One-time migration: a book path must be unique within a library. Earlier
+    // builds enforced uniqueness only on the random `id`, so overlapping reconciles
+    // could insert two rows for the same folder (duplicate shelf entries). Dedupe
+    // any such rows (keep the oldest), then add the unique index so it can't recur.
+    let has_path_idx = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_items_path'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|e| format!("path index check: {e}"))?
+        .is_some();
+    if !has_path_idx {
+        conn.execute_batch(
+            "DELETE FROM items WHERE rowid NOT IN (
+                 SELECT MIN(rowid) FROM items GROUP BY library_id, source_path
+             );
+             CREATE UNIQUE INDEX idx_items_path ON items(library_id, source_path);",
+        )
+        .map_err(|e| format!("items dedupe + unique index: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Deterministic id from the root path so re-creating the same library is idempotent.
@@ -244,8 +271,33 @@ fn library_root(conn: &Connection, id: &str) -> Result<String, String> {
     .map_err(|e| format!("library root lookup: {e}"))
 }
 
-/// Full re-scan: clear the library's items, scan its root, store fresh items.
-/// Returns the number of items catalogued. Blocking — call from `spawn_blocking`.
+/// Generate a stable, path-independent item id. Catalog-assigned at first INSERT
+/// so a later re-file (which changes the folder path) keeps the same id, and the
+/// progress/bookmarks keyed by id survive. Seeded with the source path plus a
+/// monotonic counter + wall-clock nanos to avoid collisions within a scan.
+fn new_item_id(seed: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (seed, nanos, n).hash(&mut h);
+    format!("local_{:016x}", h.finish())
+}
+
+/// Presence reconcile of a local library against its `Audiobooks/` tree.
+///
+/// The catalog is the source of truth for metadata, so this NEVER rewrites an
+/// existing item's metadata. It only ADDS book folders that aren't catalogued yet
+/// (deriving their metadata once, at first discovery) and REMOVES rows whose
+/// folder has disappeared (also clearing that item's progress/bookmarks). Rows are
+/// matched to disk by `source_path`; a Skald-initiated re-file updates the row's
+/// path in the same operation, so it's never seen as a remove+add. Returns the
+/// current item count. Blocking — call from `spawn_blocking`.
 pub fn scan_library(library_id: &str) -> Result<usize, String> {
     let conn = open()?;
     let root = library_root(&conn, library_id)?;
@@ -254,26 +306,69 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
     let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
     let scanned = scanner::scan_folder(&books_root.to_string_lossy(), library_id)?;
 
-    // Single transaction so a re-scan is atomic (no window where the library
-    // appears empty mid-rebuild).
+    // Existing rows keyed by on-disk path.
+    let mut existing: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, source_path FROM items WHERE library_id = ?1")
+            .map_err(|e| format!("reconcile select: {e}"))?;
+        let rows = stmt
+            .query_map(params![library_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })
+            .map_err(|e| format!("reconcile query: {e}"))?;
+        for row in rows {
+            let (id, sp) = row.map_err(|e| format!("reconcile row: {e}"))?;
+            if let Some(sp) = sp {
+                existing.insert(sp, id);
+            }
+        }
+    }
+    let present: std::collections::HashSet<&str> =
+        scanned.iter().map(|s| s.source_path.as_str()).collect();
+
     let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
-    tx.execute("DELETE FROM items WHERE library_id = ?1", params![library_id])
-        .map_err(|e| format!("clear items: {e}"))?;
     let now = now_ms();
+
+    // ADD folders not yet catalogued (derive metadata once; catalog assigns id).
     for s in &scanned {
-        let item_id = s.item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let item_str = serde_json::to_string(&s.item).map_err(|e| format!("serialize item: {e}"))?;
+        if existing.contains_key(&s.source_path) {
+            continue; // already catalogued — preserve its metadata
+        }
+        let id = new_item_id(&s.source_path);
+        let mut item = s.item.clone();
+        if let Some(obj) = item.as_object_mut() {
+            obj.insert("id".into(), Value::String(id.clone()));
+            obj.insert("ino".into(), Value::String(id.clone()));
+        }
+        let item_str = serde_json::to_string(&item).map_err(|e| format!("serialize item: {e}"))?;
+        // DO NOTHING on a path conflict: if another reconcile already catalogued
+        // this folder, keep its row (and metadata) rather than adding a duplicate.
         tx.execute(
-            "INSERT OR REPLACE INTO items
+            "INSERT INTO items
                 (id, library_id, source_path, item_json, confidence, identified, added_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            params![item_id, library_id, s.source_path, item_str, s.confidence as i64, s.identified as i64, now],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(library_id, source_path) DO NOTHING",
+            params![id, library_id, s.source_path, item_str, s.confidence as i64, s.identified as i64, now],
         )
         .map_err(|e| format!("insert item: {e}"))?;
     }
+
+    // REMOVE rows whose folder is gone; clear their progress/bookmarks too.
+    for (sp, id) in &existing {
+        if !present.contains(sp.as_str()) {
+            tx.execute("DELETE FROM items WHERE id = ?1", params![id]).map_err(|e| format!("del item: {e}"))?;
+            tx.execute("DELETE FROM progress WHERE item_id = ?1", params![id]).map_err(|e| format!("del progress: {e}"))?;
+            tx.execute("DELETE FROM bookmarks WHERE item_id = ?1", params![id]).map_err(|e| format!("del bookmarks: {e}"))?;
+        }
+    }
+
     tx.commit().map_err(|e| format!("commit: {e}"))?;
-    log::info!(target: "skald::library", "catalog: scanned library {library_id} items={}", scanned.len());
-    Ok(scanned.len())
+    let count = conn
+        .query_row("SELECT COUNT(*) FROM items WHERE library_id = ?1", params![library_id], |r| r.get::<_, i64>(0))
+        .map_err(|e| format!("count: {e}"))? as usize;
+    log::info!(target: "skald::library", "catalog: reconciled library {library_id} present={} items={count}", present.len());
+    Ok(count)
 }
 
 pub fn list_items(library_id: &str) -> Result<Vec<Value>, String> {
@@ -323,8 +418,12 @@ pub fn set_progress(item_id: &str, current_time: f64, duration: f64, is_finished
         .map_err(|e| format!("progress lib lookup: {e}"))?
         .unwrap_or_default();
     conn.execute(
+        // "current_time" is quoted everywhere it appears as an identifier: bare,
+        // SQLite parses current_time as the CURRENT_TIME keyword (wall-clock TEXT),
+        // not this column. The write column-list happens to be safe, but we quote
+        // it here too so the column name is unambiguous across all statements.
         "INSERT OR REPLACE INTO progress
-            (item_id, library_id, current_time, duration, is_finished, updated_at)
+            (item_id, library_id, \"current_time\", duration, is_finished, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![item_id, library_id, current_time, duration, is_finished as i64, now_ms()],
     )
@@ -335,7 +434,9 @@ pub fn set_progress(item_id: &str, current_time: f64, duration: f64, is_finished
 pub fn get_progress(item_id: &str) -> Result<Option<Value>, String> {
     let conn = open()?;
     conn.query_row(
-        "SELECT current_time, duration, is_finished, updated_at FROM progress WHERE item_id = ?1",
+        // "current_time" MUST be quoted — unquoted it resolves to the CURRENT_TIME
+        // keyword (wall-clock TEXT), failing the f64 read below and breaking resume.
+        "SELECT \"current_time\", duration, is_finished, updated_at FROM progress WHERE item_id = ?1",
         params![item_id],
         |r| Ok(media_progress_json(item_id, r.get::<_, f64>(0)?, r.get::<_, f64>(1)?, r.get::<_, i64>(2)? != 0, r.get::<_, i64>(3)?)),
     )
@@ -346,7 +447,10 @@ pub fn get_progress(item_id: &str) -> Result<Option<Value>, String> {
 pub fn list_progress(library_id: &str) -> Result<Vec<Value>, String> {
     let conn = open()?;
     let mut stmt = conn
-        .prepare("SELECT item_id, current_time, duration, is_finished, updated_at FROM progress WHERE library_id = ?1")
+        // "current_time" MUST be quoted — unquoted it resolves to the CURRENT_TIME
+        // keyword (wall-clock TEXT), failing the f64 read below so list_progress
+        // errors out and Pick-it-up shows nothing for local libraries.
+        .prepare("SELECT item_id, \"current_time\", duration, is_finished, updated_at FROM progress WHERE library_id = ?1")
         .map_err(|e| format!("list progress: {e}"))?;
     let rows = stmt
         .query_map(params![library_id], |r| {
@@ -560,24 +664,235 @@ pub fn get_unidentified(library_id: &str) -> Result<Vec<scanner::ScannedItem>, S
     scanner::scan_unidentified(&un.to_string_lossy(), library_id)
 }
 
-/// Move a matched book out of `_Unidentified` into `<root>/Author/[Series/]Title`
-/// and return the new directory. The chosen author/title/series drive the folder
-/// names, so the subsequent catalog re-scan derives the right metadata via the
-/// folder-fallback path even when the files carry no tags. Cover download and the
-/// re-scan are done by the caller (async command).
-pub fn file_matched(
+/// Merge a frontend-supplied metadata `fields` object (all keys optional) into an
+/// item's `media.metadata` (and `media.tags`), then return the effective
+/// (title, author, series) after the merge — used to decide the canonical folder.
+/// Only keys that are present and non-null overwrite; everything else is left as
+/// it was, so a partial edit (e.g. just the description) keeps the rest intact.
+fn merge_metadata(item: &mut Value, fields: &Value) -> (String, String, Option<String>) {
+    let obj = item.as_object_mut().expect("item json is an object");
+    let media = obj.entry("media").or_insert_with(|| json!({}));
+    let media_obj = media.as_object_mut().expect("media is an object");
+
+    // Tags live at the media level (not inside metadata), mirroring ABS.
+    if let Some(tags) = fields.get("tags") {
+        if !tags.is_null() {
+            media_obj.insert("tags".into(), tags.clone());
+        }
+    }
+
+    let meta = media_obj.entry("metadata").or_insert_with(|| json!({}));
+    let meta_obj = meta.as_object_mut().expect("metadata is an object");
+
+    // The full editable field set the match/edit review screens expose.
+    const KEYS: &[&str] = &[
+        "title", "subtitle", "authorName", "narratorName", "seriesName", "seriesSequence",
+        "publisher", "publishedYear", "language", "isbn", "asin", "description", "genres",
+    ];
+    for k in KEYS {
+        if let Some(v) = fields.get(*k) {
+            if !v.is_null() {
+                meta_obj.insert((*k).to_string(), v.clone());
+            }
+        }
+    }
+
+    let title = meta_obj.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let author = meta_obj.get("authorName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let series = meta_obj
+        .get("seriesName")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    (title, author, series)
+}
+
+/// Apply user-edited metadata to an existing catalogued local item (Match or Edit
+/// Metadata). Merges `fields` into the stored item_json, re-files the folder when
+/// the title/author/series identity changes (pruning the vacated dirs) and updates
+/// the stored path, then marks the item identified. The catalog is the source of
+/// truth, so this is the authoritative write — no re-derive from disk. Cover
+/// download is done by the async caller. Returns (updated_item_json, target_dir).
+pub fn apply_metadata(
     library_id: &str,
-    source_path: &str,
-    title: &str,
-    author: &str,
-    series: Option<&str>,
-) -> Result<String, String> {
+    item_id: &str,
+    fields: &Value,
+    has_cover: bool,
+) -> Result<(Value, String), String> {
     let conn = open()?;
     let root = library_root(&conn, library_id)?;
     let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
-    let target = ingest::unique_dir(ingest::book_target_dir(&books_root, author, series, title));
-    // Move (not copy) — the book is leaving the quarantine folder.
+
+    let (item_str, source_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT item_json, source_path FROM items WHERE id = ?1 AND library_id = ?2",
+            params![item_id, library_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .map_err(|e| format!("load item: {e}"))?;
+    let mut item: Value = serde_json::from_str(&item_str).map_err(|e| format!("parse item: {e}"))?;
+
+    let (title, author, series) = merge_metadata(&mut item, fields);
+
+    // Re-file when the canonical folder differs from the current one.
+    let cur_path = source_path.unwrap_or_default();
+    let mut new_path = cur_path.clone();
+    if !cur_path.is_empty() && !title.trim().is_empty() && !author.trim().is_empty() {
+        let desired = ingest::book_target_dir(&books_root, &author, series.as_deref(), &title);
+        if !same_dir(&desired, Path::new(&cur_path)) {
+            let target = ingest::unique_dir(desired);
+            ingest::place_book(Path::new(&cur_path), &target, true)?;
+            prune_upwards(Path::new(&cur_path), &books_root);
+            new_path = target.to_string_lossy().into_owned();
+        }
+    }
+
+    if let Some(obj) = item.as_object_mut() {
+        obj.insert("localPath".into(), Value::String(new_path.clone()));
+        if has_cover {
+            obj.insert("hasLocalCover".into(), Value::Bool(true));
+        }
+    }
+
+    // Write the metadata back into the audio files (the durable store). Best-effort:
+    // a locked file (e.g. currently playing) still leaves the catalog updated.
+    if let Some(meta) = item.get("media").and_then(|m| m.get("metadata")) {
+        if let Err(e) = crate::tone::write_book_tags(Path::new(&new_path), meta) {
+            log::warn!(target: "skald::metadata", "apply_metadata: file tag write incomplete: {e}");
+        }
+    }
+
+    let updated_str = serde_json::to_string(&item).map_err(|e| format!("serialize: {e}"))?;
+    conn.execute(
+        "UPDATE items SET item_json = ?1, source_path = ?2, identified = 1, confidence = 100, updated_at = ?3 WHERE id = ?4",
+        params![updated_str, new_path, now_ms(), item_id],
+    )
+    .map_err(|e| format!("update item: {e}"))?;
+    log::info!(target: "skald::metadata", "apply_metadata {item_id} -> {new_path}");
+    Ok((item, new_path))
+}
+
+/// File a quarantined (Unidentified) book into `Audiobooks/Author/[Series/]Title`
+/// from chosen match metadata, then INSERT a new catalogued item carrying that
+/// metadata (catalog-assigned id; metadata not re-derived). Cover download is done
+/// by the async caller. Returns (new_item_json, target_dir).
+pub fn file_and_insert(
+    library_id: &str,
+    source_path: &str,
+    fields: &Value,
+    has_cover: bool,
+) -> Result<(Value, String), String> {
+    let conn = open()?;
+    let root = library_root(&conn, library_id)?;
+    let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
+
+    // Derive a base item from the source (duration/chapters/file list), then
+    // overlay the user-chosen metadata on top.
+    let mut item = scanner::scan_folder(source_path, library_id)?
+        .into_iter()
+        .next()
+        .map(|s| s.item)
+        .unwrap_or_else(|| json!({ "mediaType": "book", "media": { "metadata": {} }, "libraryFiles": [] }));
+
+    let (title, author, series) = merge_metadata(&mut item, fields);
+    if title.trim().is_empty() || author.trim().is_empty() {
+        return Err("a match needs both a title and an author".into());
+    }
+
+    let target = ingest::unique_dir(ingest::book_target_dir(&books_root, &author, series.as_deref(), &title));
     ingest::place_book(Path::new(source_path), &target, true)?;
-    log::info!(target: "skald::metadata", "match filed {source_path} -> {}", target.display());
-    Ok(target.to_string_lossy().into_owned())
+    let new_path = target.to_string_lossy().into_owned();
+
+    // Write the chosen metadata into the audio files (best-effort).
+    if let Some(meta) = item.get("media").and_then(|m| m.get("metadata")) {
+        if let Err(e) = crate::tone::write_book_tags(Path::new(&new_path), meta) {
+            log::warn!(target: "skald::metadata", "file_and_insert: file tag write incomplete: {e}");
+        }
+    }
+
+    let id = new_item_id(&new_path);
+    if let Some(obj) = item.as_object_mut() {
+        obj.insert("id".into(), Value::String(id.clone()));
+        obj.insert("ino".into(), Value::String(id.clone()));
+        obj.insert("libraryId".into(), Value::String(library_id.to_string()));
+        obj.insert("localPath".into(), Value::String(new_path.clone()));
+        if has_cover {
+            obj.insert("hasLocalCover".into(), Value::Bool(true));
+        }
+    }
+    let item_str = serde_json::to_string(&item).map_err(|e| format!("serialize: {e}"))?;
+    conn.execute(
+        "INSERT OR REPLACE INTO items
+            (id, library_id, source_path, item_json, confidence, identified, added_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 100, 1, ?5, ?5)",
+        params![id, library_id, new_path, item_str, now_ms()],
+    )
+    .map_err(|e| format!("insert item: {e}"))?;
+    log::info!(target: "skald::metadata", "file_and_insert {source_path} -> {new_path}");
+    Ok((item, new_path))
+}
+
+/// Permanently delete a catalogued local item: remove its book folder from disk,
+/// drop the catalog row plus its progress/bookmarks, and prune the now-empty
+/// parent dirs up to the Audiobooks root. Blocking — call from `spawn_blocking`.
+pub fn delete_item(item_id: &str) -> Result<(), String> {
+    let conn = open()?;
+    let (library_id, source_path): (String, Option<String>) = conn
+        .query_row(
+            "SELECT library_id, source_path FROM items WHERE id = ?1",
+            params![item_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .map_err(|e| format!("load item for delete: {e}"))?;
+
+    if let Some(sp) = source_path.as_deref() {
+        let p = Path::new(sp);
+        if p.exists() {
+            std::fs::remove_dir_all(p).map_err(|e| format!("remove book dir: {e}"))?;
+        }
+        // Prune the vacated Author/Series skeleton (stops at the Audiobooks root).
+        if let Ok(root) = library_root(&conn, &library_id) {
+            let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
+            if let Some(parent) = p.parent() {
+                prune_upwards(parent, &books_root);
+            }
+        }
+    }
+
+    conn.execute("DELETE FROM items WHERE id = ?1", params![item_id]).map_err(|e| format!("del item: {e}"))?;
+    conn.execute("DELETE FROM progress WHERE item_id = ?1", params![item_id]).map_err(|e| format!("del progress: {e}"))?;
+    conn.execute("DELETE FROM bookmarks WHERE item_id = ?1", params![item_id]).map_err(|e| format!("del bookmarks: {e}"))?;
+    log::info!(target: "skald::library", "catalog: deleted item {item_id}");
+    Ok(())
+}
+
+/// True when two paths resolve to the same directory. Canonicalize when both
+/// exist (handles separator / case / `.` differences); otherwise fall back to a
+/// plain comparison — the desired target won't exist when the identity changed,
+/// which correctly reports "not the same".
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Remove `start` if empty, then walk upward removing empty parents, stopping
+/// before `stop_root` (the Audiobooks root is never removed). Used after a
+/// re-file to clean up the vacated Author/Series/Title skeleton.
+fn prune_upwards(start: &Path, stop_root: &Path) {
+    let mut cur = start.to_path_buf();
+    while cur.starts_with(stop_root) && cur != *stop_root {
+        let empty = std::fs::read_dir(&cur)
+            .map(|mut it| it.next().is_none())
+            .unwrap_or(false);
+        if !empty || std::fs::remove_dir(&cur).is_err() {
+            break;
+        }
+        match cur.parent() {
+            Some(p) => cur = p.to_path_buf(),
+            None => break,
+        }
+    }
 }

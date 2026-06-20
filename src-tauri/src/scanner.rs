@@ -1,25 +1,21 @@
 // scanner.rs — local audiobook folder scanner (Local Library roadmap, Phase 1).
 //
 // Walks a folder, groups audio files into "book units", reads embedded metadata
-// (tags + cover presence + duration) via `lofty`, and emits **ABS-shaped
+// (tags + chapters + duration) via `ffprobe` (see probe.rs), and emits **ABS-shaped
 // LibraryItem JSON** so the existing frontend shelf/player can consume local
 // items unchanged. The single biggest leverage point of the whole feature is
 // that the frontend only cares about the JSON *shape*, not the origin — so this
 // module's job is to produce that shape from files on disk.
 //
 // A "book unit" here is one directory that directly contains audio files; its
-// files (sorted by name) are the book's tracks. Multi-file books become one item
-// with one chapter per file; a lone file is a single-track book. Real grouping
+// files (sorted by name) are the book's tracks. A single-file book uses its
+// embedded chapters; a multi-file book gets one chapter per file. Real grouping
 // (Author/Series/Title inference, standalone-file handling) is the ingest layer's
 // job (Phase 3) — this scanner is deliberately a thin "what's on disk" reader.
 //
-// Duration comes from lofty's parsed audio properties. Symphonia is reserved as
-// a fallback for formats where lofty reports a zero duration (wired in a later
-// phase only if a real gap shows up — see roadmap §"things to confirm").
-//
-// NOTE (per CLAUDE.md): exact lofty API surface can shift across versions; if a
-// method name differs at build time, that is the expected spike outcome — adjust
-// against the resolved lofty version rather than guessing further here.
+// Tag + chapter + duration reading is delegated to ffprobe (probe::probe_file),
+// matching how Audiobookshelf reads metadata. lofty is retained only for embedded
+// cover-art byte extraction (find_cover_bytes).
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -27,8 +23,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+// lofty is retained only for embedded cover-art extraction (find_cover_bytes);
+// all tag + chapter reading now goes through ffprobe (probe.rs).
 use lofty::prelude::*;
 use lofty::probe::Probe;
+
+use crate::probe;
 
 /// Audio extensions the scanner recognises. Mirrors the set `play_local` already
 /// plays (session.rs) plus `wav`, so anything scanned is also playable.
@@ -64,45 +64,6 @@ pub struct ScannedItem {
     pub confidence: u8,
     /// True when both a title and an author were resolved (from tags or folders).
     pub identified: bool,
-}
-
-/// Tags read from a single audio file.
-#[derive(Default)]
-struct TrackTags {
-    title: Option<String>,
-    artist: Option<String>,       // maps to author
-    album: Option<String>,        // usually the book title
-    album_artist: Option<String>, // preferred author when present
-    narrator: Option<String>,     // best-effort (composer/narrator tags vary)
-    genre: Option<String>,
-    duration_secs: f64,
-    has_cover: bool,
-}
-
-/// Read embedded tags + duration from one audio file. Never fails: an unreadable
-/// file yields empty tags (it still counts as a track, just without metadata).
-fn read_track_tags(path: &Path) -> TrackTags {
-    let mut t = TrackTags::default();
-    match Probe::open(path).and_then(|p| p.read()) {
-        Ok(tagged) => {
-            t.duration_secs = tagged.properties().duration().as_secs_f64();
-            if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
-                t.title = tag.title().map(|s| s.to_string());
-                t.artist = tag.artist().map(|s| s.to_string());
-                t.album = tag.album().map(|s| s.to_string());
-                t.genre = tag.genre().map(|s| s.to_string());
-                t.has_cover = !tag.pictures().is_empty();
-                t.album_artist = tag.get_string(&ItemKey::AlbumArtist).map(|s| s.to_string());
-                // Narrator has no universal tag; composer is the most common
-                // convention for audiobooks. Refined in a later phase if needed.
-                t.narrator = tag.get_string(&ItemKey::Composer).map(|s| s.to_string());
-            }
-        }
-        Err(e) => {
-            log::warn!(target: "skald::library", "scan: unreadable audio file {} ({e})", path.display());
-        }
-    }
-    t
 }
 
 /// Sidecar cover file names checked (in order) when looking for folder art.
@@ -147,7 +108,8 @@ pub fn find_cover_bytes(dir: &Path) -> Option<Vec<u8>> {
 
 /// Stable id derived from the directory path. Deterministic for the same path so
 /// a re-scan of an un-moved book yields the same id. The catalog (Phase 2) owns
-/// long-term identity across moves; this is the pre-catalog seed.
+/// long-term identity across moves; this is the pre-catalog seed (and the per-file
+/// `ino` in libraryFiles).
 fn stable_id(path: &Path) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -180,50 +142,66 @@ fn folder_fallback(dir: &Path, root: &Path) -> (Option<String>, Option<String>, 
 fn build_item(dir: &Path, root: &Path, mut files: Vec<PathBuf>, library_id: &str) -> ScannedItem {
     files.sort(); // alphabetical = chapter order (matches play_local's behaviour)
 
-    let tracks: Vec<TrackTags> = files.iter().map(|f| read_track_tags(f)).collect();
-    let first = tracks.first();
+    let probed: Vec<probe::ProbedFile> = files.iter().map(|f| probe::probe_file(f)).collect();
+    let first = probed.first();
 
     // ── Resolve display fields, preferring real tags over folder guesses ───────
-    let tag_title = first.and_then(|t| t.album.clone()).filter(|s| !s.trim().is_empty());
-    let tag_author = first
-        .and_then(|t| t.album_artist.clone().or_else(|| t.artist.clone()))
-        .filter(|s| !s.trim().is_empty());
+    let tag_title = first.and_then(|p| p.title.clone());
+    let tag_author = first.and_then(|p| p.author.clone());
 
     let (fb_title, fb_author, fb_series) = folder_fallback(dir, root);
 
     let title = tag_title.clone().or(fb_title);
     let author = tag_author.clone().or(fb_author);
-    let series = fb_series; // series has no standard single-file tag; folder-derived for now
-    let narrator = first.and_then(|t| t.narrator.clone());
+    // Series: prefer a tag, fall back to the folder layout.
+    let series = first.and_then(|p| p.series.clone()).or(fb_series);
+    let series_sequence = first.and_then(|p| p.series_sequence.clone());
+    let narrator = first.and_then(|p| p.narrator.clone());
+    let subtitle = first.and_then(|p| p.subtitle.clone());
+    let publisher = first.and_then(|p| p.publisher.clone());
+    let year = first.and_then(|p| p.year.clone());
+    let language = first.and_then(|p| p.language.clone());
+    let isbn = first.and_then(|p| p.isbn.clone());
+    let asin = first.and_then(|p| p.asin.clone());
+    let description = first.and_then(|p| p.description.clone());
 
-    // Distinct, order-preserving genre list across all tracks.
+    // Distinct, order-preserving genre list across all files.
     let mut genres: Vec<String> = Vec::new();
-    for tr in &tracks {
-        if let Some(g) = &tr.genre {
-            if !g.trim().is_empty() && !genres.contains(g) {
+    for p in &probed {
+        for g in &p.genres {
+            if !genres.contains(g) {
                 genres.push(g.clone());
             }
         }
     }
 
-    let total_duration: f64 = tracks.iter().map(|t| t.duration_secs).sum();
+    let total_duration: f64 = probed.iter().map(|p| p.duration_secs).sum();
 
-    // ── Chapters: one per file for multi-file books; none for single-file ──────
-    // (Embedded single-file chapter atoms are a later-phase enhancement.)
-    let chapters: Vec<Value> = if files.len() > 1 {
+    // ── Chapters ──────────────────────────────────────────────────────────────
+    // Single-file book: use its real embedded chapters (ffprobe). Multi-file book:
+    // one chapter per file. Lone file without embedded chapters: none.
+    let chapters: Vec<Value> = if files.len() == 1 && !probed[0].chapters.is_empty() {
+        probed[0]
+            .chapters
+            .iter()
+            .enumerate()
+            .map(|(i, c)| json!({ "id": i, "start": c.start, "end": c.end, "title": c.title }))
+            .collect()
+    } else if files.len() > 1 {
         let mut acc = 0.0f64;
         files
             .iter()
-            .zip(tracks.iter())
+            .zip(probed.iter())
             .enumerate()
-            .map(|(i, (f, tr))| {
+            .map(|(i, (f, p))| {
                 let start = acc;
-                let end = acc + tr.duration_secs;
+                let end = acc + p.duration_secs;
                 acc = end;
-                let title = tr.title.clone().unwrap_or_else(|| {
-                    f.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string())
-                        .unwrap_or_else(|| format!("Chapter {}", i + 1))
-                });
+                let title = f
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("Chapter {}", i + 1));
                 json!({ "id": i, "start": start, "end": end, "title": title })
             })
             .collect()
@@ -246,9 +224,9 @@ fn build_item(dir: &Path, root: &Path, mut files: Vec<PathBuf>, library_id: &str
         .collect();
 
     let id = stable_id(dir);
-    // A cover exists if any track carries embedded art OR a sidecar image sits
-    // in the folder (cover.jpg from a match, etc.).
-    let has_cover = tracks.iter().any(|t| t.has_cover) || has_sidecar_cover(dir);
+    // A cover exists if any file carries embedded art OR a sidecar image sits in
+    // the folder (cover.jpg from a match, etc.).
+    let has_cover = probed.iter().any(|p| p.has_cover) || has_sidecar_cover(dir);
 
     // ── Confidence: title/author dominate; series is a bonus ───────────────────
     let mut confidence: u8 = 0;
@@ -278,11 +256,18 @@ fn build_item(dir: &Path, root: &Path, mut files: Vec<PathBuf>, library_id: &str
             "chapters": chapters,
             "metadata": {
                 "title": title,
+                "subtitle": subtitle,
                 "authorName": author,
                 "narratorName": narrator,
                 "seriesName": series,
+                "seriesSequence": series_sequence,
+                "publisher": publisher,
+                "publishedYear": year,
+                "language": language,
+                "isbn": isbn,
+                "asin": asin,
                 "genres": genres,
-                "publisher": Value::Null,
+                "description": description,
             },
         },
         "libraryFiles": library_files,

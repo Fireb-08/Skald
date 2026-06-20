@@ -107,12 +107,20 @@ export default function Player({ st }: PlayerProps) {
       setFetchedFocusedChapters(st.currentBookChapters);
       return;
     }
+    // Local-library items already carry their chapters from the scan — read them
+    // straight from the catalog item instead of the server-bound fetchItem path
+    // (which would reject with no server). Mirrors onyx's currentBookChapters effect.
+    const localItem = st.library.find(it => it.id === fid);
+    if (localItem?.localPath) {
+      setFetchedFocusedChapters(bookChapters(localItem));
+      return;
+    }
     let cancelled = false;
     fetchItem(st.serverUrl, fid)
       .then(item => { if (!cancelled) setFetchedFocusedChapters(bookChapters(item)); })
       .catch(console.error);
     return () => { cancelled = true; };
-  }, [st.focusedBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.focusedBookId, st.library]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Podcast episodes carry their own optional chapters (same {start,end,title}
   // shape as books) on the episode object, not on the item. Map them into the
@@ -199,20 +207,22 @@ export default function Player({ st }: PlayerProps) {
   }, [focusId, bookmarkTab]);
 
   // A local-library item has no server — bookmarks go to the catalog instead.
-  const isLocalItem = !!st.library.find(b => b.id === st.currentBookId)?.localPath;
+  // Key off the focused book (what's on screen), not the playing book, so in
+  // split mode bookmarks load/add against the book the user is viewing.
+  const isLocalItem = !!st.library.find(b => b.id === focusId)?.localPath;
 
   // Load a local item's catalog bookmarks into shared state so they render in the
   // same list as server bookmarks (playerBookmarks filters by libraryItemId).
   useEffect(() => {
-    if (!isLocalItem || !st.currentBookId) return;
-    getLocalBookmarks(st.currentBookId)
+    if (!isLocalItem || !focusId) return;
+    getLocalBookmarks(focusId)
       .then(bms => {
-        const others = st.bookmarks.filter(b => b.libraryItemId !== st.currentBookId);
+        const others = st.bookmarks.filter(b => b.libraryItemId !== focusId);
         st.setBookmarks([...others, ...bms]);
       })
       .catch(err => console.error('[bookmark] local load failed:', err));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLocalItem, st.currentBookId]);
+  }, [isLocalItem, focusId]);
 
   const addBookmark = async () => {
     try {
@@ -220,12 +230,12 @@ export default function Player({ st }: PlayerProps) {
         ? `${curCh.t} — ${fmtTime(st.position)}`
         : fmtTime(st.position);
       if (isLocalItem) {
-        await addLocalBookmark(st.currentBookId, title, st.position);
-        const bms = await getLocalBookmarks(st.currentBookId);
-        const others = st.bookmarks.filter(b => b.libraryItemId !== st.currentBookId);
+        await addLocalBookmark(focusId, title, st.position);
+        const bms = await getLocalBookmarks(focusId);
+        const others = st.bookmarks.filter(b => b.libraryItemId !== focusId);
         st.setBookmarks([...others, ...bms]);
       } else {
-        await createBookmark(st.serverUrl, st.currentBookId, st.position, title);
+        await createBookmark(st.serverUrl, focusId, st.position, title);
         const me = await getMe(st.serverUrl);
         st.setBookmarks(me.bookmarks);
       }
@@ -587,7 +597,16 @@ export default function Player({ st }: PlayerProps) {
 
   const handlePlayPause = async () => {
     try {
-      // Local playback mode — no session management needed.
+      // Viewing a different book than the one playing — start the focused book
+      // via the canonical loader (routes local/server correctly and resumes
+      // from its saved position). This must precede the local short-circuit
+      // below, otherwise Play would merely toggle the already-playing book.
+      if (isFocusedDifferent) {
+        await playBook(st, st.focusedBookId!);
+        return;
+      }
+
+      // Local playback mode (same book) — no session management needed.
       // Call audio commands directly, same as the MiniPlayer toggle.
       // Without this branch, the !st.sessionReady check below would fire
       // (we never set sessionReady=true for local files) and call playBook
@@ -597,11 +616,7 @@ export default function Player({ st }: PlayerProps) {
         return;
       }
 
-      if (isFocusedDifferent && !st.playing) {
-        // User pressed play while viewing a different book — start that book
-        // via the canonical function so it resumes from saved position.
-        await playBook(st, st.focusedBookId!);
-      } else if (!st.sessionReady) {
+      if (!st.sessionReady) {
         // Fallback: preload didn't arm a session (e.g. cold launch edge case).
         // Start the current/focused book with proper resume logic.
         await playBook(st, st.focusedBookId ?? st.currentBookId);
@@ -618,34 +633,23 @@ export default function Player({ st }: PlayerProps) {
   };
 
   const handlePlayFocused = async () => {
-    // If a book is actively playing (not just paused), pause it before
-    // switching books so audio does not continue over the transition.
-    if (st.playing) {
-      await pauseAudio().catch(console.error);
-      // Reflect the paused state in the UI immediately.
-      st.setPlaying(false);
-    }
-
-    // Switch the playing book to the focused book in local state only.
-    // No server interaction — the transport play button handles that.
-    st.setCurrentBookId(st.focusedBookId!);
-
-    // Clear the session ID so no stale reference to the old book's session lingers.
-    st.setSessionId('');
-    // Mark session as not ready so handlePlayPause opens a fresh session on play.
-    st.setSessionReady(false);
-    // Ensure the playing flag is false for the new book (covers the paused case too).
-    st.setPlaying(false);
-    // Reset position to 0 so the waveform and chapter list start from the beginning
-    // of the new book; the chapter lock condition uses this to gate interaction.
-    st.setPosition(0);
-
     // Animate the button out and expand the transport bar.
     setBtnOut(true);
     // Expand the card after 50ms to allow the button exit animation to begin first.
     setTimeout(() => setShowTransport(true), 50);
     // Remove the button from the DOM after the exit animation completes (300ms).
     setTimeout(() => setBtnMounted(false), 300);
+
+    // Start the focused book through the canonical loader: it routes local vs
+    // server playback, resolves the catalog/server resume position, plays the
+    // right file, and sets currentBookId/focusedBookId/position itself. Replaces
+    // the old state-only mutation that relied on a follow-up Play (which on
+    // local toggled the previous audio and discarded the saved resume point).
+    try {
+      await playBook(st, st.focusedBookId!);
+    } catch (err) {
+      console.error('[Player] play focused failed:', err);
+    }
   };
 
   // Responsive title size — shrink longer titles (and in short windows) so the

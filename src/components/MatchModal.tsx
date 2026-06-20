@@ -6,7 +6,12 @@ import ReactDOM from 'react-dom';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
-import { searchBooks, searchProviders, updateMedia, fetchItem, getCover, getCustomMetadataProviders } from '../api/abs';
+import {
+  searchBooks, searchProviders, updateMedia, fetchItem, getCover, getCustomMetadataProviders,
+  searchMetadata, getLocalCover, applyLocalMetadata, fileAndInsertLocalMatch,
+} from '../api/abs';
+import type { MetadataResult, LocalMetadataFields, ScannedItem } from '../api/abs';
+import { bustCover } from '../lib/coverBust';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -395,21 +400,186 @@ function ConfBadge({ score }: { score?: number }) {
   );
 }
 
+// ── Source adapter ────────────────────────────────────────────────────────────
+// MatchModal is source-agnostic: the same search + review-diff UI drives both the
+// ABS (server) flow and local libraries. An adapter supplies the four
+// data/persistence touch-points; everything else (the diff, toggles, inline edit)
+// is shared verbatim so the two experiences mimic each other.
+
+/** Resolved field values from the review screen, keyed by the modal's field keys
+ *  (title/subtitle/author/narrator/series/publisher/year/genres/tags/language/
+ *  isbn/asin/description). Only *applied* fields are present; `cover` is conveyed
+ *  separately as a URL. */
+export type ResolvedFields = Record<string, unknown>;
+
+export interface MatchAdapter {
+  loadProviders: () => Promise<{ id: string; name: string }[]>;
+  search: (title: string, author: string, provider: string) => Promise<SearchResult[]>;
+  /** asset:// URL for the item's current cover, or null if none. */
+  loadCurrentCover: () => Promise<string | null>;
+  /** Persist the accepted fields (+ chosen cover); returns the updated item. */
+  submit: (fields: ResolvedFields, coverUrl: string | null) => Promise<LibraryItem>;
+}
+
+// Free, keyless providers for local libraries (no server). Audible first — it's
+// the richest audiobook source (narrators + series).
+const LOCAL_PROVIDERS = [
+  { id: 'audible', name: 'Audible' },
+  { id: 'google', name: 'Google Books' },
+  { id: 'itunes', name: 'iTunes' },
+  { id: 'openlibrary', name: 'Open Library' },
+];
+
+// A free-provider MetadataResult is already SearchResult-shaped; just coerce the
+// nullable series to undefined.
+function toSearchResult(r: MetadataResult): SearchResult {
+  return { ...r, series: r.series ?? undefined };
+}
+
+// Map the modal's resolved field keys to the local catalog's metadata field names.
+function resolvedToLocalFields(resolved: ResolvedFields): LocalMetadataFields {
+  const f: LocalMetadataFields = {};
+  const arr = (v: unknown) => Array.isArray(v) ? v as string[] : String(v).split(',').map(s => s.trim()).filter(Boolean);
+  for (const [k, v] of Object.entries(resolved)) {
+    switch (k) {
+      case 'title':       f.title = String(v); break;
+      case 'subtitle':    f.subtitle = String(v); break;
+      case 'author':      f.authorName = String(v); break;
+      case 'narrator':    f.narratorName = String(v); break;
+      case 'series': {
+        const { name, sequence } = splitSeries(String(v));
+        f.seriesName = name;
+        if (sequence) f.seriesSequence = sequence;
+        break;
+      }
+      case 'publisher':   f.publisher = String(v); break;
+      case 'year':        f.publishedYear = String(v); break;
+      case 'genres':      f.genres = arr(v); break;
+      case 'tags':        f.tags = arr(v); break;
+      case 'language':    f.language = String(v); break;
+      case 'isbn':        f.isbn = String(v); break;
+      case 'asin':        f.asin = String(v); break;
+      case 'description': f.description = String(v); break;
+    }
+  }
+  return f;
+}
+
+/** ABS server adapter — reproduces the original MatchModal behavior exactly. */
+export function makeServerAdapter(serverUrl: string, item: LibraryItem): MatchAdapter {
+  return {
+    loadProviders: async () => {
+      const [raw, custom] = await Promise.all([
+        searchProviders(serverUrl).catch(() => null),
+        getCustomMetadataProviders(serverUrl).catch(() => []),
+      ]);
+      const books = (((raw as Record<string, unknown>)?.providers as Record<string, unknown>)
+        ?.books as { value: string; text: string }[] | undefined) ?? [];
+      const builtins = books.map(p => ({ id: p.value, name: p.text }));
+      const base = builtins.length > 0 ? builtins : FALLBACK_PROVIDERS;
+      const customBook = (custom ?? [])
+        .filter(p => p.mediaType === 'book')
+        .map(p => ({ id: p.slug, name: `${p.name} (custom)` }));
+      return [...base, ...customBook];
+    },
+    search: async (title, author, provider) => {
+      const raw = await searchBooks(serverUrl, title, author, provider);
+      return (Array.isArray(raw) ? raw : ((raw as Record<string, unknown>)?.results as SearchResult[] ?? [])) as SearchResult[];
+    },
+    loadCurrentCover: async () => {
+      try { return convertFileSrc(await getCover(serverUrl, item.id)); } catch { return null; }
+    },
+    submit: async (resolved) => {
+      // Tags live at the top level of the media payload (ABS reads mediaPayload.tags).
+      const metadata: Record<string, unknown> = {};
+      let tags: string[] | undefined;
+      for (const [key, val] of Object.entries(resolved)) {
+        switch (key) {
+          case 'title':       metadata.title         = val; break;
+          case 'subtitle':    metadata.subtitle      = val; break;
+          case 'author':      metadata.authors       = String(val).split(',').map(n => ({ name: n.trim() })).filter(o => o.name); break;
+          case 'narrator':    metadata.narrators     = String(val).split(',').map(n => n.trim()).filter(Boolean); break;
+          case 'publisher':   metadata.publisher     = val; break;
+          case 'year':        metadata.publishedYear = val; break;
+          case 'series': {
+            const { name, sequence } = splitSeries(String(val));
+            metadata.series = [{ name, sequence }]; break;
+          }
+          case 'genres':      metadata.genres        = Array.isArray(val) ? val : String(val).split(',').map(g => g.trim()).filter(Boolean); break;
+          case 'tags':        tags                   = Array.isArray(val) ? val : String(val).split(',').map(t => t.trim()).filter(Boolean); break;
+          case 'language':    metadata.language      = val; break;
+          case 'isbn':        metadata.isbn          = val; break;
+          case 'asin':        metadata.asin          = val; break;
+          case 'description': metadata.description   = val; break;
+        }
+      }
+      await updateMedia(serverUrl, item.id, tags ? { metadata, tags } : { metadata });
+      return await fetchItem(serverUrl, item.id);
+    },
+  };
+}
+
+const localSearch = async (title: string, author: string, provider: string): Promise<SearchResult[]> => {
+  const q = [title, author].filter(Boolean).join(' ').trim();
+  const r = await searchMetadata(q, provider);
+  return r.map(toSearchResult);
+};
+
+/** Local adapter for an already-shelved item — writes the catalog + re-files. */
+export function makeLocalShelfAdapter(item: LibraryItem): MatchAdapter {
+  return {
+    loadProviders: async () => LOCAL_PROVIDERS,
+    search: localSearch,
+    loadCurrentCover: async () => {
+      try { return convertFileSrc(await getLocalCover(item.id)); } catch { return null; }
+    },
+    submit: async (resolved, coverUrl) => {
+      const updated = await applyLocalMetadata(item.libraryId, item.id, resolvedToLocalFields(resolved), coverUrl);
+      // The item id is unchanged across a re-file, so force the shelf cover to
+      // re-fetch the new art (the asset:// URL would otherwise be cached).
+      if (coverUrl) bustCover(item.id);
+      return updated;
+    },
+  };
+}
+
+/** Local adapter for a quarantined (Unidentified) book — files + inserts a row. */
+export function makeLocalQuarantineAdapter(libraryId: string, scanned: ScannedItem): MatchAdapter {
+  return {
+    loadProviders: async () => LOCAL_PROVIDERS,
+    search: localSearch,
+    loadCurrentCover: async () => null,
+    submit: async (resolved, coverUrl) =>
+      fileAndInsertLocalMatch(libraryId, scanned.sourcePath, resolvedToLocalFields(resolved), coverUrl),
+  };
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface MatchModalProps {
   item: LibraryItem;
-  serverUrl: string;
+  /** ABS server URL — used to build the default server adapter when none is given. */
+  serverUrl?: string;
+  /** Source adapter; defaults to a server adapter built from serverUrl + item. */
+  adapter?: MatchAdapter;
 
   onClose: () => void;
   onComplete: (updatedItem: LibraryItem) => void;
   onRefresh: () => void;
+  /** Batch progress (e.g. Add-books): renders position dots above the modal. */
+  queue?: { index: number; total: number };
 }
 
 // ── MatchModal ────────────────────────────────────────────────────────────────
 
-export default function MatchModal({ item, serverUrl, onClose, onComplete, onRefresh }: MatchModalProps) {
+export default function MatchModal({ item, serverUrl, adapter: adapterProp, onClose, onComplete, onRefresh, queue }: MatchModalProps) {
   const meta = item.media.metadata;
+  // Default to a server adapter when none is injected, so existing ABS call sites
+  // (which pass item + serverUrl) keep working unchanged.
+  const adapter = useMemo(
+    () => adapterProp ?? makeServerAdapter(serverUrl ?? '', item),
+    [adapterProp, serverUrl, item],
+  );
 
   // ── Search screen state ───────────────────────────────────────────────────
   const [provider, setProvider]       = useState('audible');
@@ -428,49 +598,29 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
   const [submitting, setSubmitting]   = useState(false);
   const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
 
-  // Fetch the current item's cover (same pattern as Cover.tsx). get_cover now
-  // returns an absolute file path, so convert it to an asset:// URL here — the
-  // shared ValueCell <img> renders this directly alongside remote incoming
-  // cover URLs, which must stay untouched.
+  // Fetch the current item's cover via the adapter (server get_cover or local
+  // get_local_cover). Both return an asset:// URL the shared ValueCell <img>
+  // renders alongside the remote incoming cover URLs.
   useEffect(() => {
     let cancelled = false;
-    getCover(serverUrl, item.id)
-      .then(path => {
-        if (cancelled) return;
-        setCurrentCoverUrl(convertFileSrc(path));
-      })
+    adapter.loadCurrentCover()
+      .then(url => { if (!cancelled) setCurrentCoverUrl(url); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [serverUrl, item.id]);
+  }, [adapter]);
 
-  // Fetch the live provider list from GET /api/search/providers (Bearer-
-  // authenticated via the existing invoke wrapper). The endpoint returns
-  // { providers: { books: [{ value, text }], booksCovers: [...], podcasts: [...] } } —
-  // see SearchController.js getAllProviders. Match is a book-search flow, so we
-  // read the "books" array and map { value, text } to the { id, name } shape used
-  // here. Falls back to a minimal hardcoded list on failure or an empty response.
+  // Load the provider list via the adapter (server: live /api/search/providers +
+  // custom providers; local: the free-provider list). Keep the current selection
+  // if it's still offered, else fall back to the first.
   useEffect(() => {
     let cancelled = false;
-    // Fetch built-in providers and registered custom providers in parallel and
-    // merge them so custom providers are selectable when matching.
-    Promise.all([
-      searchProviders(serverUrl).catch(() => null),
-      getCustomMetadataProviders(serverUrl).catch(() => []),
-    ]).then(([raw, custom]) => {
+    adapter.loadProviders().then(list => {
       if (cancelled) return;
-      const books = (((raw as Record<string, unknown>)?.providers as Record<string, unknown>)
-        ?.books as { value: string; text: string }[] | undefined) ?? [];
-      const builtins = books.map(p => ({ id: p.value, name: p.text }));
-      const base = builtins.length > 0 ? builtins : FALLBACK_PROVIDERS;
-      const customBook = (custom ?? [])
-        .filter(p => p.mediaType === 'book')
-        .map(p => ({ id: p.slug, name: `${p.name} (custom)` }));
-      const list = [...base, ...customBook];
       setProviders(list);
       setProvider(p => list.some(x => x.id === p) ? p : (list[0]?.id ?? 'audible'));
-    });
+    }).catch(() => {});
     return () => { cancelled = true; };
-  }, [serverUrl]);
+  }, [adapter]);
 
   // ── Option B review state (replaces checked / editedValues) ───────────────
   const [base, setBase]               = useState<Record<string, 'incoming' | 'current'>>({});
@@ -554,17 +704,13 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
   const handleSearch = useCallback(async () => {
     setSearching(true); setSearchErr(null); setHasSearched(true);
     try {
-      const raw = await searchBooks(serverUrl, queryTitle, queryAuthor, provider);
-      const arr = Array.isArray(raw)
-        ? raw
-        : ((raw as Record<string, unknown>)?.results as SearchResult[] ?? []);
-      setResults(arr as SearchResult[]);
+      setResults(await adapter.search(queryTitle, queryAuthor, provider));
     } catch (e) {
       setSearchErr(String(e));
     } finally {
       setSearching(false);
     }
-  }, [serverUrl, queryTitle, queryAuthor, provider]);
+  }, [adapter, queryTitle, queryAuthor, provider]);
 
   const handleSelect = useCallback((result: SearchResult) => {
     setSelected(result);
@@ -577,36 +723,16 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
     if (!selected) return;
     setSubmitting(true);
     try {
-      /* Builds metadata patch from Option B resolved field values. Tags live at
-         the top level of the media payload (ABS reads mediaPayload.tags, not
-         metadata.tags), so they're collected separately. */
-      const metadata: Record<string, unknown> = {};
-      let tags: string[] | undefined;
+      // Collect the resolved value for every applied field (cover handled
+      // separately as a URL); each adapter maps these to its own payload.
+      const resolved: ResolvedFields = {};
       for (const f of fields) {
-        if (f.key === 'cover') continue; // cover update requires separate endpoint
-        if (!isApplied(f)) continue;
-        const val = resolveField(f);
-        switch (f.key) {
-          case 'title':       metadata.title         = val; break;
-          case 'subtitle':    metadata.subtitle      = val; break;
-          case 'author':      metadata.authors       = String(val).split(',').map(n => ({ name: n.trim() })).filter(o => o.name); break;
-          case 'narrator':    metadata.narrators     = String(val).split(',').map(n => n.trim()).filter(Boolean); break;
-          case 'publisher':   metadata.publisher     = val; break;
-          case 'year':        metadata.publishedYear = val; break;
-          case 'series': {
-            const { name, sequence } = splitSeries(String(val));
-            metadata.series = [{ name, sequence }]; break;
-          }
-          case 'genres':      metadata.genres        = Array.isArray(val) ? val : String(val).split(',').map(g => g.trim()).filter(Boolean); break;
-          case 'tags':        tags                   = Array.isArray(val) ? val : String(val).split(',').map(t => t.trim()).filter(Boolean); break;
-          case 'language':    metadata.language      = val; break;
-          case 'isbn':        metadata.isbn          = val; break;
-          case 'asin':        metadata.asin          = val; break;
-          case 'description': metadata.description   = val; break;
-        }
+        if (f.key === 'cover' || !isApplied(f)) continue;
+        resolved[f.key] = resolveField(f);
       }
-      await updateMedia(serverUrl, item.id, tags ? { metadata, tags } : { metadata });
-      const updated = await fetchItem(serverUrl, item.id);
+      // Apply the incoming cover unless the user toggled the cover row to "current".
+      const coverUrl = base.cover !== 'current' ? (selected.cover ?? null) : null;
+      const updated = await adapter.submit(resolved, coverUrl);
       onComplete(updated);
       onRefresh();
     } catch (e) {
@@ -615,7 +741,7 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
       setSubmitting(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, item.id, selected, fields, base, edits, onComplete, onRefresh]);
+  }, [adapter, selected, fields, base, edits, onComplete, onRefresh]);
 
   // ── Style constants ───────────────────────────────────────────────────────
   const inputStyle: CSSProperties = {
@@ -638,9 +764,32 @@ export default function MatchModal({ item, serverUrl, onClose, onComplete, onRef
       style={{
         position: 'fixed', inset: 0, zIndex: 500,
         background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24,
       }}
     >
+      {/* Batch progress dots (Add-books queue) — sit just above the modal card. */}
+      {queue && queue.total > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {Array.from({ length: queue.total }).map((_, i) => (
+              <span
+                key={i}
+                style={{
+                  width: i === queue.index ? 9 : 7,
+                  height: i === queue.index ? 9 : 7,
+                  borderRadius: '50%',
+                  background: i <= queue.index ? 'var(--onyx-accent)' : 'rgba(255,255,255,0.22)',
+                  opacity: i < queue.index ? 0.55 : 1,
+                  transition: 'all 0.15s',
+                }}
+              />
+            ))}
+          </div>
+          <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', color: MX.textMute }}>
+            Book {queue.index + 1} of {queue.total}
+          </span>
+        </div>
+      )}
       <div style={{
         width: '100%', maxWidth: 720, maxHeight: '90vh',
         background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)',
