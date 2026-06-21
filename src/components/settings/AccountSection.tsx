@@ -1,6 +1,7 @@
 // AccountSection — profile view for all users, plus admin-only user management.
-// Non-admin users see their username, account type, and a WIP change-password stub.
-// Admin and root users additionally see a paginated user list with CRUD controls.
+// Non-admin users see their username, account type, and self-service change password
+// (PATCH /api/me/password). Admin and root users additionally see a paginated user
+// list with CRUD controls.
 import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { SectionHead, Row, Pill, SERIF, MONO } from './shared';

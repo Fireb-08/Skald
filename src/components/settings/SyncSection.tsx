@@ -1,9 +1,7 @@
 // SyncSection — settings pane for controlling how Skald synchronises with the server.
 //
-// Phase A: toggle + WIP badge (cosmetic only).
-// Phase B: toggle wired to the real Rust Socket.IO connect/disconnect commands.
-// Phase G: live connection indicator, graceful degradation on persistent failure,
-//          WIP badge removed now that all sync phases are complete.
+// The live-sync toggle is wired to the Rust Socket.IO connect/disconnect commands and
+// shows a live connection indicator with graceful degradation on persistent failure.
 
 import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
