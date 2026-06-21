@@ -822,9 +822,12 @@ function OpenLibraryManager({ st }: { st: OnyxState }) {
 
 export interface LibrariesSectionProps {
   st: OnyxState;
+  // Hides the SectionHead so the section can be hosted inside another pane
+  // (LibraryManagementSection's combined "Libraries" view).
+  embedded?: boolean;
 }
 
-export default function LibrariesSection({ st }: LibrariesSectionProps) {
+export default function LibrariesSection({ st, embedded = false }: LibrariesSectionProps) {
   const isAdmin = st.isAdmin;
 
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -940,10 +943,12 @@ export default function LibrariesSection({ st }: LibrariesSectionProps) {
 
   return (
     <div>
-      <SectionHead
-        title="Libraries"
-        subtitle="Manage libraries on your Audiobookshelf server."
-      />
+      {!embedded && (
+        <SectionHead
+          title="Libraries"
+          subtitle="Manage libraries on your Audiobookshelf server."
+        />
+      )}
 
       <Panel
         label="Libraries"

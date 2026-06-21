@@ -40,9 +40,11 @@ function PathChip({ label, hint, path }: { label: string; hint?: string; path: s
 // Create a local library from a folder on disk, (re)scan it into the catalog, and
 // switch to it. Unlike the ABS Libraries section this is always available — local
 // libraries are a client-side concept and require neither a server nor admin.
-export interface LocalLibrarySectionProps { st: OnyxState; }
+// `embedded` hides the SectionHead so the section can be hosted inside another
+// pane (LibraryManagementSection's combined "Libraries" view).
+export interface LocalLibrarySectionProps { st: OnyxState; embedded?: boolean; }
 
-export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
+export default function LocalLibrarySection({ st, embedded = false }: LocalLibrarySectionProps) {
   // Busy id: the library currently scanning (or '__new__' while adding), so the
   // relevant button shows a spinner and is disabled.
   const [busy, setBusy] = useState<string | null>(null);
@@ -176,10 +178,12 @@ export default function LocalLibrarySection({ st }: LocalLibrarySectionProps) {
 
   return (
     <div>
-      <SectionHead
-        title="Local Library"
-        subtitle="Build a library from audiobooks on this computer — no server required. Skald reads each book's embedded tags and chapters, sorts them into Author / Series / Title folders, and tracks playback progress locally. Use Match or Edit Metadata on a book to fill in or correct details — changes are written back to the files."
-      />
+      {!embedded && (
+        <SectionHead
+          title="Local Library"
+          subtitle="Build a library from audiobooks on this computer — no server required. Skald reads each book's embedded tags and chapters, sorts them into Author / Series / Title folders, and tracks playback progress locally. Use Match or Edit Metadata on a book to fill in or correct details — changes are written back to the files."
+        />
+      )}
 
       <Panel
         label="Your local libraries"

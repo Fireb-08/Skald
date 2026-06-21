@@ -9,8 +9,7 @@ import {
   ServerSection,
   PlaybackSection,
   AudioSection,
-  LibrariesSection,
-  LocalLibrarySection,
+  LibraryManagementSection,
   DownloadsSection,
   AppearanceSection,
   KeyboardSection,
@@ -28,7 +27,7 @@ export interface SettingsProps { st: OnyxState; onLogout: () => void; }
 
 type SectionId =
   | 'account' | 'server' | 'notifications' | 'backups' | 'scheduled-tasks' | 'logs' | 'sharing' | 'playback' | 'audio'
-  | 'library' | 'local-library' | 'downloads' | 'appearance' | 'keyboard' | 'about';
+  | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about';
 
 interface NavSection { id: SectionId; label: string; icon: IconName; }
 
@@ -44,7 +43,6 @@ const NAV: NavSection[] = [
   { id: 'downloads',       label: 'Downloads',       icon: 'bookmark'   },
   { id: 'keyboard',        label: 'Keyboard',        icon: 'kbd'        },
   { id: 'library',         label: 'Libraries',       icon: 'grid'       },
-  { id: 'local-library',   label: 'Local Library',   icon: 'bookmark'   },
   { id: 'logs',            label: 'Logs',            icon: 'list'       },
   { id: 'notifications',   label: 'Notifications',   icon: 'airplay'    },
   { id: 'playback',        label: 'Playback',        icon: 'play'       },
@@ -87,8 +85,10 @@ export default function Settings({ st, onLogout }: SettingsProps) {
             (low-resolution windows would otherwise spill the last items out). */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
           {NAV.map(s => {
-            // Hide admin-only sections from non-admin users
-            if ((s.id === 'notifications' || s.id === 'backups' || s.id === 'scheduled-tasks' || s.id === 'logs' || s.id === 'sharing' || s.id === 'library') && !st.isAdmin) return null;
+            // Hide admin-only sections from non-admin users. Libraries stays visible
+            // for everyone — it now also hosts local libraries (always available); the
+            // admin-only server-library pane inside it is gated within the section.
+            if ((s.id === 'notifications' || s.id === 'backups' || s.id === 'scheduled-tasks' || s.id === 'logs' || s.id === 'sharing') && !st.isAdmin) return null;
             // Build the label — append a count badge for Downloads when books are present.
             // This gives the user an at-a-glance view of how many books are stored offline.
             const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
@@ -129,8 +129,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
           {/* st is passed so the Sessions subtab can access serverUrl and user type */}
           {section === 'playback'   && <PlaybackSection st={st} />}
           {section === 'audio'      && <AudioSection />}
-          {section === 'library'    && <LibrariesSection st={st} />}
-          {section === 'local-library' && <LocalLibrarySection st={st} />}
+          {section === 'library'    && <LibraryManagementSection st={st} />}
           {section === 'downloads'  && <DownloadsSection st={st} />}
           {section === 'appearance' && <AppearanceSection st={st} />}
           {section === 'keyboard'      && <KeyboardSection />}

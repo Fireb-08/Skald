@@ -1,4 +1,4 @@
-import { useState, useCallback, type ReactNode, type CSSProperties } from 'react';
+import { useState, useCallback, createContext, useContext, type ReactNode, type CSSProperties } from 'react';
 
 export const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 export const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -90,6 +90,13 @@ export function Pill({ active, onClick, children }: PillProps) {
 // A bordered glass card with an eyebrow header that can carry a right-aligned
 // action/badge. `style` overrides the outer card (width/flex/marginTop — e.g. the
 // Appearance two-column layout); `bodyStyle` overrides the body padding.
+// When true, nested <Panel>s drop their own glass card and render as a flush
+// eyebrow-divider + content instead. This lets a PARENT pane host several
+// sub-sections as ONE glass surface — the look the Appearance Theme/Shelf panes
+// have, reused to fold the Libraries sub-sections into two single panes. Default
+// false, so every existing standalone Panel is unaffected.
+export const PanelFlatContext = createContext(false);
+
 export interface PanelProps {
   label: string;
   action?: ReactNode;
@@ -98,6 +105,20 @@ export interface PanelProps {
   bodyStyle?: CSSProperties;
 }
 export function Panel({ label, action, children, style, bodyStyle }: PanelProps) {
+  const flat = useContext(PanelFlatContext);
+  if (flat) {
+    // No glass card — an eyebrow divider + flush content, so it reads as a
+    // sub-section of the surrounding pane (cf. Appearance's "Shelf tabs" divider).
+    return (
+      <div style={{ marginTop: 16, ...style }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '4px 0 8px', borderBottom: '1px solid var(--onyx-line)' }}>
+          <span style={eyebrowStyle}>{label}</span>
+          {action}
+        </div>
+        <div style={{ padding: '2px 0 4px', ...bodyStyle }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div style={{
       background: 'rgba(255,255,255,0.02)',

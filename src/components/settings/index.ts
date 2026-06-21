@@ -17,6 +17,8 @@ export { default as LibrariesSection } from './LibrariesSection';
 export type { LibrariesSectionProps } from './LibrariesSection';
 export { default as LocalLibrarySection } from './LocalLibrarySection';
 export type { LocalLibrarySectionProps } from './LocalLibrarySection';
+export { default as LibraryManagementSection } from './LibraryManagementSection';
+export type { LibraryManagementSectionProps } from './LibraryManagementSection';
 export { default as ServerSettingsSection } from './ServerSettingsSection';
 export type { ServerSettingsSectionProps } from './ServerSettingsSection';
 export { default as NotificationsSection } from './NotificationsSection';
