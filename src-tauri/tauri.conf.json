@@ -16,7 +16,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$HOME/AppData/Local/skald/Skald/cache/covers/**"
+          "$HOME/AppData/Local/Skald/cache/covers/**"
         ]
       }
     }
@@ -46,7 +46,7 @@
       "nsis": {
         "displayLanguageSelector": false,
         "installerIcon": "icons/icon.ico",
-        "installMode": "currentUser",
+        "installMode": "perMachine",
         "installerHooks": "windows/hooks.nsh"
       }
     }

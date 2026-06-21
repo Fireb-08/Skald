@@ -26,7 +26,10 @@ struct Overrides {
 }
 
 fn project_dirs() -> Result<directories::ProjectDirs, String> {
-    directories::ProjectDirs::from("com", "skald", "Skald")
+    // Empty organization → roots live at %LOCALAPPDATA%\Skald\… (single "Skald"),
+    // not the old skald\Skald. ALL three ProjectDirs call sites (here, catalog.rs,
+    // eq.rs) must use the same args or the data dirs would split.
+    directories::ProjectDirs::from("com", "", "Skald")
         .ok_or_else(|| "Could not resolve app directories".to_string())
 }
 

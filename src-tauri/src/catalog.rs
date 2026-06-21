@@ -41,9 +41,10 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
-/// `<data_local>/Skald/catalog.db` — sibling to the downloads directory.
+/// `%LOCALAPPDATA%\Skald\data\catalog.db` — sibling to the downloads directory.
+/// Empty organization keeps the root a single "Skald" (must match paths.rs / eq.rs).
 fn db_path() -> Result<PathBuf, String> {
-    directories::ProjectDirs::from("com", "skald", "Skald")
+    directories::ProjectDirs::from("com", "", "Skald")
         .map(|d| d.data_local_dir().join("catalog.db"))
         .ok_or_else(|| "Could not resolve catalog path".to_string())
 }

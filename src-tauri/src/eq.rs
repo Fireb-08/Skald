@@ -112,6 +112,7 @@ impl EqSettings {
 }
 
 fn eq_path() -> Option<std::path::PathBuf> {
-    directories::ProjectDirs::from("com", "skald", "Skald")
+    // Empty organization → %LOCALAPPDATA%\Skald\… (must match paths.rs / catalog.rs).
+    directories::ProjectDirs::from("com", "", "Skald")
         .map(|dirs| dirs.data_local_dir().join("eq.json"))
 }

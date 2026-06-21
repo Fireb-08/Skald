@@ -12,6 +12,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+// Windows process-creation flag: run the child with no console window. The bundled
+// ffprobe.exe is a console-subsystem binary, so without this each invocation flashes
+// a command-prompt window — extremely visible when probing every file of a
+// multi-file book during import or first playback.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 static FFPROBE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -57,13 +66,16 @@ pub struct ProbedFile {
 /// protocol so ffmpeg never reinterprets it as a URL/pattern.
 pub fn probe(path: &Path) -> Result<Value, String> {
     let arg = format!("file:{}", path.to_string_lossy());
-    let out = Command::new(ffprobe_bin())
-        .args([
-            "-hide_banner", "-loglevel", "error",
-            "-print_format", "json",
-            "-show_format", "-show_streams", "-show_chapters",
-        ])
-        .arg(&arg)
+    let mut cmd = Command::new(ffprobe_bin());
+    cmd.args([
+        "-hide_banner", "-loglevel", "error",
+        "-print_format", "json",
+        "-show_format", "-show_streams", "-show_chapters",
+    ])
+    .arg(&arg);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW); // no flashing console window per file
+    let out = cmd
         .output()
         .map_err(|e| format!("ffprobe spawn failed (is it bundled?): {e}"))?;
     if !out.status.success() {

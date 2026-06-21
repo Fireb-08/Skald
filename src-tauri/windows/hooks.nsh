@@ -34,3 +34,32 @@
   ; would keep the plugins\ directory from being pruned.
   Delete "$INSTDIR\plugins\plugins.dat"
 !macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ; Per-user state lives OUTSIDE $INSTDIR, so the normal uninstaller (which only
+  ; removes tracked install files) leaves it behind — which is why a reinstall used
+  ; to show old libraries and skip onboarding. Clean it up here.
+  ;
+  ;   $LOCALAPPDATA\Skald         — Rust ProjectDirs("com","","Skald") data/cache root:
+  ;                                 catalog.db, eq.json, paths.json, cover cache,
+  ;                                 library/chapter caches, and the (default-location)
+  ;                                 offline downloads.
+  ;   $LOCALAPPDATA\com.skald.app — the WebView2 profile (localStorage: the
+  ;                                 skald.onboarded flag, auth token, all prefs).
+  ;                                 Keep this in sync with tauri.conf.json `identifier`.
+  ;
+  ; CRITICAL: skip entirely during a SILENT uninstall. Tauri runs this same
+  ; uninstaller silently as the first step of an app UPDATE; wiping the user's
+  ; library/downloads/settings on every update would be catastrophic. A real
+  ; uninstall from Add/Remove Programs is interactive, so IfSilent cleanly
+  ; distinguishes the two.
+  ;
+  ; Note: a downloads folder the user RELOCATED (Settings → Downloads) lives at a
+  ; user-chosen path we don't track here and is intentionally left untouched, as is
+  ; any local-library audio (which lives in the user's own folders, never appdata).
+  IfSilent skald_userdata_done
+    MessageBox MB_YESNO|MB_ICONQUESTION "Also remove your Skald library data, downloads, and settings?$\n$\nYour audiobook files stored in their own folders are NOT affected." /SD IDNO IDNO skald_userdata_done
+      RMDir /r "$LOCALAPPDATA\Skald"
+      RMDir /r "$LOCALAPPDATA\com.skald.app"
+  skald_userdata_done:
+!macroend

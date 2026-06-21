@@ -2058,7 +2058,7 @@ pub async fn download_item(
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
 
-    // Resolve and create the downloads directory (e.g. AppData\Local\skald\Skald\downloads).
+    // Resolve and create the downloads directory (e.g. AppData\Local\Skald\data\downloads).
     let dl_dir = downloads::downloads_dir()?;
     std::fs::create_dir_all(&dl_dir)
         .map_err(|e| format!("Failed to create downloads directory: {e}"))?;

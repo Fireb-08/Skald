@@ -9,6 +9,12 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+// Run the bundled console-subsystem tone.exe with no flashing command-prompt window.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 static TONE: OnceLock<PathBuf> = OnceLock::new();
 
@@ -99,7 +105,11 @@ pub fn write_book_tags(dir: &Path, meta: &Value) -> Result<(), String> {
         }
         args.push(f.to_string_lossy().into_owned());
 
-        match Command::new(&tone).args(&args).output() {
+        let mut cmd = Command::new(&tone);
+        cmd.args(&args);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.output() {
             Ok(out) if out.status.success() => {}
             Ok(out) => {
                 let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();

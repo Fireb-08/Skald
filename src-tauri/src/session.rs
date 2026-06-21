@@ -102,20 +102,30 @@ impl SessionManager {
         *self.current_time.lock().unwrap() = load_time;
         *self.time_listened.lock().unwrap() = 0.0;
 
-        // Load first audio track into the player.
-        // Token-in-URL pattern (CLAUDE.md critical lesson 2): LibVLC HTTP headers
-        // are unreliable on Windows — never use Authorization headers for media URLs.
-        if let Some(track) = session.audio_tracks.first() {
-            let token = self.client.token.as_deref().unwrap_or("");
-            let url = format!(
-                "{}{}?token={}",
-                self.client.base_url.trim_end_matches('/'),
-                track.content_url,
-                token,
-            );
+        // Load the audio track(s) into the player.
+        // Token-in-URL pattern (CLAUDE.md critical lesson 2): LibVLC HTTP headers are
+        // unreliable on Windows — never use Authorization headers for media URLs.
+        // A book with >1 audioTrack is multi-track: load them ALL as one contiguous
+        // timeline (ABS's model — each track carries a startOffset). The single ABS
+        // session keeps driving sync with the GLOBAL currentTime, so advancing tracks
+        // client-side needs no new server session.
+        let token = self.client.token.as_deref().unwrap_or("").to_string();
+        let base = self.client.base_url.trim_end_matches('/').to_string();
+        let online_multitrack = session.audio_tracks.len() > 1;
+        {
             let player_guard = self.player.lock().unwrap();
             if let Some(p) = player_guard.as_ref() {
-                p.load(&url, load_time)?;
+                if online_multitrack {
+                    let tracks: Vec<(String, f64)> = session
+                        .audio_tracks
+                        .iter()
+                        .map(|t| (format!("{base}{}?token={token}", t.content_url), t.duration))
+                        .collect();
+                    p.load_tracks(tracks, load_time)?;
+                } else if let Some(track) = session.audio_tracks.first() {
+                    let url = format!("{base}{}?token={token}", track.content_url);
+                    p.load(&url, load_time)?;
+                }
             }
         }
 
@@ -179,7 +189,45 @@ impl SessionManager {
             }
         });
 
+        // Multi-track ABS book → chain its tracks (see spawn_advance_task).
+        if online_multitrack {
+            self.spawn_advance_task(Arc::clone(&active));
+        }
+
         Ok(session.current_time)
+    }
+
+    /// Spawn the track-advance loop for the currently-loaded multi-track book. The
+    /// MediaPlayerEndReached callback (audio.rs) wakes the player's `advance` Notify
+    /// when a track finishes; this task performs the actual switch to the next track
+    /// OFF the libvlc event thread (calling libvlc from within the callback risks a
+    /// deadlock). try_advance() is a no-op unless the current track has really ended
+    /// and another remains, so the 2s fallback tick — which also lets the task notice
+    /// session teardown (active=false) and exit — is harmless. Shared by the local
+    /// (play_local) and online (start_session) multi-track paths.
+    fn spawn_advance_task(&self, active: Arc<AtomicBool>) {
+        let advance = {
+            let guard = self.player.lock().unwrap();
+            guard.as_ref().map(|p| p.advance_signal())
+        };
+        let Some(advance) = advance else { return };
+        let player_adv = Arc::clone(&self.player);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = advance.notified() => {}
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                }
+                if !active.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Ok(guard) = player_adv.lock() {
+                    if let Some(p) = guard.as_ref() {
+                        let _ = p.try_advance();
+                    }
+                }
+            }
+        });
     }
 
     /// Load a local audio file into LibVLC and start playback without opening a
@@ -238,44 +286,70 @@ impl SessionManager {
             }
         }
 
-        // Build a file:/// URI for LibVLC from the registry path.
-        // If the path is a directory (multi-file book), scan for audio files sorted
-        // by name — alphabetical order matches ABS export chapter order — and use
-        // the first file. Single-file books are loaded directly.
-        let audio_ext = ["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a"];
-        let uri = if std::path::Path::new(file_path).is_dir() {
-            let mut files: Vec<_> = std::fs::read_dir(file_path)
-                .map_err(|e| format!("Failed to read download directory: {e}"))?
+        // Resolve what to load. A directory is a (potentially) multi-file book:
+        // list its audio files in playback order. We sort the full paths with
+        // `.sort()` — the SAME ordering the scanner uses when it builds this book's
+        // per-file chapters — so each track's global offset lines up exactly with
+        // its chapter. >1 file → true multi-track playback (ABS's model: one player,
+        // one contiguous timeline across the tracks, auto-advancing). 1 file (or a
+        // single-file path) → the original single-media path, untouched.
+        let audio_ext = ["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a", "wav"];
+        let dir_files: Option<Vec<std::path::PathBuf>> = if std::path::Path::new(file_path).is_dir() {
+            let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(file_path)
+                .map_err(|e| format!("Failed to read book directory: {e}"))?
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path()
-                        .extension()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension()
                         .and_then(|x| x.to_str())
                         .map(|x| audio_ext.contains(&x.to_lowercase().as_str()))
                         .unwrap_or(false)
                 })
                 .collect();
-            // Sort by file name so multi-file books play in chapter order.
-            files.sort_by_key(|e| e.file_name());
+            files.sort();
             if files.is_empty() {
-                return Err("No audio files found in download directory".to_string());
+                return Err("No audio files found in book directory".to_string());
             }
-            // LibVLC expects forward slashes even on Windows.
-            format!(
-                "file:///{}",
-                files[0].path().to_string_lossy().replace('\\', "/")
-            )
+            Some(files)
         } else {
-            // Single audio file — convert the Windows path to a file:/// URI.
-            format!("file:///{}", file_path.replace('\\', "/"))
+            None
         };
 
-        // Load the URI into LibVLC. AudioPlayer::load() applies the :start-time
-        // media option when start_time > 0, so no explicit seek is needed after play().
+        // A true multi-file book drives the track-advance task spawned below.
+        let multitrack = matches!(&dir_files, Some(files) if files.len() > 1);
+
+        // Probe each file's duration to build the global timeline (the scanner uses
+        // the same ffprobe durations to derive this book's chapters, so offsets line
+        // up). Done OUTSIDE the player lock — ffprobe spawns are slow and holding the
+        // lock across them would stall the tick loop / transport controls.
+        let multitrack_tracks: Option<Vec<(String, f64)>> = if multitrack {
+            dir_files.as_ref().map(|files| {
+                files
+                    .iter()
+                    .map(|f| {
+                        let uri = format!("file:///{}", f.to_string_lossy().replace('\\', "/"));
+                        (uri, crate::probe::probe_file(f).duration_secs)
+                    })
+                    .collect()
+            })
+        } else {
+            None
+        };
+
         {
             let guard = self.player.lock().unwrap();
             if let Some(p) = guard.as_ref() {
-                p.load(&uri, start_time)?;
+                if let Some(tracks) = multitrack_tracks {
+                    p.load_tracks(tracks, start_time)?;
+                } else {
+                    // Single file (bare path, or the lone file inside a directory).
+                    // AudioPlayer::load() applies :start-time so no post-play seek.
+                    let uri = match &dir_files {
+                        Some(files) => format!("file:///{}", files[0].to_string_lossy().replace('\\', "/")),
+                        None => format!("file:///{}", file_path.replace('\\', "/")),
+                    };
+                    p.load(&uri, start_time)?;
+                }
             }
         }
 
@@ -381,6 +455,11 @@ impl SessionManager {
                 }
             }
         });
+
+        // Multi-file book → chain its tracks (see spawn_advance_task).
+        if multitrack {
+            self.spawn_advance_task(Arc::clone(&active));
+        }
 
         // Start playback after the tick task is spawned so the first tick fires
         // while audio is already playing (avoids a spurious isPlaying=false tick).

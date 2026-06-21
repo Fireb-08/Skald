@@ -111,7 +111,32 @@ pub fn run() {
             // the target machine. Must run before the first Instance::new() call,
             // which is lazy (triggered by open_playback_session / play_local_file).
             if let Ok(resource_dir) = app.path().resource_dir() {
-                std::env::set_var("VLC_PLUGIN_PATH", resource_dir.join("plugins"));
+                let plugins = resource_dir.join("plugins");
+                std::env::set_var("VLC_PLUGIN_PATH", &plugins);
+
+                // Pre-build the LibVLC plugin cache (plugins.dat) when it's missing.
+                // Without it, libvlccore rebuilds the cache on the first Instance::new()
+                // (i.e. first playback) — on Windows that spawns the console-subsystem
+                // vlc-cache-gen and/or rescans every plugin, flashing command-prompt
+                // windows and adding a multi-second first-play delay. The NSIS installer
+                // builds this at install time for production; a dev run (no installer)
+                // has no cache, so build it here. Idempotent (skipped once present) and
+                // run WINDOWLESS. vlc-cache-gen needs libvlccore.dll in its own dir (it
+                // sits beside it in resource_dir) and an ABSOLUTE plugins path.
+                let cache_gen = resource_dir.join("vlc-cache-gen.exe");
+                if cache_gen.exists() && plugins.is_dir() && !plugins.join("plugins.dat").exists() {
+                    let mut cmd = std::process::Command::new(&cache_gen);
+                    cmd.arg(&plugins);
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                    }
+                    match cmd.status() {
+                        Ok(s) => log::info!(target: "skald::app", "built LibVLC plugin cache (exit {:?})", s.code()),
+                        Err(e) => log::warn!(target: "skald::app", "LibVLC plugin cache build failed: {e}"),
+                    }
+                }
             }
 
             // Resolve the bundled helper binaries (ffprobe = read metadata/chapters,
