@@ -29,30 +29,37 @@ type SectionId =
   | 'account' | 'server' | 'notifications' | 'backups' | 'scheduled-tasks' | 'logs' | 'sharing' | 'playback' | 'audio'
   | 'library' | 'downloads' | 'appearance' | 'keyboard' | 'about';
 
-interface NavSection { id: SectionId; label: string; icon: IconName; }
+// `requiresAbs` marks panes that only make sense with an Audiobookshelf server
+// connection — they're hidden in local-only mode. `adminOnly` panes are hidden
+// from non-admin users. Both are filtered at render time but keep their slot.
+interface NavSection { id: SectionId; label: string; icon: IconName; requiresAbs?: boolean; adminOnly?: boolean; }
 
-// Sorted alphabetically by label. Admin-only entries (Backups, Logs,
-// Notifications, Scheduled Tasks, Sharing & RSS) are filtered out for non-admins
-// at render time but keep their alphabetical slot when shown.
+// Sorted alphabetically by label. ABS-only entries (Server + the admin panes) are
+// hidden when no server is connected; admin panes are also hidden from non-admins.
 const NAV: NavSection[] = [
   { id: 'about',           label: 'About',           icon: 'dot'        },
   { id: 'account',         label: 'Account',         icon: 'home'       },
   { id: 'appearance',      label: 'Appearance',      icon: 'speaker'    },
   { id: 'audio',           label: 'Audio',           icon: 'headphones' },
-  { id: 'backups',         label: 'Backups',         icon: 'bookmark'   },
+  { id: 'backups',         label: 'Backups',         icon: 'bookmark',   requiresAbs: true, adminOnly: true },
   { id: 'downloads',       label: 'Downloads',       icon: 'bookmark'   },
   { id: 'keyboard',        label: 'Keyboard',        icon: 'kbd'        },
   { id: 'library',         label: 'Libraries',       icon: 'grid'       },
-  { id: 'logs',            label: 'Logs',            icon: 'list'       },
-  { id: 'notifications',   label: 'Notifications',   icon: 'airplay'    },
+  { id: 'logs',            label: 'Logs',            icon: 'list',       requiresAbs: true, adminOnly: true },
+  { id: 'notifications',   label: 'Notifications',   icon: 'airplay',    requiresAbs: true, adminOnly: true },
   { id: 'playback',        label: 'Playback',        icon: 'play'       },
-  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep'      },
-  { id: 'server',          label: 'Server',          icon: 'monitor'    },
-  { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay'    },
+  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep',      requiresAbs: true, adminOnly: true },
+  { id: 'server',          label: 'Server',          icon: 'monitor',    requiresAbs: true },
+  { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay',    requiresAbs: true, adminOnly: true },
 ];
 
 export default function Settings({ st, onLogout }: SettingsProps) {
   const [section, setSection] = useState<SectionId>('account');
+  // True when connected to an Audiobookshelf server. Local-only users (no token)
+  // never see the ABS-only panes. authToken is read synchronously from
+  // localStorage, so this is stable across reloads and survives the server being
+  // temporarily offline (the token persists).
+  const hasAbs = !!st.authToken && !!st.serverUrl;
 
   async function handleSignOut() {
     try { await logout(); } catch { /* keyring failure is non-fatal */ }
@@ -85,10 +92,12 @@ export default function Settings({ st, onLogout }: SettingsProps) {
             (low-resolution windows would otherwise spill the last items out). */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
           {NAV.map(s => {
-            // Hide admin-only sections from non-admin users. Libraries stays visible
-            // for everyone — it now also hosts local libraries (always available); the
+            // Hide ABS-only panes in local-only mode (no server connected), and
+            // hide admin-only panes from non-admins. Libraries stays visible for
+            // everyone — it also hosts local libraries (always available); the
             // admin-only server-library pane inside it is gated within the section.
-            if ((s.id === 'notifications' || s.id === 'backups' || s.id === 'scheduled-tasks' || s.id === 'logs' || s.id === 'sharing') && !st.isAdmin) return null;
+            if (s.requiresAbs && !hasAbs) return null;
+            if (s.adminOnly && !st.isAdmin) return null;
             // Build the label — append a count badge for Downloads when books are present.
             // This gives the user an at-a-glance view of how many books are stored offline.
             const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
