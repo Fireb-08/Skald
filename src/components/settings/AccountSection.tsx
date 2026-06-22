@@ -717,9 +717,20 @@ export interface AccountSectionProps {
 export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   // Admin check — used to gate the user-list section and the "Add User" button.
   const isAdmin = st.isAdmin;
+  // True when connected to an Audiobookshelf server. Local-only users get a
+  // simplified profile: an editable display name, no account type / password.
+  const hasAbs = !!st.authToken && !!st.serverUrl;
+
+  // Local-only display name, persisted in localStorage. Stands in for the ABS
+  // username (avatar + library greeting) when there is no server connected.
+  const [localName, setLocalName] = useState(() => localStorage.getItem('onyx.local.displayName') ?? '');
+  const saveLocalName = (v: string) => {
+    setLocalName(v);
+    localStorage.setItem('onyx.local.displayName', v);
+  };
 
   // Profile display values — used in the avatar block for all users.
-  const displayName = st.user?.username ?? '';
+  const displayName = hasAbs ? (st.user?.username ?? '') : localName;
   const initial = displayName.charAt(0).toUpperCase() || '?';
 
   // ── Admin-only state ──────────────────────────────────────────────────────
@@ -996,10 +1007,34 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
             marginTop: 6,
             letterSpacing: '0.06em',
           }}>
-            {st.serverUrl || 'Not connected'}
+            {hasAbs ? (st.serverUrl || 'Not connected') : 'Local library'}
           </div>
         </div>
       </div>
+
+      {/* ── Local-only view: editable display name (no account type / password) ── */}
+      {!hasAbs && (
+        <Row label="Display name" hint="Shown in your library greeting. Stored on this device.">
+          <input
+            type="text"
+            value={localName}
+            onChange={e => saveLocalName(e.target.value)}
+            placeholder="Reader"
+            maxLength={40}
+            style={{
+              padding: '8px 12px',
+              minWidth: 200,
+              fontSize: 13,
+              background: 'rgba(0,0,0,0.25)',
+              borderRadius: 8,
+              color: 'var(--onyx-text)',
+              border: '1px solid var(--onyx-glass-edge)',
+              outline: 'none',
+              fontFamily: 'inherit',
+            }}
+          />
+        </Row>
+      )}
 
       {/* ── Admin self-service: password change + read-only SSO status ── */}
       {isAdmin && (
@@ -1021,8 +1056,8 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
         </>
       )}
 
-      {/* ── Non-admin view: read-only account info ── */}
-      {!isAdmin && (
+      {/* ── Non-admin ABS view: read-only account info ── */}
+      {!isAdmin && hasAbs && (
         <>
           {/* Username row — read-only; ABS has no public rename endpoint */}
           <Row label="Display name" hint="Name is managed by your Audiobookshelf server.">
