@@ -3,7 +3,7 @@ import type { CSSProperties, FocusEvent } from 'react';
 import ReactDOM from 'react-dom';
 import type { LibraryItem } from '../state/onyx';
 import { bookAuthor, bookNarrator } from '../state/onyx';
-import { updateMedia, updateChapters, fetchItem, applyLocalMetadata, scanFolder } from '../api/abs';
+import { updateMedia, updateChapters, fetchItem, applyLocalMetadata, scanFolder, setLocalChapters } from '../api/abs';
 import type { LocalMetadataFields } from '../api/abs';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -80,9 +80,22 @@ export interface MetadataEditorProps {
   onClose: () => void;
   onComplete: (updated: LibraryItem) => void;
   onRefresh: () => void;
+  // Optional soft-notice channel (wired to the app toast) — used to report a
+  // best-effort failure that didn't fail the save (e.g. local chapters saved to
+  // the catalog but not embedded into the audio file).
+  onNotice?: (message: string, type: 'info' | 'success') => void;
 }
 
 interface EditChapter { start: number; title: string; }
+
+// Count a local item's audio files from its catalogued libraryFiles. Used to gate
+// chapter write-back to single-file books — editing one global chapter list and
+// writing it back across N files is ambiguous (the scanner derives multi-file
+// chapters one-per-file), so multi-file local books keep chapters read-only.
+function localAudioFileCount(item: LibraryItem): number {
+  const files = (item as unknown as { libraryFiles?: Array<{ fileType?: string }> }).libraryFiles;
+  return Array.isArray(files) ? files.filter(f => f.fileType === 'audio').length : 0;
+}
 
 // ── Time helpers (H:MM:SS) ──────────────────────────────────────────────────────
 function fmtHMS(total: number): string {
@@ -117,12 +130,19 @@ function seriesDisplay(item: LibraryItem): string {
   return (m.seriesName as string) ?? '';
 }
 
-export default function MetadataEditor({ item, serverUrl, onClose, onComplete, onRefresh }: MetadataEditorProps) {
+export default function MetadataEditor({ item, serverUrl, onClose, onComplete, onRefresh, onNotice }: MetadataEditorProps) {
   // Local items are catalog-backed (no server). They seed from the item directly
-  // and save via the catalog. Chapter write-back isn't built for local yet, so the
-  // Chapters tab is hidden for them.
+  // and save via the catalog. Chapter write-back is supported for single-file
+  // local books (catalog is authoritative; the file is updated best-effort via
+  // tone). Multi-file local books keep chapters hidden — see localAudioFileCount.
   const isLocal = !!item.localPath;
-  const tabs = isLocal ? (['details'] as const) : (['details', 'chapters'] as const);
+  const isMultiFile = isLocal && localAudioFileCount(item) > 1;
+  const tabs = isLocal
+    ? (isMultiFile ? (['details'] as const) : (['details', 'chapters'] as const))
+    : (['details', 'chapters'] as const);
+  // Local single-file books offer an opt-out of embedding chapters into the file
+  // (the catalog write always happens). Default on so edits are durable.
+  const [writeToFile, setWriteToFile] = useState(true);
   const [tab, setTab] = useState<'details' | 'chapters'>('details');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -315,6 +335,18 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
         end: i + 1 < sorted.length ? sorted[i + 1].start : duration,
         title: c.title.trim(),
       }));
+      // Local: write the catalog (source of truth) + optionally embed into the
+      // file via tone. The returned item already carries the new chapters, so the
+      // player/shelf update immediately; a soft fileWarning (file write skipped or
+      // failed) is surfaced as a notice without failing the save.
+      if (isLocal) {
+        const { item: updated, fileWarning } = await setLocalChapters(item.id, payload, writeToFile);
+        onComplete(updated);
+        onRefresh();
+        if (fileWarning) onNotice?.(fileWarning, 'info');
+        onClose();
+        return;
+      }
       await updateChapters(serverUrl, item.id, payload);
       const updated = await fetchItem(serverUrl, item.id);
       onComplete(updated);
@@ -447,6 +479,15 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
                 <div style={{ fontSize: 11, color: 'var(--onyx-text-mute)', marginTop: 10, lineHeight: 1.5 }}>
                   Times are H:MM:SS. Chapter ends are derived automatically from the next chapter's start.
                 </div>
+                {/* Local single-file books: chapters always save to the library;
+                    this also embeds them into the audio file so they survive a
+                    re-scan. Best-effort — a locked file leaves the library edit. */}
+                {isLocal && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--onyx-text-dim)', cursor: 'pointer', marginTop: 12 }}>
+                    <input type="checkbox" checked={writeToFile} onChange={e => setWriteToFile(e.target.checked)} />
+                    Write chapters into the audio file
+                  </label>
+                )}
               </div>
             </div>
           )}

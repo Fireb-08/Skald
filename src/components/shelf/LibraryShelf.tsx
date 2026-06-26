@@ -547,6 +547,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             setEditItem(null);
           }}
           onRefresh={() => { st.refreshLibrary().catch(console.error); }}
+          onNotice={(message, type) => st.setToast({ message, type })}
         />
       )}
       {coverItem && (

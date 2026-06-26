@@ -295,6 +295,7 @@ pub fn run() {
             commands::search_metadata,
             commands::get_unidentified_items,
             commands::apply_local_metadata,
+            commands::set_local_chapters,
             commands::file_and_insert_local_match,
             commands::delete_local_item,
             // Local Library — Phase 7: staging-folder watcher

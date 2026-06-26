@@ -1041,6 +1041,26 @@ pub async fn apply_local_metadata(
     Ok(item)
 }
 
+/// Replace the chapter markers on a catalogued local item (Local Chapter
+/// Write-Back roadmap). The catalog is authoritative (immediate effect); when
+/// `write_to_file` is set, the chapters are also written into the single audio
+/// file via `tone` so they survive a re-scan (best-effort). Returns
+/// `{ item, fileWarning }` — `fileWarning` is a non-null soft message when the
+/// optional file write couldn't complete (the catalog edit still applied).
+#[tauri::command]
+pub async fn set_local_chapters(
+    item_id: String,
+    chapters: serde_json::Value,
+    write_to_file: bool,
+) -> Result<serde_json::Value, String> {
+    let (item, warning) = tokio::task::spawn_blocking(move || {
+        crate::catalog::set_item_chapters(&item_id, chapters, write_to_file)
+    })
+    .await
+    .map_err(|e| format!("set_local_chapters task panicked: {e}"))??;
+    Ok(serde_json::json!({ "item": item, "fileWarning": warning }))
+}
+
 /// Apply a chosen match to a quarantined (Unidentified) book: file it into
 /// Author/Series/Title, insert a catalogued item carrying the chosen metadata,
 /// download the cover (best-effort), then return the new item. No re-scan.

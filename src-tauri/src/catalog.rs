@@ -977,6 +977,118 @@ pub fn apply_metadata(
     Ok((item, new_path))
 }
 
+// Audio extensions for the single-file resolver below — mirrors scanner.rs /
+// tone.rs. Kept local so this resolver stays self-contained.
+const CHAPTER_AUDIO_EXTS: &[&str] = &["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a", "wav"];
+
+/// Resolve the one audio file of a single-file local book, for chapter write-back.
+/// Prefers the catalogued `libraryFiles` (the authoritative file set the scanner
+/// emitted); falls back to scanning `localPath`. Returns None when the book has
+/// zero or more than one audio file — multi-file chapter write-back is ambiguous,
+/// so the caller treats None as "catalog-only" and skips the file write.
+fn single_audio_file(item: &Value) -> Option<PathBuf> {
+    if let Some(files) = item.get("libraryFiles").and_then(|v| v.as_array()) {
+        let audio: Vec<&Value> = files
+            .iter()
+            .filter(|f| f.get("fileType").and_then(|t| t.as_str()) == Some("audio"))
+            .collect();
+        if audio.len() == 1 {
+            if let Some(p) = audio[0].get("metadata").and_then(|m| m.get("path")).and_then(|p| p.as_str()) {
+                return Some(PathBuf::from(p));
+            }
+        }
+        if audio.len() > 1 {
+            return None; // multi-file
+        }
+    }
+    // Fallback: exactly one audio file directly inside the book folder.
+    let dir = item.get("localPath").and_then(|p| p.as_str())?;
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(|e| CHAPTER_AUDIO_EXTS.contains(&e.to_lowercase().as_str()))
+                .unwrap_or(false)
+        })
+        .collect();
+    if found.len() == 1 {
+        found.pop()
+    } else {
+        None
+    }
+}
+
+/// Replace the chapter markers on a catalogued local item (Local Chapter
+/// Write-Back roadmap). The catalog JSON is what the player and shelf read, so
+/// this is the authoritative write and takes effect immediately. When
+/// `write_to_file` is set, the chapters are additionally written into the single
+/// audio file via `tone` so the edit survives a re-scan — best-effort: a failure
+/// there (locked file, odd container, multi-file book) leaves the catalog edit
+/// intact and is reported back as a warning string rather than failing the call.
+/// Returns (updated_item_json, file_write_warning). Blocking — call from
+/// `spawn_blocking`. The caller scopes this to single-file books.
+pub fn set_item_chapters(
+    item_id: &str,
+    chapters: Value,
+    write_to_file: bool,
+) -> Result<(Value, Option<String>), String> {
+    let conn = open()?;
+    let item_str: String = conn
+        .query_row("SELECT item_json FROM items WHERE id = ?1", params![item_id], |r| r.get(0))
+        .map_err(|e| format!("load item: {e}"))?;
+    let mut item: Value = serde_json::from_str(&item_str).map_err(|e| format!("parse item: {e}"))?;
+
+    let count = chapters.as_array().map(Vec::len).unwrap_or(0);
+    let duration = item
+        .get("media")
+        .and_then(|m| m.get("duration"))
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+
+    // Authoritative catalog write: replace media.chapters (+ numChapters if the
+    // stored shape carries it). Done before the file write so the edit is live even
+    // if the (best-effort) file write fails.
+    match item.get_mut("media").and_then(|m| m.as_object_mut()) {
+        Some(media) => {
+            media.insert("chapters".into(), chapters.clone());
+            if media.contains_key("numChapters") {
+                media.insert("numChapters".into(), json!(count));
+            }
+        }
+        None => return Err("item has no media object".to_string()),
+    }
+
+    let updated_str = serde_json::to_string(&item).map_err(|e| format!("serialize: {e}"))?;
+    conn.execute(
+        "UPDATE items SET item_json = ?1, updated_at = ?2 WHERE id = ?3",
+        params![updated_str, now_ms(), item_id],
+    )
+    .map_err(|e| format!("update item: {e}"))?;
+    log::info!(target: "skald::metadata", "set_item_chapters {item_id} count={count} write_to_file={write_to_file}");
+
+    // Best-effort durable write into the file.
+    let mut warning: Option<String> = None;
+    if write_to_file {
+        match single_audio_file(&item) {
+            Some(path) => {
+                if let Err(e) = crate::tone::write_chapters(&path, &chapters, duration) {
+                    log::warn!(target: "skald::metadata", "set_item_chapters: file write incomplete: {e}");
+                    warning = Some(e);
+                }
+            }
+            None => {
+                log::warn!(target: "skald::metadata", "set_item_chapters: no single audio file for {item_id}; catalog-only");
+                warning = Some("Chapters saved to the library, but couldn't be written into the audio file (this book isn't a single file).".to_string());
+            }
+        }
+    }
+
+    Ok((item, warning))
+}
+
 /// File a quarantined (Unidentified) book into `Audiobooks/Author/[Series/]Title`
 /// from chosen match metadata, then INSERT a new catalogued item carrying that
 /// metadata (catalog-assigned id; metadata not re-derived). Cover download is done

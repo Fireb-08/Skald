@@ -1278,6 +1278,20 @@ export async function applyLocalMetadata(
   return invoke<LibraryItem>('apply_local_metadata', { libraryId, itemId, fields, coverUrl });
 }
 
+/** Replace the chapter markers on a catalogued local item (Local Chapter
+ *  Write-Back). The catalog is authoritative (immediate); `writeToFile` also
+ *  embeds the chapters into the single audio file via `tone` so they survive a
+ *  re-scan (best-effort). Returns the updated item plus an optional `fileWarning`
+ *  — a soft message when the file write couldn't complete (catalog edit still
+ *  applied). Scoped to single-file local books by the caller. */
+export async function setLocalChapters(
+  itemId: string,
+  chapters: { start: number; end: number; title: string }[],
+  writeToFile: boolean,
+): Promise<{ item: LibraryItem; fileWarning: string | null }> {
+  return invoke('set_local_chapters', { itemId, chapters, writeToFile });
+}
+
 /** Apply a chosen match to a quarantined (Unidentified) book: file it into
  *  Author/Series/Title, insert a catalogued item with the chosen metadata, fetch
  *  the cover, and return the new item. `sourcePath` is the quarantine folder. */
