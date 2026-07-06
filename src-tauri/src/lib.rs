@@ -160,6 +160,15 @@ pub fn run() {
                 }
             }
 
+            // The cover cache path is user-relocatable and Store/MSIX installs can
+            // canonicalize AppData paths through the package identity. Authorize
+            // the resolved directory at runtime instead of relying only on a
+            // hard-coded assetProtocol scope from tauri.conf.json.
+            match crate::cover_cache::allow_asset_scope(app.handle()) {
+                Ok(dir) => log::info!(target: "skald::app", "cover cache asset scope allowed {}", dir.display()),
+                Err(e) => log::warn!(target: "skald::app", "cover cache asset scope failed: {e}"),
+            }
+
             // The main window is created here instead of in tauri.conf.json so we
             // can call disable_file_drop_handler(). Tauri 2.x removed fileDropEnabled
             // from the JSON config schema — the option only exists on the builder.

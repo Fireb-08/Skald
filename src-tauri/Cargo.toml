@@ -1,6 +1,6 @@
 [package]
 name = "skald"
-version = "1.0.0"
+version = "1.0.3"
 description = "A native audiobook client for Audiobookshelf"
 authors = ["fireb"]
 edition = "2021"

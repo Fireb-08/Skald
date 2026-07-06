@@ -1575,7 +1575,7 @@ pub fn set_downloads_dir(path: String) -> Result<(), String> {
 /// (covers, library cache, chapter caches) then persists the override. No registry
 /// rewrite is needed — cache entries are resolved by computed path each lookup.
 #[tauri::command]
-pub fn set_cache_dir(path: String) -> Result<(), String> {
+pub fn set_cache_dir(path: String, app: tauri::AppHandle) -> Result<(), String> {
     let new = std::path::PathBuf::from(path.trim());
     if new.as_os_str().is_empty() {
         return Err("A folder is required.".into());
@@ -1587,6 +1587,10 @@ pub fn set_cache_dir(path: String) -> Result<(), String> {
     log::info!(target: "skald::app", "set_cache_dir start");
     move_dir_contents(&old, &new)?;
     paths::set_cache_override(&new.to_string_lossy())?;
+    match cover_cache::allow_asset_scope(&app) {
+        Ok(dir) => log::info!(target: "skald::app", "cover cache asset scope allowed {}", dir.display()),
+        Err(e) => log::warn!(target: "skald::app", "cover cache asset scope failed after relocation: {e}"),
+    }
     log::info!(target: "skald::app", "set_cache_dir success");
     Ok(())
 }
@@ -3071,4 +3075,3 @@ pub async fn close_feed(server_url: String, feed_id: String) -> Result<(), Strin
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
     AbsClient::new(server_url).with_token(token).close_feed(&feed_id).await
 }
-

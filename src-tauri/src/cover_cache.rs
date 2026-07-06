@@ -6,6 +6,27 @@ fn cache_dir() -> Option<PathBuf> {
     crate::paths::cache_dir().ok().map(|root| root.join("covers"))
 }
 
+/// Authorize the effective cover cache directory for Tauri's asset protocol.
+///
+/// The static scope in `tauri.conf.json` is only a fallback: Store/MSIX package
+/// identity and Settings -> Downloads cache relocation can both make the real
+/// on-disk cache root differ from a hard-coded `$HOME/...` pattern. Registering
+/// the resolved directory at runtime keeps `convertFileSrc()` cover URLs inside
+/// Tauri's security scope in every install mode.
+pub fn allow_asset_scope<R, M>(manager: &M) -> Result<PathBuf, String>
+where
+    R: tauri::Runtime,
+    M: tauri::Manager<R>,
+{
+    let dir = cache_dir().ok_or_else(|| "Could not resolve cover cache directory".to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Create cover cache dir failed: {e}"))?;
+    manager
+        .asset_protocol_scope()
+        .allow_directory(&dir, true)
+        .map_err(|e| format!("Allow cover cache asset scope failed: {e}"))?;
+    Ok(dir)
+}
+
 /// Full path where the cover for `item_id` at an optional render `width` and a
 /// cache-bust `version` would be stored. Sized requests use `{id}_w{width}.jpg`,
 /// unsized use `{id}.jpg`; a non-zero version appends `_v{version}` so a changed
