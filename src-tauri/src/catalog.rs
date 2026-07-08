@@ -1164,15 +1164,25 @@ pub fn delete_item(item_id: &str) -> Result<(), String> {
 
     if let Some(sp) = source_path.as_deref() {
         let p = Path::new(sp);
+        // Containment guard: source_path is durable catalog state. A corrupt or
+        // hand-edited row must not turn unsubscribe/delete into a recursive wipe
+        // of an arbitrary directory — require it to sit strictly inside this
+        // library's root (both paths were built from the same stored root, so a
+        // lexical starts_with comparison is sound).
+        let root = library_root(&conn, &library_id)?;
+        let lib_root = Path::new(&root);
+        if !p.starts_with(lib_root) || p == lib_root {
+            log::warn!(target: "skald::library",
+                "delete_item refused out-of-root path {} (library root {})", p.display(), lib_root.display());
+            return Err(format!("Refusing to delete outside the library root: {sp}"));
+        }
         if p.exists() {
             std::fs::remove_dir_all(p).map_err(|e| format!("remove book dir: {e}"))?;
         }
         // Prune the vacated Author/Series skeleton (stops at the Audiobooks root).
-        if let Ok(root) = library_root(&conn, &library_id) {
-            let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);
-            if let Some(parent) = p.parent() {
-                prune_upwards(parent, &books_root);
-            }
+        let books_root = lib_root.join(AUDIOBOOKS_DIR);
+        if let Some(parent) = p.parent() {
+            prune_upwards(parent, &books_root);
         }
     }
 
@@ -1638,8 +1648,12 @@ pub fn prune_episodes(podcast_id: &str, max_keep: i64, skip_episode_id: Option<&
 /// on-disk folder, and its progress rows. Blocking — call from `spawn_blocking`.
 pub fn delete_podcast(podcast_id: &str) -> Result<(), String> {
     let conn = open()?;
-    let folder: Option<String> = conn
-        .query_row("SELECT folder_path FROM podcasts WHERE id = ?1", params![podcast_id], |r| r.get(0))
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT library_id, folder_path FROM podcasts WHERE id = ?1",
+            params![podcast_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
         .optional()
         .map_err(|e| format!("podcast folder lookup: {e}"))?;
     conn.execute("DELETE FROM podcast_episodes WHERE podcast_id = ?1", params![podcast_id])
@@ -1648,10 +1662,18 @@ pub fn delete_podcast(podcast_id: &str) -> Result<(), String> {
         .map_err(|e| format!("del podcast: {e}"))?;
     conn.execute("DELETE FROM progress WHERE item_id = ?1", params![podcast_id])
         .map_err(|e| format!("del podcast progress: {e}"))?;
-    if let Some(f) = folder {
+    if let Some((library_id, Some(f))) = row {
         let p = Path::new(&f);
-        if p.exists() {
-            let _ = std::fs::remove_dir_all(p);
+        // Containment guard (see delete_item): only delete a folder that sits
+        // strictly inside this library's root — never an arbitrary stored path.
+        match library_root(&conn, &library_id) {
+            Ok(root) if p.starts_with(Path::new(&root)) && p != Path::new(&root) => {
+                if p.exists() {
+                    let _ = std::fs::remove_dir_all(p);
+                }
+            }
+            _ => log::warn!(target: "skald::library",
+                "delete_podcast refused out-of-root folder {} (library {library_id})", p.display()),
         }
     }
     log::info!(target: "skald::library", "podcast unsubscribe id={podcast_id}");

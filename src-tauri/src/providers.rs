@@ -56,6 +56,10 @@ pub(crate) fn strip_html(s: &str) -> String {
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent("Skald/0.1 (local library metadata)")
+        // Bounded timeouts — a wedged metadata provider must fail the match
+        // flow predictably, not hang it (see api::bounded_client).
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("http client: {e}"))
 }
@@ -361,15 +365,29 @@ pub async fn search_podcasts(query: &str, country: Option<&str>) -> Result<Vec<V
 }
 
 /// Download a cover image to `dest` (best-effort; used by the match-apply flow).
+/// Streamed with a byte cap — the URL comes from provider search results, so an
+/// unbounded read would let a hostile endpoint buffer without limit.
 pub async fn download_cover(url: &str, dest: &Path) -> Result<(), String> {
-    let bytes = client()?
+    use futures_util::StreamExt;
+    const MAX_COVER_BYTES: usize = 25 * 1024 * 1024;
+    let resp = client()?
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("cover request: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("cover body: {e}"))?;
+        .map_err(|e| format!("cover request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("cover HTTP {}", resp.status()));
+    }
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("cover body: {e}"))?;
+        if bytes.len() + chunk.len() > MAX_COVER_BYTES {
+            log::warn!(target: "skald::metadata", "cover exceeds {} MB cap url={url}", MAX_COVER_BYTES / (1024 * 1024));
+            return Err(format!("cover exceeds the {} MB size limit", MAX_COVER_BYTES / (1024 * 1024)));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     std::fs::write(dest, &bytes).map_err(|e| format!("cover write: {e}"))?;
     log::info!(target: "skald::metadata", "cover saved {}", dest.display());
     Ok(())

@@ -30,6 +30,10 @@ pub async fn fetch_feed_text(url: &str) -> Result<String, String> {
     log::info!(target: "skald::metadata", "podcast feed fetch url={url}");
     let client = reqwest::Client::builder()
         .user_agent("Skald/0.1 (local podcasts)")
+        // Bounded timeouts so a wedged feed host fails predictably (see
+        // api::bounded_client); the read timeout is per-chunk, not total.
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let resp = client.get(url).send().await.map_err(|e| format!("feed request: {e}"))?;
@@ -419,6 +423,10 @@ pub async fn download_enclosure<R: tauri::Runtime>(
 
     let client = reqwest::Client::builder()
         .user_agent("Skald/0.1 (local podcasts)")
+        // Connect + per-chunk stall timeouts; safe for long episode downloads
+        // because the read timeout resets on every received chunk.
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
     let resp = client.get(url).send().await.map_err(|e| format!("episode request: {e}"))?;

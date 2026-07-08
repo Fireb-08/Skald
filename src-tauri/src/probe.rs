@@ -33,6 +33,44 @@ fn ffprobe_bin() -> PathBuf {
     FFPROBE.get().cloned().unwrap_or_else(|| PathBuf::from("ffprobe"))
 }
 
+/// `Command::output()` with a hard deadline. A malformed/locked media file can
+/// hang the bundled ffprobe/tone indefinitely, which would stall a whole scan
+/// or metadata write-back — kill the child on expiry and surface a soft error
+/// instead. stdout/stderr are drained on threads so a chatty child can't
+/// deadlock on a full pipe while we poll.
+pub fn output_with_timeout(
+    cmd: &mut Command,
+    timeout: std::time::Duration,
+) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let mut out_pipe = child.stdout.take().expect("stdout piped above");
+    let mut err_pipe = child.stderr.take().expect("stderr piped above");
+    let out_t = std::thread::spawn(move || { let mut b = Vec::new(); let _ = out_pipe.read_to_end(&mut b); b });
+    let err_t = std::thread::spawn(move || { let mut b = Vec::new(); let _ = err_pipe.read_to_end(&mut b); b });
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(std::process::Output {
+                status,
+                stdout: out_t.join().unwrap_or_default(),
+                stderr: err_t.join().unwrap_or_default(),
+            });
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait(); // reap; also unblocks the reader threads
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("child process timed out after {}s", timeout.as_secs()),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 /// One embedded chapter (seconds).
 pub struct Chapter {
     pub start: f64,
@@ -75,8 +113,8 @@ pub fn probe(path: &Path) -> Result<Value, String> {
     .arg(&arg);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW); // no flashing console window per file
-    let out = cmd
-        .output()
+    // 60s is generous for a metadata read; a hung probe must not stall the scan.
+    let out = output_with_timeout(&mut cmd, std::time::Duration::from_secs(60))
         .map_err(|e| format!("ffprobe spawn failed (is it bundled?): {e}"))?;
     if !out.status.success() {
         return Err(format!(

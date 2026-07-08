@@ -40,7 +40,7 @@ pub async fn login(
     // The legacy token from /login works for HTTP Bearer auth but is rejected by
     // the ABS socket middleware which expects a signed JWT.
     // Note: /api/authorize is a POST route in ABS — a GET request returns 404.
-    let http = reqwest::Client::new();
+    let http = crate::api::bounded_client();
     let server_root = server_url.trim_end_matches('/');
     let auth_resp = http
         .post(format!("{server_root}/api/authorize"))
@@ -623,7 +623,7 @@ pub async fn cache_remote_image(url: String) -> Result<String, String> {
     if cover_cache::remote_is_cached(&url) {
         return Ok(cover_cache::remote_cache_path(&url).to_string_lossy().into_owned());
     }
-    let resp = reqwest::Client::new()
+    let resp = crate::api::bounded_client()
         .get(&url)
         .send()
         .await
@@ -631,7 +631,20 @@ pub async fn cache_remote_image(url: String) -> Result<String, String> {
     if !resp.status().is_success() {
         return Err(format!("remote image fetch HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("remote image read failed: {e}"))?;
+    // Stream with a byte cap — the URL comes from arbitrary feed metadata, so an
+    // unbounded .bytes() read would let a hostile endpoint buffer without limit.
+    use futures_util::StreamExt;
+    const MAX_IMAGE_BYTES: usize = 25 * 1024 * 1024;
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("remote image read failed: {e}"))?;
+        if bytes.len() + chunk.len() > MAX_IMAGE_BYTES {
+            log::warn!(target: "skald::metadata", "remote image exceeds {} MB cap url={url}", MAX_IMAGE_BYTES / (1024 * 1024));
+            return Err(format!("remote image exceeds the {} MB size limit", MAX_IMAGE_BYTES / (1024 * 1024)));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
     let path = cover_cache::save_remote(&url, &bytes)?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -1795,7 +1808,7 @@ pub async fn login_with_api_key(
     server_url: String,
     api_key: String,
 ) -> Result<ApiKeyLoginResult, String> {
-    let client = reqwest::Client::new();
+    let client = crate::api::bounded_client();
     let response = client
         .get(format!("{}/api/me", server_url.trim_end_matches('/')))
         .header("Authorization", format!("Bearer {}", api_key))
@@ -1832,7 +1845,7 @@ pub async fn login_with_api_key(
     // /api/me does not include serverSettings. Call POST /api/authorize with the
     // resolved token to retrieve them (same endpoint used by the password login path).
     let server_settings: Option<ServerSettings> = {
-        let auth_resp = reqwest::Client::new()
+        let auth_resp = crate::api::bounded_client()
             .post(format!("{}/api/authorize", server_url.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {token}"))
             .send()
@@ -2124,8 +2137,9 @@ pub async fn download_item(
     cancel_registry.lock().await.insert(item_id.clone(), cancel_token.clone());
 
     // The token-in-header pattern is fine for file downloads (unlike media streaming
-    // where we use token-in-URL per CLAUDE.md critical lesson 2).
-    let client = reqwest::Client::new();
+    // where we use token-in-URL per CLAUDE.md critical lesson 2). The bounded
+    // client's read-stall timeout is per-chunk, so multi-GB downloads are safe.
+    let client = crate::api::bounded_client();
 
     // If the HTTP request itself fails, remove the registry entry before returning.
     let response = match client
@@ -2275,7 +2289,19 @@ pub async fn download_item(
     // The ABS download endpoint returns a ZIP archive. Extract it into a
     // subdirectory named after item_id so multiple books never overwrite each
     // other's files even when they have identically-named tracks inside.
-    let extract_dir = dl_dir.join(&item_id);
+    // item_id is server-originated: sanitize it before use as a path component
+    // so a malformed/hostile id (separators, "..") cannot escape the downloads
+    // root — same posture as the file_name sanitization above. Normal ABS ids
+    // are alphanumeric UUIDs, so this is a no-op for well-formed servers.
+    let safe_item_dir: String = item_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
+        .collect();
+    if safe_item_dir.is_empty() {
+        cancel_registry.lock().await.remove(&item_id);
+        return Err("Download failed: empty item id".to_string());
+    }
+    let extract_dir = dl_dir.join(&safe_item_dir);
     std::fs::create_dir_all(&extract_dir)
         .map_err(|e| format!("Failed to create extract dir: {e}"))?;
 
@@ -2463,7 +2489,23 @@ pub fn remove_download(item_id: String) -> Result<(), String> {
                 .to_path_buf()
         };
 
-        if extract_dir.exists() {
+        // Containment guards before the recursive delete. The registry is durable
+        // local state — a corrupt or hand-edited row must not turn this into an
+        // arbitrary-directory wipe, and a legacy row whose file sits directly in
+        // the downloads root would otherwise resolve extract_dir to the root and
+        // delete EVERY download.
+        if extract_dir == dir {
+            // File directly in the downloads root: delete just that file.
+            match std::fs::remove_file(file_path) {
+                Ok(()) => None,
+                Err(e) if !file_path.exists() => { let _ = e; None } // already gone
+                Err(e) => Some(format!("Failed to remove download file: {e}")),
+            }
+        } else if !extract_dir.starts_with(&dir) {
+            log::warn!(target: "skald::downloads",
+                "remove_download refused out-of-root path {}", extract_dir.display());
+            Some(format!("Refusing to delete outside downloads root: {}", extract_dir.display()))
+        } else if extract_dir.exists() {
             // Recursively remove the item_id directory and all its contents —
             // audio file, cover image, and any other files extracted from the ZIP.
             match std::fs::remove_dir_all(&extract_dir) {

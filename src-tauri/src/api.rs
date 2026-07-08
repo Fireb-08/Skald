@@ -9,12 +9,26 @@ pub struct AbsClient {
     pub http: reqwest::Client,
 }
 
+/// Shared HTTP client with bounded connect + read-stall timeouts, so a dead or
+/// wedged endpoint fails a command predictably instead of pending forever.
+/// read_timeout is per-read (stall detection), not a total-request cap, so
+/// large library fetches and long streaming downloads stay unaffected as long
+/// as bytes keep flowing. Used by AbsClient and by the one-off clients in
+/// commands.rs (authorize, API-key login, remote images, item downloads).
+pub fn bounded_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default()
+}
+
 impl AbsClient {
     pub fn new(base_url: String) -> Self {
         Self {
             base_url,
             token: None,
-            http: reqwest::Client::new(),
+            http: bounded_client(),
         }
     }
 

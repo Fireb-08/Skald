@@ -109,7 +109,9 @@ pub fn write_book_tags(dir: &Path, meta: &Value) -> Result<(), String> {
         cmd.args(&args);
         #[cfg(windows)]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        match cmd.output() {
+        // Rewriting tags on a large m4b can be slow, but a hung tone must not
+        // stall the write-back forever (see probe::output_with_timeout).
+        match crate::probe::output_with_timeout(&mut cmd, std::time::Duration::from_secs(300)) {
             Ok(out) if out.status.success() => {}
             Ok(out) => {
                 let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
@@ -194,7 +196,8 @@ pub fn write_chapters(file: &Path, chapters: &Value, total_duration: f64) -> Res
         .arg(file);
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    let result = cmd.output();
+    // Same hung-child guard as the tag path (see probe::output_with_timeout).
+    let result = crate::probe::output_with_timeout(&mut cmd, std::time::Duration::from_secs(300));
     let _ = std::fs::remove_file(&chapters_path);
 
     match result {
