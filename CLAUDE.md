@@ -61,7 +61,7 @@ The Audiobookshelf project is the **source of truth** for endpoint paths, reques
 | Frontend language | TypeScript ~5.8 |
 | Frontend build tool | Vite 7 |
 | List virtualization | `@tanstack/react-virtual` |
-| Desktop shell | Tauri 2.x (`protocol-asset`, `devtools` features) |
+| Desktop shell | Tauri 2.x (`protocol-asset` feature; devtools auto-enabled in debug builds only — the `devtools` cargo feature was removed so release/Store builds don't ship an inspector) |
 | Tauri plugins | `opener`, `dialog`, `global-shortcut` |
 | Backend language | Rust (edition 2021) |
 | HTTP client | `reqwest` 0.12 (`json`, `rustls-tls`, `stream`) + `tokio` (full) |

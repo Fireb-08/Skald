@@ -36,9 +36,16 @@ fn main() {
     tauri_build::build()
 }
 
+// Copy failures FAIL THE BUILD with both paths in the message. A silently
+// missing DLL / VLC plugin / helper exe would otherwise surface much later as
+// a runtime failure in playback, probing, or tag writes. The common cause is
+// a running skald.exe locking libvlc.dll (OS error 32) — stop the app and
+// rebuild (CLAUDE.md critical lesson 11).
 fn copy_dir_all(src: &Path, dst: &Path) {
-    for entry in std::fs::read_dir(src).expect("vlc-dist is unreadable") {
-        let entry = entry.unwrap();
+    let read = std::fs::read_dir(src)
+        .unwrap_or_else(|e| panic!("cannot read bundled dir {}: {e}", src.display()));
+    for entry in read {
+        let entry = entry.unwrap_or_else(|e| panic!("cannot read entry in {}: {e}", src.display()));
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         if src_path.is_file() {
@@ -47,9 +54,13 @@ fn copy_dir_all(src: &Path, dst: &Path) {
             if entry.file_name() == "plugins.dat" {
                 continue;
             }
-            std::fs::copy(&src_path, &dst_path).ok();
+            std::fs::copy(&src_path, &dst_path).unwrap_or_else(|e| {
+                panic!("copy {} -> {} failed: {e}", src_path.display(), dst_path.display())
+            });
         } else if src_path.is_dir() {
-            std::fs::create_dir_all(&dst_path).ok();
+            std::fs::create_dir_all(&dst_path).unwrap_or_else(|e| {
+                panic!("create dir {} failed: {e}", dst_path.display())
+            });
             copy_dir_all(&src_path, &dst_path);
         }
     }

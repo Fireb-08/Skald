@@ -1350,9 +1350,11 @@ export function openLogDir(): Promise<void> {
   return invoke('open_log_dir');
 }
 
-/** Writes text to an absolute path (used to save the diagnostic report). */
-export function writeTextFile(path: string, contents: string): Promise<void> {
-  return invoke('write_text_file', { path, contents });
+/** Opens a Rust-side save dialog and writes `contents` to the chosen path
+ *  (used to export the notices / diagnostic report). The renderer never picks
+ *  the path — see export_text_file in commands.rs. Resolves false on cancel. */
+export function exportTextFile(defaultName: string, contents: string): Promise<boolean> {
+  return invoke('export_text_file', { defaultName, contents });
 }
 
 // Returns the offline progress queue entry for a book, or null if none exists.

@@ -246,7 +246,7 @@ pub fn run() {
             commands::reveal_path,
             commands::read_skald_log,
             commands::open_log_dir,
-            commands::write_text_file,
+            commands::export_text_file,
             // Library disk cache — read/write for offline launch fallback
             commands::save_library_cache,
             commands::load_library_cache,

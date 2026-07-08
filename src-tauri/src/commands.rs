@@ -2043,11 +2043,32 @@ pub fn read_skald_log(app: tauri::AppHandle) -> Result<String, String> {
     }
 }
 
-/// Write text to a path chosen via the save dialog — used by the About tab to
-/// save the diagnostic report bundle.
+/// Open a save dialog and write `contents` to the chosen path — used by the
+/// About tab to export the third-party notices / diagnostic report. The dialog
+/// runs HERE, on the Rust side, so the renderer never supplies a filesystem
+/// path: the old split (frontend dialog → write_text_file(path, contents))
+/// handed any compromised WebView script an arbitrary-file-write primitive.
+/// Returns false when the user cancels the dialog.
 #[tauri::command]
-pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(&path, contents).map_err(|e| format!("write failed: {e}"))
+pub async fn export_text_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("Text", &["txt"])
+        .save_file(move |path| { let _ = tx.send(path); });
+    let picked = rx.await.map_err(|e| format!("save dialog failed: {e}"))?;
+    let Some(file_path) = picked else { return Ok(false) }; // user cancelled
+    let path = file_path
+        .into_path()
+        .map_err(|e| format!("save path unavailable: {e}"))?;
+    std::fs::write(&path, contents).map_err(|e| format!("write failed: {e}"))?;
+    Ok(true)
 }
 
 /// Reveal the Skald log folder (app_log_dir) in the OS file explorer.

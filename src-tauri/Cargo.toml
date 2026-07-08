@@ -18,7 +18,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+# No `devtools` feature: Tauri enables devtools automatically in debug builds;
+# the cargo feature would ALSO enable them in release/Store builds, expanding
+# the inspection surface of a shipped app that renders remote metadata.
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { save } from '@tauri-apps/plugin-dialog';
 import lyreIcon from '../../assets/lyre.png';
 import type { OnyxState } from '../../state/onyx';
 import { SectionHead, Row, SERIF, MONO } from './shared';
-import { writeTextFile } from '../../api/abs';
+import { exportTextFile } from '../../api/abs';
 import { log } from '../../lib/log';
 
 const ghostBtn = {
@@ -64,10 +63,10 @@ function LicensesModal({ onClose }: { onClose: () => void }) {
     setStatus('Loading…');
     try {
       const text = await loadNotices();
-      const path = await save({ defaultPath: 'THIRD-PARTY-NOTICES.txt', filters: [{ name: 'Text', extensions: ['txt'] }] });
-      if (!path) { setStatus(''); return; }
-      await writeTextFile(path, text);
-      setStatus('Saved');
+      // Dialog + write both run Rust-side (export_text_file) so no path string
+      // ever originates in the renderer.
+      const saved = await exportTextFile('THIRD-PARTY-NOTICES.txt', text);
+      setStatus(saved ? 'Saved' : '');
     } catch (e) { setStatus(`Failed: ${String(e)}`); }
   };
 
