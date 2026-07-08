@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { log } from '../../lib/log';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { getSeriesItems } from '../../api/abs';
 import {
@@ -37,6 +38,29 @@ const LIST_GRID = '48px minmax(0,2.4fr) minmax(0,1.4fr) minmax(0,1.2fr) minmax(0
 
 function seriesNameOf(s: string | undefined) { return (s || '').split(' · ')[0]; }
 function seriesVolOf(s: string | undefined)  { return parseInt((s || '').split(' · ')[1] || '0', 10); }
+
+// Diagnostic guard (Library Virtualization bug report, 2026-07-08): a
+// non-empty dataset with an empty virtual window IS the sporadic blank-shelf
+// failure — capture the geometry so the next field report is definitive.
+function useEmptyWindowDiag(
+  view: 'grid' | 'list',
+  bookCount: number,
+  windowCount: number,
+  totalSize: number,
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+) {
+  useEffect(() => {
+    if (bookCount > 0 && windowCount === 0) {
+      log.warn('library', 'virtualizer window empty for non-empty shelf', {
+        view,
+        books: bookCount,
+        totalSize,
+        scrollTop: scrollRef.current?.scrollTop ?? -1,
+        clientHeight: scrollRef.current?.clientHeight ?? -1,
+      });
+    }
+  }, [view, bookCount, windowCount, totalSize, scrollRef]);
+}
 
 type SortDir = 'asc' | 'desc';
 interface SortState { col: string; dir: SortDir }
@@ -94,6 +118,8 @@ function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
     estimateSize: () => LIST_ROW_H,
     overscan: 5,
   });
+
+  useEmptyWindowDiag('list', sorted.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
 
   if (sorted.length === 0) {
     return (
@@ -283,6 +309,8 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
     overscan: 3,
   });
 
+  useEmptyWindowDiag('grid', books.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
+
   if (books.length === 0) {
     return (
       <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
@@ -460,12 +488,17 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     });
   }
 
-  // Identity of the current dataset. Changing it remounts the virtualized child
-  // (list/grid prefix included so a view switch also forces a fresh virtualizer).
-  const shelfKey = [
-    st.libraryView,
+  // Identity of the current dataset (Library Virtualization bug report,
+  // 2026-07-08). Beyond the filter controls, it carries a cheap result-set
+  // signature (count + first/last ids) so changes the controls can't see —
+  // a series fetch landing, a library switch/reload, sort or grouping — still
+  // register as a new dataset.
+  const datasetKey = [
+    st.currentLibraryId,
     st.filter,
     st.showFinished,
+    st.librarySort,
+    st.groupBySeries,
     st.contextFilter?.kind ?? '',
     st.contextFilter?.value ?? '',
     st.search,
@@ -474,7 +507,23 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     // Include bookIds so a playlist reorder forces the virtualizer to remount
     // with the new sort order rather than serving the stale cached layout.
     (st.contextFilter?.bookIds ?? []).join(','),
+    shelfBooks.length,
+    shelfBooks[0]?.id ?? '',
+    shelfBooks[shelfBooks.length - 1]?.id ?? '',
   ].join('|');
+  // Changing shelfKey remounts the virtualized child (view mode + cover size
+  // included so a view/size switch also forces a fresh virtualizer).
+  const shelfKey = `${st.libraryView}|${coverW}|${datasetKey}`;
+
+  // Reset the persistent scroll container whenever the dataset changes. The
+  // scroller deliberately survives the virtualized child's remount, so a
+  // scrollTop inherited from a long pre-search shelf can point past the new
+  // (shorter) content — TanStack then reports an empty visible range and the
+  // shelf renders blank even while the header counts matches. Layout effect so
+  // the reset lands before the freshly mounted virtualizer paints.
+  useLayoutEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [datasetKey]);
 
   const openBook = (id: string) => {
     if (selectedId === id) {
