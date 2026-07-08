@@ -190,8 +190,9 @@ pub fn run() {
             .disable_drag_drop_handler()
             .build()?;
 
-            // [DND-DIAG] Confirm the handler was disabled at startup.
-            eprintln!("[DND-DIAG] Window '{}' created with file-drop handler disabled", win.label());
+            // Confirm the handler was disabled at startup — regressing this silently
+            // re-breaks all internal DOM drags (see CLAUDE.md critical lesson 12).
+            log::info!(target: "skald::app", "window '{}' created with file-drop handler disabled", win.label());
 
             // Start the local-podcast auto-download scheduler (launch catch-up +
             // per-minute cron evaluation). No-op until a podcast enables it.

@@ -6,6 +6,7 @@ import { getPlaylist, updatePlaylist, batchRemoveFromPlaylist } from '../../api/
 import type { Playlist, PlaylistItem, PlaylistItemInput } from '../../api/abs';
 import Cover from '../Cover';
 import { playBook } from '../../api/playbook';
+import { log } from '../../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -57,18 +58,10 @@ export default function PlaylistDetail({
   // entire viewport for the lifetime of the modal, regardless of which element
   // the pointer is over at any given moment during a drag.
   useEffect(() => {
-    const prevent = (e: DragEvent) => {
-      e.preventDefault();
-      // [DND-DIAG] Fires if document catches the event — means item/container handlers didn't stopPropagation
-      if (dragIndexRef.current !== null) console.log('[DND] document dragover fired, target:', (e.target as Element)?.tagName, (e.target as Element)?.className);
-    };
-    const onDocDrop = (e: DragEvent) => {
-      e.preventDefault();
-      console.log('[DND] document drop fired — drop was NOT caught by any item handler');
-    };
+    const prevent = (e: DragEvent) => { e.preventDefault(); };
+    const onDocDrop = (e: DragEvent) => { e.preventDefault(); };
     document.addEventListener('dragover', prevent);
     document.addEventListener('drop', onDocDrop);
-    console.log('[DND] document-level dragover+drop listeners registered');
     return () => {
       document.removeEventListener('dragover', prevent);
       document.removeEventListener('drop', onDocDrop);
@@ -183,11 +176,7 @@ export default function PlaylistDetail({
   // ── Drag-to-reorder ───────────────────────────────────────────────────────
   async function handleDrop(toIndex: number) {
     const fromIndex = dragIndexRef.current;
-    console.log('[DND] handleDrop called — from:', fromIndex, 'to:', toIndex);
-    if (fromIndex === null || fromIndex === toIndex || !playlist) {
-      console.log('[DND] handleDrop bailed — fromIndex:', fromIndex, 'toIndex:', toIndex, 'playlist:', !!playlist);
-      return;
-    }
+    if (fromIndex === null || fromIndex === toIndex || !playlist) return;
     const prevItems = items;
     const reordered = items.slice();
     const [moved] = reordered.splice(fromIndex, 1);
@@ -200,10 +189,10 @@ export default function PlaylistDetail({
       const updated = await updatePlaylist(serverUrl, playlist.id, undefined, undefined, toInputs(reordered));
       setItems(updated.items);
       onUpdated(updated);
-      console.log('[DND] reorder saved to server');
+      log.info('library', 'playlist reorder saved', { playlistId: playlist.id, from: fromIndex, to: toIndex });
     } catch (e) {
       setItems(prevItems); // revert on server error
-      console.error('[PlaylistDetail] reorder failed:', e);
+      log.error('library', 'playlist reorder failed', { playlistId: playlist.id, err: String(e) });
     }
   }
 
@@ -377,25 +366,19 @@ export default function PlaylistDetail({
                   e.dataTransfer.effectAllowed = 'move';
                   dragIndexRef.current = i;
                   setDragActive(true);
-                  console.log('[DND] dragstart on item', i);
                 }}
                 onDragOver={e => {
                   e.stopPropagation();
                   e.preventDefault();
                   e.dataTransfer.dropEffect = 'move';
-                  if (overIndex !== i) {
-                    console.log('[DND] dragover item', i, '— dropEffect set to move');
-                    setOverIndex(i);
-                  }
+                  if (overIndex !== i) setOverIndex(i);
                 }}
                 onDrop={e => {
                   e.stopPropagation();
                   e.preventDefault();
-                  console.log('[DND] drop on item', i);
                   void handleDrop(i);
                 }}
                 onDragEnd={() => {
-                  console.log('[DND] dragend — drag cancelled or completed');
                   dragIndexRef.current = null;
                   setDragActive(false);
                   setOverIndex(null);

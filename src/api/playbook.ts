@@ -21,7 +21,7 @@ export async function playBook(
 ): Promise<void> {
   // Prevent concurrent calls — second call is dropped until first resolves
   if (playBookInFlight) {
-    console.log('[playBook] already in flight — ignoring duplicate call');
+    log.debug('playback', 'playBook already in flight — ignoring duplicate call', { bookId });
     return;
   }
   playBookInFlight = true;
@@ -81,13 +81,15 @@ export async function playBook(
         } else {
           const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
           if (saved) {
-            // Progress already in state (server cache).
-            startTime = saved.currentTime;
+            // Progress already in state (server cache). A finished record sits at
+            // the media duration — restart from 0 instead of resuming at the end
+            // (same replay rule as the local-library branch above).
+            startTime = saved.isFinished ? 0 : saved.currentTime;
           } else {
             // Downloaded ABS book — query the local offline queue written by the tick task.
             try {
               const offlineProgress = await getOfflineProgress(bookId);
-              startTime = offlineProgress?.currentTime ?? 0;
+              startTime = offlineProgress && !offlineProgress.isFinished ? offlineProgress.currentTime : 0;
             } catch {
               startTime = 0;
             }
@@ -135,11 +137,13 @@ export async function playBook(
     st.setPlaying(false);
 
     // 2. Determine start position: explicit override wins, otherwise the
-    //    book's saved progress from the server, otherwise 0.
+    //    book's saved progress from the server, otherwise 0. A finished book
+    //    restarts from the beginning — its record sits at the media duration,
+    //    so resuming there would open the player at the end.
     let startTime = startTimeOverride;
     if (startTime === undefined) {
       const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
-      startTime = saved ? saved.currentTime : 0;
+      startTime = saved && !saved.isFinished ? saved.currentTime : 0;
     }
 
     // 3. Open the session at the resolved position — server tells LibVLC
@@ -186,7 +190,7 @@ export async function playEpisode(
   const episodeId = episode.id;
   if (!episodeId) return;
   if (playBookInFlight) {
-    console.log('[playEpisode] already in flight — ignoring duplicate call');
+    log.debug('playback', 'playEpisode already in flight — ignoring duplicate call', { podcastItemId, episodeId });
     return;
   }
   playBookInFlight = true;
@@ -234,13 +238,14 @@ export async function playEpisode(
     st.setPlaying(false);
 
     // Resolve start position: explicit override > saved episode progress > 0.
-    // Episode progress records carry both libraryItemId and episodeId.
+    // Episode progress records carry both libraryItemId and episodeId. A
+    // finished episode restarts from the beginning (same rule as books).
     let startTime = startTimeOverride;
     if (startTime === undefined) {
       const saved = st.mediaProgress.find(
         p => p.libraryItemId === podcastItemId && p.episodeId === episodeId,
       );
-      startTime = saved ? saved.currentTime : 0;
+      startTime = saved && !saved.isFinished ? saved.currentTime : 0;
     }
 
     const result = await openPlaybackSession(st.serverUrl, podcastItemId, startTime, episodeId);

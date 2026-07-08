@@ -1250,7 +1250,10 @@ export function useOnyxState(): OnyxState {
               duration,
               currentTime: payload.currentTime,
               progress: duration > 0 ? payload.currentTime / duration : 0,
-              isFinished: idx >= 0 ? prev[idx].isFinished : false,
+              // Mirror the Rust persist rule (session.rs local tick): finished on
+              // a true end, un-finished again while playing earlier (a restart).
+              // Same end threshold as the book-finished observer above.
+              isFinished: duration > 0 && payload.currentTime >= duration - 1.5,
               lastUpdate: Date.now(),
             };
             if (idx >= 0) { const c = [...prev]; c[idx] = rec; return c; }
@@ -1287,16 +1290,26 @@ export function useOnyxState(): OnyxState {
         // Those writes echo back here as progress-updated events. If we applied
         // the echo to the live transport position, it would yank the playhead
         // backwards on every sync cycle. The guard detects this case by checking
-        // whether the update is for the book we are actively playing right now.
-        const isActivelyPlayingThisBook =
-          update.libraryItemId === currentBookIdRef.current && playingRef.current;
+        // whether the update is for the book/episode we are actively playing
+        // right now. Podcast episodes share their parent's libraryItemId, so the
+        // episodeId must match too — otherwise an echo for a sibling episode
+        // would be treated as ours (and vice versa).
+        const isForCurrentPlayback =
+          update.libraryItemId === currentBookIdRef.current &&
+          (update.episodeId ?? null) === (currentEpisodeIdRef.current ?? null);
+        const isActivelyPlayingThisBook = isForCurrentPlayback && playingRef.current;
 
         // ── Stored progress reconciliation (always runs) ──────────────────────
         // Pick it up, library cover overlays, and the progress bar for
         // non-playing books all read from mediaProgress. Keep it accurate
         // even for the actively-playing book so the UI is correct on pause.
+        // Match on the (libraryItemId, episodeId) composite key — the same
+        // pattern as mergeProgress — so one podcast episode's progress never
+        // overwrites a sibling episode's row.
         setMediaProgress((prev: MediaProgress[]) => {
-          const idx = prev.findIndex(p => p.libraryItemId === update.libraryItemId);
+          const idx = prev.findIndex(p =>
+            p.libraryItemId === update.libraryItemId &&
+            (p.episodeId ?? null) === (update.episodeId ?? null));
           if (idx >= 0) {
             // Update existing record without mutating the original array.
             const copy = [...prev];
@@ -1311,7 +1324,7 @@ export function useOnyxState(): OnyxState {
         // If this update is for the focused book but we are NOT actively playing
         // it, advance the position so the player UI reflects the remote device's
         // current position. If we ARE playing, leave the transport alone.
-        if (!isActivelyPlayingThisBook && update.libraryItemId === currentBookIdRef.current) {
+        if (!isActivelyPlayingThisBook && isForCurrentPlayback) {
           setPosition(update.currentTime);
         }
       } catch (e) {

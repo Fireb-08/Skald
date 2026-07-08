@@ -61,7 +61,6 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
 
   const openPlaylist = (p: Playlist) => {
     const bookIds = p.items.map(pi => pi.libraryItemId);
-    console.log('[PLAYLIST-DIAG] openPlaylist — setting contextFilter bookIds:', bookIds);
     st.setContextFilter({
       kind: 'playlist',
       value: p.name,
@@ -238,20 +237,15 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
           st={st}
           onClose={() => setDetailPlaylistId(null)}
           onUpdated={updated => {
-            console.log('[PLAYLIST-DIAG] onUpdated — new items order:', updated.items.map((it, i) => `${i}:${it.libraryItemId.slice(-6)}`));
             // Update the local playlist list so grid covers reflect the new order.
             setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
             // If the library shelf is currently filtered by this playlist, push
             // the new bookIds into the contextFilter so the shelf re-sorts immediately.
             if (st.contextFilter?.playlistId === updated.id) {
-              const newBookIds = updated.items.map(it => it.libraryItemId);
-              console.log('[PLAYLIST-DIAG] active playlist updated — refreshing contextFilter bookIds:', newBookIds);
               st.setContextFilter({
                 ...st.contextFilter,
-                bookIds: newBookIds,
+                bookIds: updated.items.map(it => it.libraryItemId),
               });
-            } else {
-              console.log('[PLAYLIST-DIAG] updated playlist is not the active filter (active:', st.contextFilter?.playlistId, ')');
             }
           }}
           onDeleted={() => {

@@ -612,12 +612,13 @@ export default function Player({ st }: PlayerProps) {
     const frac = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
     // Chapterless items scrub across the whole episode; chaptered items scrub
     // within the current chapter (the waveform represents one chapter).
-    if (!hasChapters) {
-      seekAudio(frac * st.bookSecs).catch(console.error);
-      return;
-    }
-    const chStart = chapterStart(chapters, chIdx);
-    seekAudio(chStart + frac * curCh.dur).catch(console.error);
+    const target = hasChapters
+      ? chapterStart(chapters, chIdx) + frac * curCh.dur
+      : frac * st.bookSecs;
+    seekAudio(target).catch(console.error);
+    // Optimistic position update — without it the waveform/time display lags
+    // one playback tick (~1s) behind the seek (other seek paths do the same).
+    st.setPosition(target);
   };
 
   const bSeries = bookSeries(b);
