@@ -45,7 +45,8 @@ export default function PickItUp({ st }: PickItUpProps) {
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
-    setContextMenu({ x: e.pageX, y: e.pageY, item });
+    // clientX/Y, not pageX/Y — the menu is position:fixed (see LibraryShelf).
+    setContextMenu({ x: e.clientX, y: e.clientY, item });
   };
 
   useEffect(() => {

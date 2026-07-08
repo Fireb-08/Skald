@@ -423,7 +423,9 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
       // Fetch this series' books directly from the server using the verified Base64 filter command.
       getSeriesItems(st.serverUrl, st.currentLibraryId, f.seriesId)
         .then(setSeriesBooks)
-        .catch(console.error);
+        // Resolve to an empty list on failure so the shelf shows "no titles"
+        // rather than sitting on the loading placeholder forever.
+        .catch(e => { log.warn('library', 'series items fetch failed', { err: String(e) }); setSeriesBooks([]); });
     } else {
       setSeriesBooks(null);
     }
@@ -433,13 +435,19 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     e.preventDefault();
     setSelectedId(item.id);
     st.setFocusedBookId(item.id);
-    setContextMenu({ x: e.pageX, y: e.pageY, item });
+    // clientX/Y, not pageX/Y: the menu is position:fixed (viewport-anchored),
+    // and its edge-flip math compares against window.innerWidth/Height.
+    setContextMenu({ x: e.clientX, y: e.clientY, item });
   };
 
   // When a series filter is active, use the server-fetched list (empty array while loading).
   // st.library books carry only the flat seriesName string, not series IDs, so client-side
   // series matching always fails — the server-side filter endpoint is the only correct path.
   const sourceBooks = (st.contextFilter?.kind === 'series') ? (seriesBooks ?? []) : st.library;
+  // In-flight series drill-in: the body source is deliberately empty while the
+  // server fetch resolves, so show a loading placeholder instead of the
+  // misleading "No titles match" empty state (UI Bugs Follow-up, 2026-07-08).
+  const seriesLoading = st.contextFilter?.kind === 'series' && seriesBooks === null;
 
   const filtered = sourceBooks.filter(b => {
     if (st.contextFilter) {
@@ -555,7 +563,11 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             viewport rect — leaving getVirtualItems() empty while getTotalSize()
             stays tall (empty body + scrollbar). A fresh virtualizer measures the
             settled layout; this is the same remount the grid/list toggle relies on. */}
-        {st.libraryView === 'list' ? (
+        {seriesLoading ? (
+          <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
+            Loading series…
+          </div>
+        ) : st.libraryView === 'list' ? (
           <ShelfList key={shelfKey} books={shelfBooks} st={st} openBook={openBook} onContextMenu={onContextMenu} scrollRef={scrollRef} />
         ) : (
           <ShelfGrid key={shelfKey} books={shelfBooks} st={st} coverW={coverW} selectedId={selectedId} openBook={openBook} onContextMenu={onContextMenu} scrollRef={scrollRef} />

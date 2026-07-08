@@ -341,7 +341,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               key={it.id}
               onClick={() => setSelectedId(prev => prev === it.id ? null : it.id)}
               onDoubleClick={() => openDetail(it.id)}
-              onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.pageX, y: e.pageY, item: it }); }}
+              onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, item: it }); }}
               title={`${asPodcastItem(it).media?.metadata?.title ?? ''} — click to filter, double-click to open, right-click for options`}
               className="onyx-poster"
               style={{
