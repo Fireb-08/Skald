@@ -45,6 +45,9 @@ Vault/
 # Memory profiling artifacts
 Mrmory/
 
+# Windows App Certification Kit output (local test run artifacts)
+/App Cert Kit/
+
 # Raw upstream font distributions (unused — only the subsetted -latin builds
 # in src/assets/fonts/ are referenced by index.css). Leading slash anchors this
 # to the repo root so it does NOT match src/assets/fonts/ (Git is case-
