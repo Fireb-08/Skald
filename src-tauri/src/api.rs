@@ -2182,7 +2182,9 @@ impl AbsClient {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            eprintln!("[update_library] HTTP {status} — ABS said: {body}");
+            // Retained failure boundary — the ABS error body explains rejected
+            // folder-list edits, which a bare HTTP status hides.
+            log::warn!(target: "skald::library", "update_library HTTP {status} — ABS said: {body}");
             return Err(format!("update_library failed: HTTP {status} — {body}"));
         }
 

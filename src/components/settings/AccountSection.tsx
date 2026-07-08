@@ -757,7 +757,6 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   };
 
   const setUserColor = (userId: string, hex: string) => {
-    console.log('[AccountSection] set user colour', userId, '->', hex);
     setColorMap(prev => { const next = { ...prev, [userId]: hex }; saveColorMap(next); return next; });
   };
 
@@ -849,7 +848,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
       for (const u of users) {
         if (!next[u.id]) { next[u.id] = randomColor(); changed = true; }
       }
-      if (changed) { console.log('[AccountSection] assigned random colours to new users'); saveColorMap(next); }
+      if (changed) saveColorMap(next);
       return changed ? next : prev;
     });
   }, [users]);

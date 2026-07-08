@@ -8,6 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { SectionHead, Row, Toggle, useLocal, MONO } from './shared';
 import type { OnyxState } from '../../state/onyx';
 import { connectSocket, disconnectSocket } from '../../api/abs';
+import { log } from '../../lib/log';
 
 // Connection state for the live indicator dot.
 // 'off'          — toggle is disabled or socket has never connected this session.
@@ -145,7 +146,7 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
       }
     } catch (e) {
       // Roll back the toggle on failure so the displayed state matches reality.
-      console.warn('[sync] toggle failed:', e);
+      log.warn('sync', 'live-sync toggle failed', { enabling: next, err: String(e) });
       liveSyncIntentRef.current = !next;
       setLiveSync(!next);
       // If enabling failed, the indicator should return to 'off'.

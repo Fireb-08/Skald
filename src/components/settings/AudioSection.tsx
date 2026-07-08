@@ -145,7 +145,6 @@ export default function AudioSection() {
   }
 
   function handleResetFlat() {
-    console.log('[Audio] reset EQ to flat');
     resetEq()
       .then(() => getEqSettings())
       .then(s => {
