@@ -56,14 +56,14 @@ const NAV: NavSection[] = [
 export default function Settings({ st, onLogout }: SettingsProps) {
   const [section, setSection] = useState<SectionId>('account');
   // True when connected to an Audiobookshelf server. Local-only users (no token)
-  // never see the ABS-only panes. authToken is read synchronously from
-  // localStorage, so this is stable across reloads and survives the server being
-  // temporarily offline (the token persists).
+  // never see the ABS-only panes. authToken is seeded synchronously from the
+  // skald.hasAuth presence flag, so this is stable across reloads and survives
+  // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
 
   async function handleSignOut() {
     try { await logout(); } catch { /* keyring failure is non-fatal */ }
-    localStorage.removeItem('skald.authToken');
+    localStorage.removeItem('skald.hasAuth');
     localStorage.removeItem('skald.serverUrl');
     localStorage.removeItem('skald.userId');
     localStorage.removeItem('skald.username');

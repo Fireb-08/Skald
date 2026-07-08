@@ -138,7 +138,7 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
     try {
       if (next) {
         // Enabling — open the Socket.IO connection and authenticate.
-        await connectSocket(st.serverUrl, st.authToken);
+        await connectSocket(st.serverUrl);
       } else {
         // Disabling — tear down cleanly; safe to call with no active connection.
         await disconnectSocket();

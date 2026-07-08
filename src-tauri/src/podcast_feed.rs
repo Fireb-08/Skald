@@ -18,9 +18,15 @@ use serde_json::{json, Map, Value};
 
 use crate::providers;
 
+/// Hard cap on a feed body — the URL is arbitrary user/OPML input, so an
+/// unbounded `text()` read would let a hostile or misconfigured endpoint buffer
+/// arbitrary data into memory. Generous: decade-old feeds run single-digit MB.
+const MAX_FEED_BYTES: usize = 20 * 1024 * 1024;
+
 /// Fetch a feed's XML text over HTTP. Kept tiny + dependency-light (reqwest is
 /// already in the graph) so the parser can be unit-reasoned without the network.
 pub async fn fetch_feed_text(url: &str) -> Result<String, String> {
+    use futures_util::StreamExt;
     log::info!(target: "skald::metadata", "podcast feed fetch url={url}");
     let client = reqwest::Client::builder()
         .user_agent("Skald/0.1 (local podcasts)")
@@ -30,7 +36,20 @@ pub async fn fetch_feed_text(url: &str) -> Result<String, String> {
     if !resp.status().is_success() {
         return Err(format!("feed HTTP {}", resp.status()));
     }
-    resp.text().await.map_err(|e| format!("feed body: {e}"))
+    // Stream with a byte cap instead of resp.text()'s unbounded buffer.
+    let mut body: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("feed body: {e}"))?;
+        if body.len() + chunk.len() > MAX_FEED_BYTES {
+            log::warn!(target: "skald::metadata", "podcast feed exceeds {} MB cap url={url}", MAX_FEED_BYTES / (1024 * 1024));
+            return Err(format!("feed exceeds the {} MB size limit", MAX_FEED_BYTES / (1024 * 1024)));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    // Feeds are near-universally UTF-8; lossy conversion keeps a stray byte from
+    // failing the whole subscribe (quick-xml re-checks the declared encoding).
+    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 /// Read an element attribute by (unprefixed) key, unescaping entities.

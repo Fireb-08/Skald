@@ -1453,12 +1453,23 @@ impl AbsClient {
         Ok(())
     }
 
-    /// GET /api/users/me/listening-sessions — returns all open sessions for
-    /// the authenticated user so stale sessions from previous runs can be closed.
+    /// GET /api/me/listening-sessions — returns the authenticated user's most
+    /// recent playback sessions so stale sessions from previous runs can be closed.
+    ///
+    /// Route verified against ABS ApiRouter.js: the per-user variant
+    /// (`/api/users/:id/listening-sessions`) does NOT resolve the literal "me"
+    /// (UserController.middleware looks the id up verbatim → 403/404 — CLAUDE.md
+    /// lesson 4), so `/api/me/listening-sessions` is the only non-admin route.
+    /// It returns session HISTORY (newest first, default 10 per page), not just
+    /// open sessions — ABS has no per-user open-sessions endpoint
+    /// (`/api/sessions/open` and `/api/users/online` are both admin-only). Any
+    /// ghost session from a previous run is by definition among the most recent,
+    /// and closing an already-closed id just 404s (openSessionMiddleware), which
+    /// the caller skips — so sweeping the first page reaps ghosts harmlessly.
     pub async fn get_open_sessions(&self) -> Result<Vec<String>, String> {
         let resp = self
             .http
-            .get(format!("{}/api/users/me/listening-sessions", self.root()))
+            .get(format!("{}/api/me/listening-sessions", self.root()))
             .header("Authorization", self.auth_header()?)
             .send()
             .await

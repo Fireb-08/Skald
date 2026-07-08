@@ -870,11 +870,13 @@ export function clearStoredToken(): Promise<void> {
 
 // ── Phase B: Socket.IO transport wrappers ─────────────────────────────────
 
-/** Opens an authenticated Socket.IO connection to the ABS server.
+/** Opens an authenticated Socket.IO connection to the ABS server. The session
+ *  JWT is loaded from the OS keyring on the Rust side — the frontend never
+ *  holds the persisted token value (see the auth-material migration in onyx.ts).
  *  Stores the client in Rust managed state; call disconnectSocket() to close it.
  *  Emits 'socket-connected' / 'socket-disconnected' Tauri events on lifecycle changes. */
-export function connectSocket(serverUrl: string, token: string): Promise<void> {
-  return invoke('connect_socket', { serverUrl, token });
+export function connectSocket(serverUrl: string): Promise<void> {
+  return invoke('connect_socket', { serverUrl });
 }
 
 /** Tears down the active Socket.IO connection cleanly.

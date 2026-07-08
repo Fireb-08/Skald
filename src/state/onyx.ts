@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { login, fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
@@ -251,10 +251,11 @@ export interface OnyxState {
   setSessionReady: (ready: boolean) => void;
   username: string;
   setUsername: (u: string) => void;
-  password: string;
-  setPassword: (p: string) => void;
   userId: string;
   setUserId: (id: string) => void;
+  // Auth presence. Holds the real JWT in memory right after login and a
+  // sentinel after a relaunch — the keyring is the source of truth for the
+  // token value, so treat this as a boolean, never send it to the server.
   authToken: string;
   setAuthToken: (token: string) => void;
   // Auth
@@ -474,6 +475,30 @@ function resolveToBase(mode: string): Theme {
 
 const DEFAULT_ACCENT = '#d4a64a';
 
+// Placeholder authToken value for a relaunch: the OS keyring holds the real
+// session JWT (auth.rs) and every Rust command loads it from there, so the
+// frontend only ever needs auth *presence* — never the token value itself.
+const AUTH_FROM_KEYRING = '__keyring__';
+
+// ── One-time auth-material migration ─────────────────────────────────────────
+// Earlier builds persisted the raw ABS token (`skald.authToken`) — and defined
+// a `skald.password` slot — in WebView localStorage. The keyring is the source
+// of truth for the token; a localStorage copy weakens that boundary (any
+// renderer compromise could read it). Replace the raw token with the non-secret
+// `skald.hasAuth` presence flag and scrub both legacy keys. The saveToken call
+// heals profiles that predate keyring writes; failure is non-fatal (the user
+// just logs in again). Runs at module load so the useState initializers below
+// see the migrated flag on first render.
+{
+  const legacyToken = localStorage.getItem('skald.authToken');
+  if (legacyToken) {
+    localStorage.setItem('skald.hasAuth', 'true');
+    saveToken(legacyToken).catch(() => {});
+    localStorage.removeItem('skald.authToken');
+  }
+  localStorage.removeItem('skald.password');
+}
+
 export function useOnyxState(): OnyxState {
   // ── Server connection (localStorage-persisted) ──────────────────────────────
   const [serverUrl, setServerUrlRaw] = useState(
@@ -485,14 +510,13 @@ export function useOnyxState(): OnyxState {
   const [username, setUsernameRaw] = useState(
     () => localStorage.getItem('skald.username') ?? '',
   );
-  const [password, setPasswordRaw] = useState(
-    () => localStorage.getItem('skald.password') ?? '',
-  );
   const [userId, setUserIdRaw] = useState(
     () => localStorage.getItem('skald.userId') ?? '',
   );
+  // In-memory only after a fresh login; a sentinel on relaunch (see
+  // AUTH_FROM_KEYRING). Consumers treat it as an auth-presence flag.
   const [authToken, setAuthTokenRaw] = useState(
-    () => localStorage.getItem('skald.authToken') ?? '',
+    () => localStorage.getItem('skald.hasAuth') === 'true' ? AUTH_FROM_KEYRING : '',
   );
 
   const setServerUrl = useCallback((v: string) => {
@@ -504,14 +528,15 @@ export function useOnyxState(): OnyxState {
   const setUsername = useCallback((v: string) => {
     localStorage.setItem('skald.username', v); setUsernameRaw(v);
   }, []);
-  const setPassword = useCallback((v: string) => {
-    localStorage.setItem('skald.password', v); setPasswordRaw(v);
-  }, []);
   const setUserId = useCallback((v: string) => {
     localStorage.setItem('skald.userId', v); setUserIdRaw(v);
   }, []);
   const setAuthToken = useCallback((v: string) => {
-    localStorage.setItem('skald.authToken', v); setAuthTokenRaw(v);
+    // Persist presence only — the raw token never touches localStorage again
+    // (it lives in the OS keyring, written by the login commands / saveToken).
+    if (v) localStorage.setItem('skald.hasAuth', 'true');
+    else localStorage.removeItem('skald.hasAuth');
+    setAuthTokenRaw(v);
   }, []);
 
   const [user, setUserRaw] = useState<User | null>(() => {
@@ -549,7 +574,7 @@ export function useOnyxState(): OnyxState {
   const [onboarded, setOnboardedRaw] = useState(() => {
     const explicit = localStorage.getItem('skald.onboarded');
     if (explicit !== null) return explicit === 'true';
-    return !!localStorage.getItem('skald.authToken') || localStorage.getItem('skald.localMode') === 'true';
+    return localStorage.getItem('skald.hasAuth') === 'true' || localStorage.getItem('skald.localMode') === 'true';
   });
   const setOnboarded = useCallback((on: boolean) => {
     localStorage.setItem('skald.onboarded', String(on));
@@ -638,7 +663,7 @@ export function useOnyxState(): OnyxState {
     }
   }, [serverUrl, libraries]);
   const [libraryLoading, setLibraryLoadingRaw] = useState(
-    () => Boolean(localStorage.getItem('skald.serverUrl') && localStorage.getItem('skald.authToken')),
+    () => Boolean(localStorage.getItem('skald.serverUrl') && localStorage.getItem('skald.hasAuth') === 'true'),
   );
   // True when the library loaded from the disk cache (server unreachable).
   // Reset to false on every successful server fetch.
@@ -663,7 +688,12 @@ export function useOnyxState(): OnyxState {
   // library), so all server-progress writes route through here. Re-merge each
   // local library's catalog progress on top of the server set to preserve it.
   const applyServerProgress = useCallback((serverProgress: MediaProgress[]) => {
-    setMediaProgress(serverProgress);
+    // Merge (not replace) synchronously so local rows never vanish for the
+    // frame(s) between this set and the async catalog re-merge below — a
+    // wholesale replace made local Pick-it-up entries flicker on every
+    // /api/me refresh. Cost: an ABS progress row deleted server-side lingers
+    // until the next launch (rare, and the next full reload clears it).
+    setMediaProgress(prev => mergeProgress(prev, serverProgress));
     const locals = librariesRef.current.filter(l => l.source === 'local');
     if (locals.length === 0) return;
     Promise.all(locals.map(l => getLocalLibraryProgress(l.id).catch(() => [] as MediaProgress[])))
@@ -709,7 +739,9 @@ export function useOnyxState(): OnyxState {
   useEffect(() => {
     // Whether we can talk to an ABS server this launch. Local libraries load
     // regardless, so we no longer early-return when there are no server creds.
-    const canQueryServer = !!serverUrl && (!!authToken || !!(username && password));
+    // authToken is presence-only here — the fetch commands load the real token
+    // from the OS keyring themselves.
+    const canQueryServer = !!serverUrl && !!authToken;
     let cancelled = false;
     setLibraryLoadingRaw(true);
     (async () => {
@@ -717,20 +749,6 @@ export function useOnyxState(): OnyxState {
       let absLibs: Library[] = [];
       try {
         if (canQueryServer) {
-          let token = authToken;
-          if (!token && username && password) {
-            const result = await login(serverUrl, username, password);
-            const loggedInUser = result.user;
-            // Capture server settings returned with the login response
-            if (result.serverSettings) setServerSettings(result.serverSettings);
-            token = loggedInUser.token;
-            setAuthToken(loggedInUser.token);
-            setUserId(loggedInUser.id);
-            setUser(loggedInUser);
-            log.info('auth', 'login ok', { userId: loggedInUser.id, type: loggedInUser.type });
-          } else {
-            await saveToken(token);
-          }
           absLibs = await fetchLibraries(serverUrl);
         }
       } catch (e) {
@@ -794,7 +812,7 @@ export function useOnyxState(): OnyxState {
       if (!cancelled) setLibraryLoadingRaw(false);
     })();
     return () => { cancelled = true; };
-  }, [serverUrl, authToken, username, password]);
+  }, [serverUrl, authToken]);
 
   // Fetch listeningStats + mediaProgress/bookmarks via /api/me once the library
   // has loaded and we have valid credentials.
@@ -1539,7 +1557,6 @@ export function useOnyxState(): OnyxState {
     sessionId, setSessionId,
     sessionReady, setSessionReady,
     username, setUsername,
-    password, setPassword,
     userId, setUserId,
     authToken, setAuthToken,
     user, setUser,

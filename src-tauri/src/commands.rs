@@ -1762,15 +1762,16 @@ pub async fn load_library_cache() -> Result<Vec<serde_json::Value>, String> {
 /// Opens an authenticated Socket.IO connection to the ABS server.
 /// Called when the user enables live sync, or automatically on startup when
 /// the `onyx.sync.live` preference is already true.
-/// Takes server_url and token explicitly so the command is stateless from
-/// the caller's perspective — the connection object is stored internally.
+/// The session JWT is loaded from the OS keyring here rather than passed in —
+/// the frontend holds only an auth-presence flag, never the token value.
 #[tauri::command]
 pub async fn connect_socket(
     server_url: String,
-    token: String,
     app: tauri::AppHandle,
     socket: tauri::State<'_, socket::SocketState>,
 ) -> Result<(), String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     socket::connect(server_url, token, app, socket.inner().clone()).await
 }
 

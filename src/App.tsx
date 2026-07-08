@@ -54,7 +54,7 @@ export default function App() {
     socketInitialised = true;
     // Auth is present: restore connection if the preference is enabled.
     if (localStorage.getItem('onyx.sync.live') === 'true') {
-      connectSocket(st.serverUrl, st.authToken).catch(e => {
+      connectSocket(st.serverUrl).catch(e => {
         // Non-fatal: the toggle in Settings → Sync remains the manual fallback.
         log.warn('sync', 'auto-connect on startup failed', { err: String(e) });
       });

@@ -8,6 +8,7 @@ import {
   addLocalBookmark, getLocalBookmarks,
 } from '../api/abs';
 import type { LocalStopPoint } from '../api/abs';
+import { sanitizeHtml } from '../lib/sanitize';
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
@@ -86,9 +87,13 @@ export default function Player({ st }: PlayerProps) {
   // ABS episode id, so there's no session to play — the player offers Download.
   const episodePending = isPodcast && !!st.currentEpisode && !st.currentEpisodeId;
   const detailLabel = isPodcast ? 'Description' : 'Synopsis';
-  const descriptionHtml = isPodcast
+  // Descriptions are remote HTML (ABS metadata / arbitrary podcast RSS) headed
+  // for dangerouslySetInnerHTML — sanitize down to basic formatting first.
+  // Memoized because the player re-renders on every 1 Hz playback tick.
+  const rawDescription = isPodcast
     ? (ep?.description || b.media?.metadata?.description || '')
     : (b.media?.metadata?.description || '');
+  const descriptionHtml = React.useMemo(() => sanitizeHtml(rawDescription), [rawDescription]);
   const noDescText = isPodcast ? 'No description available.' : 'No synopsis available.';
 
   // Chapters are locked when the focused book differs from the playing book,

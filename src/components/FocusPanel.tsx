@@ -15,6 +15,7 @@ import {
 import Glass from './chrome/Glass';
 import Cover from './Cover';
 import Icon from './Icon';
+import { sanitizeHtml } from '../lib/sanitize';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -498,7 +499,8 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         ) : focus.media.metadata.description ? (
           <div
             style={{ fontFamily: SERIF, fontSize: 13.5, lineHeight: 1.55, color: 'var(--onyx-text-dim)', paddingTop: 4 }}
-            dangerouslySetInnerHTML={{ __html: focus.media.metadata.description }}
+            // Remote HTML (ABS metadata / RSS) — allowlist-sanitized before render.
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(focus.media.metadata.description) }}
           />
         ) : (
           <div style={{ fontFamily: SERIF, fontSize: 13.5, lineHeight: 1.55, color: 'var(--onyx-text-dim)', paddingTop: 4 }}>
