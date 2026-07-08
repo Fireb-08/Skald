@@ -1136,7 +1136,17 @@ export default function LibrariesSection({ st, embedded = false }: LibrariesSect
         <CustomProvidersManager
           providers={customProviders}
           onAdd={handleAddProvider}
-          onDelete={handleDeleteProvider}
+          // Confirm before deleting — provider config (URL + auth header) is
+          // not recoverable and nearby destructive actions all confirm.
+          onDelete={async id => {
+            const p = customProviders.find(x => x.id === id);
+            st.setConfirmDialog({
+              title: 'Delete metadata provider',
+              message: `Delete the custom provider "${p?.name ?? id}"? Its configuration cannot be recovered.`,
+              confirmLabel: 'Delete',
+              onConfirm: () => void handleDeleteProvider(id),
+            });
+          }}
         />
       )}
 

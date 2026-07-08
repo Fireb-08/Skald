@@ -33,8 +33,14 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
     }
   };
 
-  // Derive the library ID from the first loaded book — same library as the shelf.
-  const libraryId = st.library[0]?.libraryId ?? '';
+  // Use the active library's id — valid even when the shelf holds zero loaded
+  // items (a new/empty ABS library can still have server-side collections).
+  // Collections are ABS-only, so local libraries resolve to '' (no fetch).
+  // Falls back to the first loaded book's libraryId for the offline-cache
+  // launch, where the libraries list itself may not have loaded.
+  const libraryId = st.activeLibrary?.source === 'local'
+    ? ''
+    : (st.activeLibrary?.id ?? st.library[0]?.libraryId ?? '');
 
   useEffect(() => {
     if (!libraryId || !st.serverUrl) { setLoading(false); return; }

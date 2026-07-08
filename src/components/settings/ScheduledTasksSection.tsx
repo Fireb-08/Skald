@@ -50,6 +50,13 @@ function taskStatus(t: Task): { color: string; label: string } {
 // ── Main section ────────────────────────────────────────────────────────────────
 
 export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps) {
+  // Hook-free admin guard wrapper — see BackupSection for the rationale
+  // (an early return between hooks crashes React if isAdmin flips).
+  if (!st.isAdmin) return null;
+  return <ScheduledTasksSectionInner st={st} />;
+}
+
+function ScheduledTasksSectionInner({ st }: ScheduledTasksSectionProps) {
   // The task list lives in onyx state (st.tasks), kept current by socket events
   // even while this pane is closed. This panel only seeds it and renders it.
   const [loading, setLoading] = useState(true);
@@ -60,9 +67,6 @@ export default function ScheduledTasksSection({ st }: ScheduledTasksSectionProps
   const [cronInput, setCronInput] = useState('0 * * * *');
   const [cronValid, setCronValid] = useState<boolean | null>(null);
   const [cronChecking, setCronChecking] = useState(false);
-
-  // Admin guard — non-admins should never reach this section.
-  if (!st.isAdmin) return null;
 
   // Live sync drives the socket task events that keep st.tasks current. When it's
   // off there are no task events, so this panel polls as a fallback instead.

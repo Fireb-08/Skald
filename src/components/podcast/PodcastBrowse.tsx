@@ -10,6 +10,7 @@ import { fmtRemaining, fmtTime } from '../../state/onyx';
 import { asPodcastItem, getRecentEpisodes, getLocalRecentEpisodes, type RecentEpisode } from '../../api/abs';
 import { resolvePodcastFeed, cachedPodcastImage, episodeKey } from '../../lib/podcastCover';
 import { playEpisode, togglePlayback } from '../../api/playbook';
+import { log } from '../../lib/log';
 import Cover from '../Cover';
 import Icon from '../Icon';
 import ContextMenu from '../ContextMenu';
@@ -212,16 +213,20 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const openDetail = (id: string) => { st.setPodcastDetailId(id); st.setScreen('podcast'); };
 
   // Downloaded episode → play directly (open the player on it).
-  const playEp = (ep: RecentEpisode) => {
+  const playEp = async (ep: RecentEpisode) => {
     const pid = ep.libraryItemId;
     if (!pid || !ep.id) return;
     const isCurrent = st.currentEpisodeId === ep.id && st.currentBookId === pid;
     if (isCurrent) { st.setScreen('player'); return; }
-    playEpisode(st, pid, ep).catch(e => {
-      console.error('[Podcast] playEpisode failed:', e);
+    // Navigate only after playback starts (see PodcastDetail.play) — a failed
+    // session open must not strand the user on a player showing stale state.
+    try {
+      await playEpisode(st, pid, ep);
+      st.setScreen('player');
+    } catch (e) {
+      log.error('playback', 'playEpisode failed', { itemId: pid, episodeId: ep.id, err: String(e) });
       st.setToast({ message: 'Could not start episode', type: 'error' });
-    });
-    st.setScreen('player');
+    }
   };
 
   // Undownloaded episode → open the player in its pending-download state (no

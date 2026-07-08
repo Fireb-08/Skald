@@ -120,6 +120,13 @@ const colorForLevel = (level: number) =>
   LOGGER_LEVELS.find(l => l.value === level)?.color ?? 'var(--onyx-text)';
 
 export default function LogsSection({ st }: LogsSectionProps) {
+  // Hook-free admin guard wrapper — see BackupSection for the rationale
+  // (an early return between hooks crashes React if isAdmin flips).
+  if (!st.isAdmin) return null;
+  return <LogsSectionInner st={st} />;
+}
+
+function LogsSectionInner({ st }: LogsSectionProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [minLevel, setMinLevel] = useState(2); // Info and above by default
   const [fatalOnly, setFatalOnly] = useState(false); // crash-level preset (cluster L)
@@ -133,9 +140,6 @@ export default function LogsSection({ st }: LogsSectionProps) {
     () => (localStorage.getItem('onyx.logs.subtab') === 'skald' ? 'skald' : 'server'),
   );
   const switchSubtab = (t: 'server' | 'skald') => { localStorage.setItem('onyx.logs.subtab', t); setSubtab(t); };
-
-  // Admin guard — non-admins should never reach this section.
-  if (!st.isAdmin) return null;
 
   // The live tail rides the live-sync socket; without it we only have the seed.
   const liveSyncOn = localStorage.getItem('onyx.sync.live') === 'true';

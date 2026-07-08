@@ -106,6 +106,15 @@ function NumField({
 // ── Main section ────────────────────────────────────────────────────────────────
 
 export default function BackupSection({ st }: BackupSectionProps) {
+  // Admin guard lives in this hook-free wrapper: an early return *between*
+  // hooks inside the component would change its hook count if isAdmin flips
+  // while mounted (React's "rendered fewer hooks than expected" crash). With
+  // the wrapper, the inner admin-only component simply unmounts instead.
+  if (!st.isAdmin) return null;
+  return <BackupSectionInner st={st} />;
+}
+
+function BackupSectionInner({ st }: BackupSectionProps) {
   const [backups, setBackups] = useState<Backup[]>([]);
   const [location, setLocation] = useState('');
   const [pathEnvSet, setPathEnvSet] = useState(false);
@@ -114,9 +123,6 @@ export default function BackupSection({ st }: BackupSectionProps) {
   const [busy, setBusy] = useState(false);
   // Pending confirmation dialog (delete or restore), or null.
   const [confirm, setConfirm] = useState<{ kind: 'delete' | 'restore'; backup: Backup } | null>(null);
-
-  // Admin guard — non-admins should never reach this section.
-  if (!st.isAdmin) return null;
 
   const load = useCallback(async () => {
     setLoading(true);

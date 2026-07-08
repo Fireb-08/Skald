@@ -283,6 +283,13 @@ function RuleEditor({ initial, events, libraries, onCancel, onSave }: EditorProp
 // ── Main section ────────────────────────────────────────────────────────────────
 
 export default function NotificationsSection({ st }: NotificationsSectionProps) {
+  // Hook-free admin guard wrapper — see BackupSection for the rationale
+  // (an early return between hooks crashes React if isAdmin flips).
+  if (!st.isAdmin) return null;
+  return <NotificationsSectionInner st={st} />;
+}
+
+function NotificationsSectionInner({ st }: NotificationsSectionProps) {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [events, setEvents] = useState<NotificationEventData[]>([]);
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -293,9 +300,6 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
   const [appriseDraft, setAppriseDraft] = useState('');
   // editing = the rule being edited; 'new' = the create form; null = neither.
   const [editing, setEditing] = useState<Notification | 'new' | null>(null);
-
-  // Admin guard — non-admins should never reach this section.
-  if (!st.isAdmin) return null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -499,7 +503,12 @@ export default function NotificationsSection({ st }: NotificationsSectionProps) 
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
             <Btn variant="ghost" onClick={() => rule.id && void testRule(rule.id)} disabled={!hasApprise}>Test</Btn>
             <Btn variant="ghost" onClick={() => setEditing(rule)}>Edit</Btn>
-            <Btn variant="danger" onClick={() => rule.id && void removeRule(rule.id)}>Delete</Btn>
+            <Btn variant="danger" onClick={() => rule.id && st.setConfirmDialog({
+              title: 'Delete notification',
+              message: `Delete the "${rule.eventName}" notification rule? This cannot be undone.`,
+              confirmLabel: 'Delete',
+              onConfirm: () => void removeRule(rule.id!),
+            })}>Delete</Btn>
           </div>
         </div>
       ))}

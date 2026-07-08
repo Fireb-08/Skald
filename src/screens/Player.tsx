@@ -9,6 +9,7 @@ import {
 } from '../api/abs';
 import type { LocalStopPoint } from '../api/abs';
 import { sanitizeHtml } from '../lib/sanitize';
+import { log } from '../lib/log';
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
@@ -291,7 +292,12 @@ export default function Player({ st }: PlayerProps) {
         setDlState('idle');
         if (match?.id) {
           await st.refreshLibrary().catch(() => {});
-          playEpisode(st, pid, match).catch(err => console.error('[Podcast] play after download failed:', err));
+          // Surface a post-download play failure — the user just watched the
+          // download succeed, so a silent no-op reads as a dead play button.
+          await playEpisode(st, pid, match).catch(err => {
+            log.error('playback', 'play after local episode download failed', { itemId: pid, err: String(err) });
+            st.setToast({ message: 'Downloaded, but playback could not start — tap the episode to retry', type: 'error' });
+          });
         } else {
           st.setToast({ message: 'Downloaded — open the episode to play', type: 'info' });
         }
@@ -319,7 +325,12 @@ export default function Player({ st }: PlayerProps) {
         const match = eps.find(e => episodeKey(e) === key) ?? eps.find(e => e.title === ep.title);
         if (match?.id) {
           setDlState('idle');
-          playEpisode(st, pid, match).catch(err => console.error('[Podcast] play after download failed:', err));
+          // Same visibility rule as the local branch: a failed auto-play after
+          // a visible download must tell the user, not just the console.
+          await playEpisode(st, pid, match).catch(err => {
+            log.error('playback', 'play after episode download failed', { itemId: pid, err: String(err) });
+            st.setToast({ message: 'Downloaded, but playback could not start — tap the episode to retry', type: 'error' });
+          });
           return;
         }
       } catch { /* keep polling */ }

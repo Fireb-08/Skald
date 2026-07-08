@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { OnyxState } from '../state/onyx';
 import { logout } from '../api/abs';
 import Glass from '../components/chrome/Glass';
@@ -60,6 +60,15 @@ export default function Settings({ st, onLogout }: SettingsProps) {
   // skald.hasAuth presence flag, so this is stable across reloads and survives
   // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
+
+  // If the selected pane's nav entry becomes hidden (admin flag revoked, server
+  // disconnected), fall back to Account rather than rendering a blank panel
+  // whose nav item no longer exists.
+  useEffect(() => {
+    const nav = NAV.find(s => s.id === section);
+    const hidden = !!nav && ((nav.requiresAbs && !hasAbs) || (nav.adminOnly && !st.isAdmin));
+    if (hidden) setSection('account');
+  }, [section, hasAbs, st.isAdmin]);
 
   async function handleSignOut() {
     try { await logout(); } catch { /* keyring failure is non-fatal */ }

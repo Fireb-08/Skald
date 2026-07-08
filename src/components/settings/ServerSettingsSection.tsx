@@ -149,14 +149,18 @@ function PrefixEditor({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function ServerSettingsSection({ st, embedded = false }: ServerSettingsSectionProps) {
+  // Hook-free admin guard wrapper — see BackupSection for the rationale
+  // (an early return between hooks crashes React if isAdmin flips).
+  if (!st.isAdmin) return null;
+  return <ServerSettingsSectionInner st={st} embedded={embedded} />;
+}
+
+function ServerSettingsSectionInner({ st, embedded = false }: ServerSettingsSectionProps) {
   // Local copy of settings — mutated optimistically on each toggle/change.
   // Seeded from st.serverSettings, which is captured at login and refreshed on
   // every app launch via POST /api/authorize (ABS has no standalone GET endpoint
   // for server settings — they only ride along with the login/authorize payload).
   const [settings, setSettings] = useState<ServerSettings | null>(st.serverSettings);
-
-  // Admin guard — non-admin users should never reach this section
-  if (!st.isAdmin) return null;
 
   // Heading: a standalone SectionHead when used as its own panel, or a lighter
   // divider sub-heading when embedded under the Server panel.

@@ -26,7 +26,12 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
   const [creating, setCreating] = useState(false);
   const [detailPlaylistId, setDetailPlaylistId] = useState<string | null>(null);
 
-  const libraryId = st.library[0]?.libraryId ?? '';
+  // Active library id, not the first shelf item's — an empty ABS library still
+  // has server-side playlists and must allow creating one. ABS-only feature, so
+  // local libraries resolve to ''. (See CollectionsView for the same pattern.)
+  const libraryId = st.activeLibrary?.source === 'local'
+    ? ''
+    : (st.activeLibrary?.id ?? st.library[0]?.libraryId ?? '');
 
   useEffect(() => {
     if (!libraryId || !st.serverUrl) { setLoading(false); return; }

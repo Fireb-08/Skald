@@ -9,6 +9,7 @@ import { fmtRemaining, fmtTime } from '../state/onyx';
 import { asPodcastItem, fetchItem, type PodcastEpisode, type RecentEpisode } from '../api/abs';
 import { resolvePodcastFeed, cachedFeedEpisodes, cachedPodcastImage, episodeKey } from '../lib/podcastCover';
 import { playEpisode, togglePlayback } from '../api/playbook';
+import { log } from '../lib/log';
 import Cover from '../components/Cover';
 import Icon from '../components/Icon';
 import PodcastSettingsModal from '../components/podcast/PodcastSettingsModal';
@@ -115,13 +116,18 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
 
   const back = () => { st.setScreen('library'); st.setPodcastDetailId(null); };
 
-  const play = (ep: PodcastEpisode) => {
+  const play = async (ep: PodcastEpisode) => {
     if (!ep.id) return;
-    playEpisode(st, item.id, ep).catch(e => {
-      console.error('[Podcast] playEpisode failed:', e);
+    // Navigate only after playback actually starts — jumping to the player
+    // first would leave it showing the previous (or no) item when the session
+    // open fails, which reads as a broken player rather than a play error.
+    try {
+      await playEpisode(st, item.id, ep);
+      st.setScreen('player');
+    } catch (e) {
+      log.error('playback', 'playEpisode failed', { itemId: item.id, episodeId: ep.id, err: String(e) });
       st.setToast({ message: 'Could not start episode', type: 'error' });
-    });
-    st.setScreen('player');
+    }
   };
 
   // Undownloaded → open the player in its pending/download-then-play state.
