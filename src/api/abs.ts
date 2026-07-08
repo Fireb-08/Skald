@@ -607,7 +607,8 @@ export function updateMedia(
   return invoke('update_media', { serverUrl, itemId, payload });
 }
 
-/** PATCH /api/items/:id/chapters — replace the chapter markers. Each chapter is
+/** POST /api/items/:id/chapters — replace the chapter markers (matches the Rust
+ *  client and the ABS router; this is a POST, not PATCH). Each chapter is
  *  { start, end, title }. Requires the canUpdate permission (admin by default). */
 export function updateChapters(
   serverUrl: string,

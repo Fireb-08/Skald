@@ -141,6 +141,12 @@ pub struct OfflineProgressEntry {
 // The queue is stored as a sibling to downloads.json in the downloads directory.
 const PROGRESS_QUEUE_FILE: &str = "offline_progress.json";
 
+// Serializes the queue's read-modify-write cycles. The 1 Hz playback tick
+// upserts entries while a reconnect flush removes the ones it synced; without
+// this lock a remove's load→save window can overlap an upsert's and silently
+// drop the freshest position from the rewritten file (lost update).
+static QUEUE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 // Load the progress queue from disk. Returns an empty vec if the file does not
 // exist (normal on first run) or is corrupt (next write will overwrite it).
 pub fn load_progress_queue(downloads_dir: &Path) -> Vec<OfflineProgressEntry> {
@@ -168,6 +174,8 @@ pub fn save_progress_queue(downloads_dir: &Path, queue: &[OfflineProgressEntry])
 // Add or replace a queue entry for the given item_id — keep only the latest
 // entry per book since only the most recent position matters.
 pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) -> Result<(), String> {
+    // Poison-tolerant: a panic elsewhere must not permanently wedge progress writes.
+    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Ensure the directory exists — the first offline write happens before any
     // download if the user has never downloaded a book.
     std::fs::create_dir_all(downloads_dir)
@@ -185,6 +193,7 @@ pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) 
 // the flush's snapshot read and this remove; matching on recorded_at ensures we
 // delete exactly the entry we sent and leave any newer position for the next flush.
 pub fn remove_progress_entry(downloads_dir: &Path, item_id: &str, recorded_at: i64) -> Result<(), String> {
+    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut queue = load_progress_queue(downloads_dir);
     let before = queue.len();
     queue.retain(|e| !(e.item_id == item_id && e.recorded_at == recorded_at));
