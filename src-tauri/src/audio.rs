@@ -121,7 +121,9 @@ impl AudioPlayer {
     /// cross-track seek.
     fn set_media_at(&self, url: &str, start_time: f64) -> Result<(), String> {
         let media = Media::new_location(&self.instance, url)
-            .ok_or_else(|| format!("Failed to create LibVLC media from URL: {url}"))?;
+            // redact_url: the query holds the session token — the error string
+            // flows into frontend logs and toasts, so it must never appear.
+            .ok_or_else(|| format!("Failed to create LibVLC media from URL: {}", crate::redact_url(url)))?;
         if start_time > 0.0 {
             let opt = CString::new(format!(":start-time={:.3}", start_time))
                 .map_err(|e| format!("CString error: {e}"))?;

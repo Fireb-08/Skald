@@ -10,6 +10,7 @@ import {
 // togglePlayback is the canonical pause/resume (applies auto-rewind-on-resume).
 import { muteAudio, unmuteAudio, togglePlayback } from '../api/playbook';
 import { skipSeconds } from '../lib/playbackPrefs';
+import { log } from '../lib/log';
 import type { OnyxState } from '../state/onyx';
 import type { ShortcutBinding } from '../api/abs';
 
@@ -45,40 +46,48 @@ export function useGlobalShortcuts(st: OnyxState): void {
     if (registered) return;
     registered = true;
 
+    const shortcutErr = (e: unknown) =>
+      log.error('playback', 'global shortcut command failed', { err: String(e) });
+
     const bindings = loadBindings();
-    registerShortcuts(bindings).catch(console.error);
+    // Safe to re-run on a later mount: the Rust command unregister_alls first.
+    registerShortcuts(bindings).catch(shortcutErr);
 
     const unlisteners: Array<() => void> = [];
+    // Cleanup can run BEFORE the listen() promises resolve (StrictMode's fake
+    // unmount is immediate) — a late-resolving listener must tear itself down
+    // instead of surviving into the next mount and double-firing shortcuts.
+    let disposed = false;
 
     function on(event: string, handler: () => void) {
       listen(event, handler)
-        .then(fn => unlisteners.push(fn))
-        .catch(console.error);
+        .then(fn => { if (disposed) fn(); else unlisteners.push(fn); })
+        .catch(shortcutErr);
     }
 
-    listen('shortcut-play_pause', () => {
+    on('shortcut-play_pause', () => {
       // Canonical toggle — pauses, or resumes with auto-rewind-on-resume applied.
-      togglePlayback(stRef.current).catch(console.error);
-    }).then(fn => unlisteners.push(fn)).catch(console.error);
+      togglePlayback(stRef.current).catch(shortcutErr);
+    });
 
     on('shortcut-skip_forward', () => {
-      seekAudio(stRef.current.position + skipSeconds()).catch(console.error);
+      seekAudio(stRef.current.position + skipSeconds()).catch(shortcutErr);
     });
 
     on('shortcut-skip_back', () => {
-      seekAudio(Math.max(0, stRef.current.position - skipSeconds())).catch(console.error);
+      seekAudio(Math.max(0, stRef.current.position - skipSeconds())).catch(shortcutErr);
     });
 
     on('shortcut-volume_up', () => {
       const vol = Math.min(1, stRef.current.volume + 0.1);
       stRef.current.setVolume(vol);
-      setAudioVolume(Math.round(vol * 100)).catch(console.error);
+      setAudioVolume(Math.round(vol * 100)).catch(shortcutErr);
     });
 
     on('shortcut-volume_down', () => {
       const vol = Math.max(0, stRef.current.volume - 0.1);
       stRef.current.setVolume(vol);
-      setAudioVolume(Math.round(vol * 100)).catch(console.error);
+      setAudioVolume(Math.round(vol * 100)).catch(shortcutErr);
     });
 
     on('shortcut-mute', () => {
@@ -91,6 +100,13 @@ export function useGlobalShortcuts(st: OnyxState): void {
       }
     });
 
-    return () => unlisteners.forEach(fn => fn());
+    return () => {
+      disposed = true;
+      unlisteners.forEach(fn => fn());
+      // Reset the StrictMode guard: the fake dev unmount just removed every
+      // listener, so the second mount MUST be allowed to re-register — leaving
+      // this true made shortcuts fire into a void for the whole dev session.
+      registered = false;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 }

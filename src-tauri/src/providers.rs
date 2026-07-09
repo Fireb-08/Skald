@@ -383,7 +383,7 @@ pub async fn download_cover(url: &str, dest: &Path) -> Result<(), String> {
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("cover body: {e}"))?;
         if bytes.len() + chunk.len() > MAX_COVER_BYTES {
-            log::warn!(target: "skald::metadata", "cover exceeds {} MB cap url={url}", MAX_COVER_BYTES / (1024 * 1024));
+            log::warn!(target: "skald::metadata", "cover exceeds {} MB cap url={}", MAX_COVER_BYTES / (1024 * 1024), crate::redact_url(url));
             return Err(format!("cover exceeds the {} MB size limit", MAX_COVER_BYTES / (1024 * 1024)));
         }
         bytes.extend_from_slice(&chunk);

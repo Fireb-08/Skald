@@ -57,8 +57,19 @@ export function clearLogBuffer(): void {
 // serialized, so secrets never reach the log file, the buffer, or the report.
 const SECRET_KEY = /token|authoriz|password|passwd|apikey|api_key|secret|bearer|cookie/i;
 
+// Value-level scrub: secrets also arrive EMBEDDED in strings under innocent
+// keys — e.g. a LibVLC/network error quoting a media URL whose query carries
+// `?token=<jwt>`, logged as { err: String(e) }. Key-based masking can't see
+// those, so scrub secret-looking query params and raw JWTs out of every string.
+const SECRET_PARAM = /([?&](?:token|auth|jwt|access_token|api_key|apikey|key|secret)=)[^&\s"'`)]+/gi;
+const RAW_JWT = /\beyJ[\w-]{10,}\.[\w-]+\.[\w-]+\b/g;
+function scrubString(s: string): string {
+  return s.replace(SECRET_PARAM, '$1***').replace(RAW_JWT, '***');
+}
+
 function redact(value: unknown, depth = 0): unknown {
   if (depth > 6) return '…';
+  if (typeof value === 'string') return scrubString(value);
   if (Array.isArray(value)) return value.map(v => redact(v, depth + 1));
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
@@ -77,7 +88,9 @@ function ctxToString(ctx: unknown): string {
 
 // ── Emit ──────────────────────────────────────────────────────────────────────
 function emit(level: LogLevel, cat: LogCategory, msg: string, ctx?: unknown): void {
-  const display = ctx === undefined ? msg : `${msg} — ${ctxToString(ctx)}`;
+  // msg is normally authored constant text, but scrub it too in case a caller
+  // interpolates an error/URL directly into the message.
+  const display = ctx === undefined ? scrubString(msg) : `${scrubString(msg)} — ${ctxToString(ctx)}`;
   pushRing({ ts: Date.now(), level, cat, msg: display });
   // Forward to the plugin (stdout + file + webview). Fire-and-forget; a logging
   // failure must never affect app behaviour.

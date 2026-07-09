@@ -1326,7 +1326,8 @@ pub fn subscribe_podcast(
     if let Some(eps) = feed.get("episodes").and_then(|e| e.as_array()) {
         upsert_episodes_conn(&conn, &id, eps)?;
     }
-    log::info!(target: "skald::library", "podcast subscribe lib={library_id} title={title} feed={feed_url}");
+    // Host only — private feed URLs carry subscriber tokens (see feed_host).
+    log::info!(target: "skald::library", "podcast subscribe lib={library_id} title={title} feed={}", crate::podcast_feed::feed_host(feed_url));
     Ok((id, cover_dest, cover_url))
 }
 

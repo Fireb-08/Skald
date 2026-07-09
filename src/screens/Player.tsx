@@ -10,6 +10,9 @@ import {
 import type { LocalStopPoint } from '../api/abs';
 import { sanitizeHtml } from '../lib/sanitize';
 import { log } from '../lib/log';
+
+// Shared boundary logger for the screen's fire-and-forget transport/IO calls.
+const logErr = (e: unknown) => log.error('playback', 'player command failed', { err: String(e) });
 import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import {
@@ -125,7 +128,7 @@ export default function Player({ st }: PlayerProps) {
     let cancelled = false;
     fetchItem(st.serverUrl, fid)
       .then(item => { if (!cancelled) setFetchedFocusedChapters(bookChapters(item)); })
-      .catch(console.error);
+      .catch(logErr);
     return () => { cancelled = true; };
   }, [st.focusedBookId, st.library]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -181,7 +184,7 @@ export default function Player({ st }: PlayerProps) {
   // Deps include currentBookId and position so the closure stays fresh.
   const recordStop = useCallback(() => {
     if (st.currentBookId && st.position > 0) {
-      recordStopPoint(st.currentBookId, st.position).catch(console.error);
+      recordStopPoint(st.currentBookId, st.position).catch(logErr);
     }
   }, [st.currentBookId, st.position]);
 
@@ -200,7 +203,7 @@ export default function Player({ st }: PlayerProps) {
     if (prevBookIdRef.current && prevBookIdRef.current !== st.currentBookId) {
       // The book just switched — save where we were in the previous book.
       if (posRef.current > 0) {
-        recordStopPoint(prevBookIdRef.current, posRef.current).catch(console.error);
+        recordStopPoint(prevBookIdRef.current, posRef.current).catch(logErr);
       }
     }
     prevBookIdRef.current = st.currentBookId;
@@ -210,7 +213,7 @@ export default function Player({ st }: PlayerProps) {
   const focusId = st.focusedBookId ?? st.currentBookId;
   useEffect(() => {
     if (!focusId || bookmarkTab !== 'local') return;
-    getStopPoints(focusId).then(setStopPoints).catch(console.error);
+    getStopPoints(focusId).then(setStopPoints).catch(logErr);
   }, [focusId, bookmarkTab]);
 
   // A local-library item has no server — bookmarks go to the catalog instead.
@@ -227,7 +230,7 @@ export default function Player({ st }: PlayerProps) {
         const others = st.bookmarks.filter(b => b.libraryItemId !== focusId);
         st.setBookmarks([...others, ...bms]);
       })
-      .catch(err => console.error('[bookmark] local load failed:', err));
+      .catch(err => log.error('playback', 'local bookmark load failed', { err: String(err) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLocalItem, focusId]);
 
@@ -247,7 +250,7 @@ export default function Player({ st }: PlayerProps) {
         st.setBookmarks(me.bookmarks);
       }
     } catch (err) {
-      console.error('[bookmark] create failed:', err);
+      log.error('playback', 'bookmark create failed', { err: String(err) });
     }
   };
 
@@ -302,7 +305,7 @@ export default function Player({ st }: PlayerProps) {
           st.setToast({ message: 'Downloaded — open the episode to play', type: 'info' });
         }
       } catch (e) {
-        console.error('[Podcast] local download failed:', e);
+        log.error('downloads', 'local episode download failed', { err: String(e) });
         st.setToast({ message: 'Download failed', type: 'error' });
         setDlState('idle');
       }
@@ -312,7 +315,7 @@ export default function Player({ st }: PlayerProps) {
     try {
       await downloadEpisodes(st.serverUrl, pid, [ep]);
     } catch (e) {
-      console.error('[Podcast] download failed:', e);
+      log.error('downloads', 'episode download failed', { err: String(e) });
       st.setToast({ message: 'Download failed', type: 'error' });
       setDlState('idle');
       return;
@@ -408,7 +411,7 @@ export default function Player({ st }: PlayerProps) {
 
         setCachedReview(b.id, { olWorkKey: olKey, olRatings: olRat, olShelves: olSh });
       } catch (e) {
-        console.error('[review] fetch failed:', e);
+        log.error('metadata', 'Open Library review fetch failed', { err: String(e) });
         if (!cancelled) setOlWorkKey(null);
       }
     })();
@@ -560,7 +563,7 @@ export default function Player({ st }: PlayerProps) {
     const t = setInterval(() => {
       setSleepRemain(r => {
         if (r <= 1) {
-          pauseAudio().catch(console.error);
+          pauseAudio().catch(logErr);
           st.setPlaying(false);
           setSleepMode(null);
           return 0;
@@ -573,7 +576,7 @@ export default function Player({ st }: PlayerProps) {
 
   useEffect(() => {
     if (sleepMode === 'chapter' && chIdx !== chapterAtStart.current) {
-      pauseAudio().catch(console.error);
+      pauseAudio().catch(logErr);
       st.setPlaying(false);
       setSleepMode(null);
     }
@@ -581,7 +584,7 @@ export default function Player({ st }: PlayerProps) {
 
   useEffect(() => {
     if (chIdx > prevChIdxRef.current && st.playing && !autoPlayNext) {
-      pauseAudio().catch(console.error);
+      pauseAudio().catch(logErr);
       st.setPlaying(false);
     }
     prevChIdxRef.current = chIdx;
@@ -631,7 +634,7 @@ export default function Player({ st }: PlayerProps) {
     const target = hasChapters
       ? chapterStart(chapters, chIdx) + frac * curCh.dur
       : frac * st.bookSecs;
-    seekAudio(target).catch(console.error);
+    seekAudio(target).catch(logErr);
     // Optimistic position update — without it the waveform/time display lags
     // one playback tick (~1s) behind the seek (other seek paths do the same).
     st.setPosition(target);
@@ -672,7 +675,7 @@ export default function Player({ st }: PlayerProps) {
         await resumePlayback(st);
       }
     } catch (err) {
-      console.error('[Player] play/pause failed:', err);
+      log.error('playback', 'play/pause failed', { err: String(err) });
     }
   };
 
@@ -692,7 +695,7 @@ export default function Player({ st }: PlayerProps) {
     try {
       await playBook(st, st.focusedBookId!);
     } catch (err) {
-      console.error('[Player] play focused failed:', err);
+      log.error('playback', 'play focused failed', { err: String(err) });
     }
   };
 
@@ -916,7 +919,7 @@ export default function Player({ st }: PlayerProps) {
               <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: isCompact ? 'none' : 'flex', gap: 6 }}>
                 {transportWidth >= 620 && !isCompact ? (
                   SPEEDS.map(s => (
-                    <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(console.error); }} style={{
+                    <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(logErr); }} style={{
                       padding: '7px 12px', borderRadius: 6, fontFamily: MONO, fontSize: 11,
                       background: s === st.speed ? 'var(--onyx-accent-dim)' : 'transparent',
                       color: s === st.speed ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
@@ -928,7 +931,7 @@ export default function Player({ st }: PlayerProps) {
                 ) : (
                   <select
                     value={st.speed}
-                    onChange={e => { st.setSpeed(e.target.value); setAudioSpeed(parseFloat(e.target.value)).catch(console.error); }}
+                    onChange={e => { st.setSpeed(e.target.value); setAudioSpeed(parseFloat(e.target.value)).catch(logErr); }}
                     style={{
                       height: 44,
                       borderRadius: 10,
@@ -953,7 +956,7 @@ export default function Player({ st }: PlayerProps) {
               {/* Center group — primary transport controls; flex: 1 with centered content
                   ensures play/pause/skip always sit at the geometric center of the row */}
               <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 14 }}>
-                <button onClick={() => seekAudio(Math.max(0, st.position - skipSeconds())).catch(console.error)} title={`Back ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                <button onClick={() => seekAudio(Math.max(0, st.position - skipSeconds())).catch(logErr)} title={`Back ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
                   <Icon name="skip-back" size={isCompact ? 14 : 20} />
                 </button>
                 <button
@@ -965,7 +968,7 @@ export default function Player({ st }: PlayerProps) {
                     <Icon name={st.playing ? 'pause' : 'play'} size={isCompact ? 15 : 26} />
                   </span>
                 </button>
-                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipSeconds())).catch(console.error)} title={`Forward ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipSeconds())).catch(logErr)} title={`Forward ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
                   <Icon name="skip-forward" size={isCompact ? 14 : 20} />
                 </button>
               </div>
@@ -1231,14 +1234,14 @@ export default function Player({ st }: PlayerProps) {
                       const pos = chapterStart(displayChapters, i);
                       if (!st.focusedBookId || st.focusedBookId === st.currentBookId) {
                         // Seek to the selected chapter's start position
-                        await seekAudio(pos).catch(console.error);
+                        await seekAudio(pos).catch(logErr);
                         st.setPosition(pos);
 
                         // If the book was paused, start playback from the selected chapter.
                         // playAudio() tells LibVLC to begin streaming; setPlaying(true) updates
                         // the UI optimistically before the playback-tick event confirms it.
                         if (!st.playing) {
-                          await playAudio().catch(console.error);
+                          await playAudio().catch(logErr);
                           st.setPlaying(true);
                         }
                       } else {
@@ -1333,7 +1336,7 @@ export default function Player({ st }: PlayerProps) {
                       meta,
                       accent: !!bm.title,
                       isLast: i === playerBookmarks.length - 1,
-                      onClick: () => seekAudio(bm.time).catch(console.error),
+                      onClick: () => seekAudio(bm.time).catch(logErr),
                     });
                   })
                 ) : (
@@ -1355,7 +1358,7 @@ export default function Player({ st }: PlayerProps) {
                       accent: !!ch,
                       isLast: i === stopPoints.length - 1,
                       onClick: () => {
-                        seekAudio(point.position).catch(console.error);
+                        seekAudio(point.position).catch(logErr);
                         st.setPosition(point.position);
                       },
                     });

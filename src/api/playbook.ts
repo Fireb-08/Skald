@@ -8,6 +8,10 @@ import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolu
 import { log } from '../lib/log';
 import { rewindSeconds } from '../lib/playbackPrefs';
 
+// Shared boundary logger for fire-and-forget transport calls — routes through
+// the structured framework (Skald log viewer) instead of the raw console.
+const logErr = (e: unknown) => log.error('playback', 'transport command failed', { err: String(e) });
+
 // Guard against concurrent playBook calls.
 // openPlaybackSession is async and slow — a second click during the await
 // would start a second session, clobbering the first call's setSessionReady(true)
@@ -169,7 +173,7 @@ export async function playBook(
 
     // 5. Start playback and optimistically mark the UI as playing — the
     //    playback-tick event from Rust confirms within ~1 second.
-    await playAudio().catch(console.error);
+    await playAudio().catch(logErr);
     st.setPlaying(true);
   } finally {
     // Always clear the flag, even if playBook throws
@@ -231,7 +235,7 @@ export async function playEpisode(
 
     st.setIsLocalPlayback(false);
     await closeActiveSession().catch(e =>
-      console.error('[playbook] closeActiveSession failed:', e)
+      log.error('playback', 'closeActiveSession failed', { err: String(e) })
     );
     st.setSessionReady(false);
     st.setSessionId('');
@@ -257,7 +261,7 @@ export async function playEpisode(
     st.setFocusedBookId(podcastItemId);
     st.setPosition(result.currentTime);
 
-    await playAudio().catch(console.error);
+    await playAudio().catch(logErr);
     st.setPlaying(true);
   } finally {
     playBookInFlight = false;
@@ -269,7 +273,7 @@ export async function playEpisode(
 // behave identically and LibVLC is actually silenced (not just the UI).
 export async function muteAudio(st: OnyxState): Promise<void> {
   // Silence LibVLC output by setting volume to 0
-  await setAudioVolume(0).catch(console.error);
+  await setAudioVolume(0).catch(logErr);
   // Reflect muted state in the UI
   st.setMuted(true);
 }
@@ -277,7 +281,7 @@ export async function muteAudio(st: OnyxState): Promise<void> {
 export async function unmuteAudio(st: OnyxState): Promise<void> {
   // Restore LibVLC output to the user's last volume level.
   // st.volume is stored as a 0–1 fraction; setAudioVolume expects 0–100.
-  await setAudioVolume(Math.round(st.volume * 100)).catch(console.error);
+  await setAudioVolume(Math.round(st.volume * 100)).catch(logErr);
   // Clear muted state in the UI
   st.setMuted(false);
 }
@@ -290,7 +294,7 @@ export async function unmuteAudio(st: OnyxState): Promise<void> {
 export async function togglePlayback(st: OnyxState): Promise<void> {
   if (st.playing) {
     // Currently playing → pause LibVLC and reflect it immediately
-    await pauseAudio().catch(console.error);
+    await pauseAudio().catch(logErr);
     st.setPlaying(false);
   } else {
     // Currently paused → resume (applies the auto-rewind-on-resume preference)
@@ -309,9 +313,9 @@ export async function resumePlayback(st: OnyxState): Promise<void> {
     // Step back a few seconds so the listener re-hears the lead-up to where they
     // paused. Clamp at 0; seekAudio moves LibVLC, setPosition keeps the UI in sync.
     const target = Math.max(0, st.position - rewind);
-    await seekAudio(target).catch(console.error);
+    await seekAudio(target).catch(logErr);
     st.setPosition(target);
   }
-  await playAudio().catch(console.error);
+  await playAudio().catch(logErr);
   st.setPlaying(true);
 }

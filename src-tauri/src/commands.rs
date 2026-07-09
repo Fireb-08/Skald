@@ -640,7 +640,7 @@ pub async fn cache_remote_image(url: String) -> Result<String, String> {
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("remote image read failed: {e}"))?;
         if bytes.len() + chunk.len() > MAX_IMAGE_BYTES {
-            log::warn!(target: "skald::metadata", "remote image exceeds {} MB cap url={url}", MAX_IMAGE_BYTES / (1024 * 1024));
+            log::warn!(target: "skald::metadata", "remote image exceeds {} MB cap url={}", MAX_IMAGE_BYTES / (1024 * 1024), crate::redact_url(&url));
             return Err(format!("remote image exceeds the {} MB size limit", MAX_IMAGE_BYTES / (1024 * 1024)));
         }
         bytes.extend_from_slice(&chunk);
@@ -1379,7 +1379,7 @@ pub async fn subscribe_local_opml(
                 let fu = feed_url.clone();
                 tokio::task::spawn_blocking(move || crate::podcast_feed::parse_feed(&xml, &fu)).await
             }
-            Err(e) => { log::warn!(target: "skald::library", "opml subscribe feed FAIL url={feed_url} err={e}"); continue; }
+            Err(e) => { log::warn!(target: "skald::library", "opml subscribe feed FAIL host={} err={e}", crate::podcast_feed::feed_host(&feed_url)); continue; }
         };
         let feed = match parsed {
             Ok(Ok(f)) => f,
@@ -2480,11 +2480,26 @@ pub struct UploadFileEntry {
     pub size: u64,
 }
 
+/// Extension allowlist shared by resolve_upload_files and upload_media. The
+/// Tauri command layer is the privilege boundary, so BOTH commands enforce it —
+/// never only the frontend picker's dialog filter.
+fn upload_ext_allowed(p: &std::path::Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .map(|e| {
+            crate::scanner::AUDIO_EXTS.contains(&e.as_str())
+                || crate::scanner::SUPPLEMENTAL_EXTS.contains(&e.as_str())
+                || e == "epub" // readable extra ABS stores alongside the audio
+        })
+        .unwrap_or(false)
+}
+
 /// Expands the Upload modal's picked paths into a flat file list with sizes.
 /// Directories contribute their DIRECT child files (no recursion — one upload is
-/// one item, so nested folders are more likely stray series trees than tracks),
-/// filtered to the scanner's audio + supplemental extension sets. Plain files
-/// pass through as-is — the picker dialog's filter already scoped them.
+/// one item, so nested folders are more likely stray series trees than tracks).
+/// Everything — including plain files the picker already scoped — is filtered to
+/// the upload extension allowlist.
 #[tauri::command]
 pub fn resolve_upload_files(paths: Vec<String>) -> Result<Vec<UploadFileEntry>, String> {
     fn entry_for(path: &std::path::Path) -> Option<UploadFileEntry> {
@@ -2495,17 +2510,6 @@ pub fn resolve_upload_files(paths: Vec<String>) -> Result<Vec<UploadFileEntry>, 
             size: meta.len(),
         })
     }
-    let allowed = |p: &std::path::Path| -> bool {
-        p.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_lowercase())
-            .map(|e| {
-                crate::scanner::AUDIO_EXTS.contains(&e.as_str())
-                    || crate::scanner::SUPPLEMENTAL_EXTS.contains(&e.as_str())
-                    || e == "epub" // readable extra ABS stores alongside the audio
-            })
-            .unwrap_or(false)
-    };
 
     let mut out = Vec::new();
     for p in &paths {
@@ -2515,14 +2519,16 @@ pub fn resolve_upload_files(paths: Vec<String>) -> Result<Vec<UploadFileEntry>, 
                 .map_err(|e| format!("Cannot read folder {p}: {e}"))?;
             for entry in entries.flatten() {
                 let child = entry.path();
-                if child.is_file() && allowed(&child) {
+                if child.is_file() && upload_ext_allowed(&child) {
                     if let Some(e) = entry_for(&child) {
                         out.push(e);
                     }
                 }
             }
-        } else if let Some(e) = entry_for(path) {
-            out.push(e);
+        } else if upload_ext_allowed(path) {
+            if let Some(e) = entry_for(path) {
+                out.push(e);
+            }
         }
     }
     // Stable case-insensitive name order so multi-track books list in track
@@ -2558,12 +2564,23 @@ pub async fn upload_media(
     }
 
     // Total size up front so every progress event can carry totalBytes.
+    // Re-validate each renderer-supplied path here too — this command, not the
+    // picker dialog or resolve_upload_files, is the privilege boundary. Without
+    // this, a compromised WebView could pass arbitrary readable files and
+    // exfiltrate them to the server under the user's account.
     let mut total_bytes: u64 = 0;
     for p in &file_paths {
-        total_bytes += tokio::fs::metadata(p)
+        let path = std::path::Path::new(p);
+        if !upload_ext_allowed(path) {
+            return Err(format!("Not an allowed upload file type: {p}"));
+        }
+        let meta = tokio::fs::metadata(p)
             .await
-            .map_err(|e| format!("Cannot read file {p}: {e}"))?
-            .len();
+            .map_err(|e| format!("Cannot read file {p}: {e}"))?;
+        if !meta.is_file() {
+            return Err(format!("Not a regular file: {p}"));
+        }
+        total_bytes += meta.len();
     }
 
     log::info!(

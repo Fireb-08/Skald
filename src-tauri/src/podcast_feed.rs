@@ -23,11 +23,20 @@ use crate::providers;
 /// arbitrary data into memory. Generous: decade-old feeds run single-digit MB.
 const MAX_FEED_BYTES: usize = 20 * 1024 * 1024;
 
+/// Scheme+host of a feed URL for log lines. Private feeds embed access keys in
+/// the query AND often in the path (per-subscriber UUID segments), so even a
+/// query-stripped URL is too much — diagnostics get the host only.
+pub(crate) fn feed_host(url: &str) -> String {
+    url.split_once("://")
+        .and_then(|(scheme, rest)| rest.split(['/', '?', '#']).next().map(|h| format!("{scheme}://{h}")))
+        .unwrap_or_else(|| "<invalid-url>".to_string())
+}
+
 /// Fetch a feed's XML text over HTTP. Kept tiny + dependency-light (reqwest is
 /// already in the graph) so the parser can be unit-reasoned without the network.
 pub async fn fetch_feed_text(url: &str) -> Result<String, String> {
     use futures_util::StreamExt;
-    log::info!(target: "skald::metadata", "podcast feed fetch url={url}");
+    log::info!(target: "skald::metadata", "podcast feed fetch host={}", feed_host(url));
     let client = reqwest::Client::builder()
         .user_agent("Skald/0.1 (local podcasts)")
         // Bounded timeouts so a wedged feed host fails predictably (see
@@ -46,7 +55,7 @@ pub async fn fetch_feed_text(url: &str) -> Result<String, String> {
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("feed body: {e}"))?;
         if body.len() + chunk.len() > MAX_FEED_BYTES {
-            log::warn!(target: "skald::metadata", "podcast feed exceeds {} MB cap url={url}", MAX_FEED_BYTES / (1024 * 1024));
+            log::warn!(target: "skald::metadata", "podcast feed exceeds {} MB cap host={}", MAX_FEED_BYTES / (1024 * 1024), feed_host(url));
             return Err(format!("feed exceeds the {} MB size limit", MAX_FEED_BYTES / (1024 * 1024)));
         }
         body.extend_from_slice(&chunk);

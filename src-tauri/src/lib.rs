@@ -22,6 +22,16 @@ pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+/// Strip the query/fragment from a URL before it reaches any log line or error
+/// string. Media URLs carry the session JWT in the query (`?token=…` — the
+/// token-in-URL pattern LibVLC requires, critical lesson 2), and remote
+/// image/feed URLs can embed access keys; none of that may land in skald.log
+/// or a user-visible error.
+pub fn redact_url(url: &str) -> String {
+    let cut = url.find(['?', '#']).unwrap_or(url.len());
+    if cut < url.len() { format!("{}?…", &url[..cut]) } else { url.to_string() }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // SessionManager is initialized without an AudioPlayer — libvlc.dll is
