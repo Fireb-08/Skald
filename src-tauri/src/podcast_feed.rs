@@ -517,3 +517,21 @@ pub fn build_opml(feeds: &[(String, String)]) -> String {
     out.push_str("  </body>\n</opml>\n");
     out
 }
+
+#[cfg(test)]
+mod feed_host_tests {
+    use super::feed_host;
+
+    #[test]
+    fn strips_path_and_query() {
+        assert_eq!(feed_host("https://example.com/premium/abc123/feed.xml?auth=tok"), "https://example.com");
+        assert_eq!(feed_host("http://feeds.host.net/show"), "http://feeds.host.net");
+        assert_eq!(feed_host("https://plain.host"), "https://plain.host");
+    }
+
+    #[test]
+    fn invalid_urls_do_not_leak() {
+        assert_eq!(feed_host("not a url"), "<invalid-url>");
+        assert_eq!(feed_host(""), "<invalid-url>");
+    }
+}

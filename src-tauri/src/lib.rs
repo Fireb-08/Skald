@@ -539,3 +539,23 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod redact_url_tests {
+    use super::redact_url;
+
+    #[test]
+    fn strips_query_and_fragment() {
+        // The exact shape session.rs builds: media URL + ?token=<jwt>.
+        assert_eq!(
+            redact_url("https://abs.host/api/items/x/file/track.m4b?token=eyJhbGciOi.abc.def"),
+            "https://abs.host/api/items/x/file/track.m4b?…"
+        );
+        assert_eq!(redact_url("https://host/path#frag"), "https://host/path?…");
+    }
+
+    #[test]
+    fn plain_urls_pass_through() {
+        assert_eq!(redact_url("https://host/cover.jpg"), "https://host/cover.jpg");
+    }
+}

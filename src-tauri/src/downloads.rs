@@ -268,3 +268,127 @@ pub fn record_stop_point(data_dir: &Path, item_id: &str, position: f64) -> Resul
     points.truncate(10);
     save_stop_points(data_dir, item_id, &points)
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+// Persistence regression tests (Testing Suite plan, Phase 1). Everything runs
+// against a tempfile dir — never the user's real downloads folder.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: &str) -> DownloadRecord {
+        DownloadRecord {
+            item_id: id.to_string(),
+            title: format!("Title {id}"),
+            author: "Author".to_string(),
+            file_path: format!("C:/nowhere/{id}.m4b"),
+            file_size: 123,
+            downloaded_at: 1_000,
+            server_deleted: false,
+        }
+    }
+
+    fn entry(id: &str, time: f64, recorded_at: i64) -> OfflineProgressEntry {
+        OfflineProgressEntry {
+            item_id: id.to_string(),
+            current_time: time,
+            duration: 3600.0,
+            progress: time / 3600.0,
+            is_finished: false,
+            recorded_at,
+        }
+    }
+
+    // Regression for the 2nd-pass review claim that write-temp-then-rename
+    // persistence "can fail after the first save" on Windows. It cannot:
+    // std::fs::rename maps to MoveFileExW + MOVEFILE_REPLACE_EXISTING, so
+    // replacing the live file works on every save — proven here by saving
+    // three times over the same destination.
+    #[test]
+    fn registry_survives_repeated_saves_over_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_record(dir.path(), record("a")).unwrap();
+        upsert_record(dir.path(), record("b")).unwrap();
+        upsert_record(
+            dir.path(),
+            DownloadRecord { title: "updated".to_string(), ..record("a") },
+        )
+        .unwrap();
+
+        let out = load_registry(dir.path());
+        assert_eq!(out.len(), 2, "upsert must replace, not duplicate");
+        assert_eq!(out.iter().find(|r| r.item_id == "a").unwrap().title, "updated");
+    }
+
+    #[test]
+    fn registry_missing_or_corrupt_file_loads_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_registry(dir.path()).is_empty(), "missing file = empty registry");
+
+        std::fs::write(dir.path().join("downloads.json"), b"{not json!").unwrap();
+        assert!(load_registry(dir.path()).is_empty(), "corrupt file = empty registry");
+    }
+
+    #[test]
+    fn remove_record_and_server_deleted_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_record(dir.path(), record("a")).unwrap();
+        upsert_record(dir.path(), record("b")).unwrap();
+
+        set_server_deleted(dir.path(), "a", true).unwrap();
+        let out = load_registry(dir.path());
+        assert!(out.iter().find(|r| r.item_id == "a").unwrap().server_deleted);
+        assert!(!out.iter().find(|r| r.item_id == "b").unwrap().server_deleted);
+
+        remove_record(dir.path(), "a").unwrap();
+        remove_record(dir.path(), "missing").unwrap(); // no-op, not an error
+        let out = load_registry(dir.path());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].item_id, "b");
+    }
+
+    #[test]
+    fn progress_queue_keeps_only_latest_entry_per_item() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_progress_entry(dir.path(), entry("a", 10.0, 1)).unwrap();
+        upsert_progress_entry(dir.path(), entry("a", 20.0, 2)).unwrap();
+        upsert_progress_entry(dir.path(), entry("b", 5.0, 3)).unwrap();
+
+        let queue = load_progress_queue(dir.path());
+        assert_eq!(queue.len(), 2);
+        let a = queue.iter().find(|e| e.item_id == "a").unwrap();
+        assert_eq!(a.current_time, 20.0, "newer tick replaces the older entry");
+    }
+
+    // The flush loop snapshots the queue, syncs to the server, then removes by
+    // (item_id, recorded_at). A tick that lands between snapshot and remove
+    // must survive — that's the lost-update race the QUEUE_LOCK + recorded_at
+    // matching guard against.
+    #[test]
+    fn progress_queue_remove_spares_entries_superseded_after_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_progress_entry(dir.path(), entry("a", 10.0, 1)).unwrap();
+        // A newer tick supersedes the snapshot the flush is holding…
+        upsert_progress_entry(dir.path(), entry("a", 30.0, 9)).unwrap();
+        // …so removing with the stale recorded_at must leave the new entry.
+        remove_progress_entry(dir.path(), "a", 1).unwrap();
+        let queue = load_progress_queue(dir.path());
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].current_time, 30.0);
+
+        // Matching recorded_at removes exactly the synced entry.
+        remove_progress_entry(dir.path(), "a", 9).unwrap();
+        assert!(load_progress_queue(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn stop_points_append_newest_first_and_cap_at_ten() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..12 {
+            record_stop_point(dir.path(), "book", i as f64).unwrap();
+        }
+        let points = load_stop_points(dir.path(), "book");
+        assert_eq!(points.len(), 10, "history capped at 10");
+        assert_eq!(points[0].position, 11.0, "newest first");
+    }
+}

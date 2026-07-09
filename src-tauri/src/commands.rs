@@ -3349,3 +3349,26 @@ pub async fn close_feed(server_url: String, feed_id: String) -> Result<(), Strin
     let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
     AbsClient::new(server_url).with_token(token).close_feed(&feed_id).await
 }
+
+#[cfg(test)]
+mod upload_validation_tests {
+    use super::upload_ext_allowed;
+    use std::path::Path;
+
+    // The Tauri command boundary must reject non-media files no matter what
+    // the frontend picker claimed (2nd-pass review P2). Note .txt/.nfo ARE
+    // allowed — they're supplemental liner-note sidecars (SUPPLEMENTAL_EXTS).
+    #[test]
+    fn rejects_non_media_files() {
+        for p in ["C:/secrets/id_rsa", "C:/keys/private.pem", "C:/app/skald.exe", "C:/x/archive.zip", "C:/x/noext", "C:/w/lib.dll"] {
+            assert!(!upload_ext_allowed(Path::new(p)), "must reject {p}");
+        }
+    }
+
+    #[test]
+    fn accepts_audio_supplemental_and_epub() {
+        for p in ["C:/b/track.m4b", "C:/b/track.MP3", "C:/b/track.flac", "C:/b/cover.jpg", "C:/b/book.epub"] {
+            assert!(upload_ext_allowed(Path::new(p)), "must accept {p}");
+        }
+    }
+}

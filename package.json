@@ -11,7 +11,11 @@
     "tauri": "tauri",
     "notices": "node scripts/generate-notices.mjs",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc --noEmit && cargo check --manifest-path src-tauri/Cargo.toml"
+    "test:front": "vitest run",
+    "test:front:watch": "vitest",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "verify:commands": "node scripts/check-tauri-commands.mjs",
+    "verify": "pnpm typecheck && pnpm test:front && pnpm verify:commands && pnpm test:rust"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",
@@ -25,10 +29,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^29.1.1",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^4.1.10"
   }
 }

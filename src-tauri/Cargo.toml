@@ -75,3 +75,8 @@ image = "0.25"
 # (Local Podcasts roadmap — see podcast_feed.rs).
 quick-xml = "0.36"
 
+[dev-dependencies]
+# Temp dirs for persistence tests (downloads registry, offline queue) — tests
+# must never touch the user's real Skald data (Testing Suite plan).
+tempfile = "3"
+
