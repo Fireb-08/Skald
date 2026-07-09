@@ -72,6 +72,8 @@ pub fn load_cover(item_id: &str, width: Option<u32>, version: u32) -> Result<Vec
 /// which the asset protocol is already allowed to serve.
 pub fn remote_cache_path(url: &str) -> PathBuf {
     use std::hash::{Hash, Hasher};
+    // DefaultHasher is fine HERE (unlike catalog ids): a cross-version output
+    // change only causes a one-time cache miss and re-download of the image.
     let mut h = std::collections::hash_map::DefaultHasher::new();
     url.hash(&mut h);
     cache_dir()

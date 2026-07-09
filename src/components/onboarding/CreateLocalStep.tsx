@@ -119,7 +119,7 @@ export default function CreateLocalStep({ st, created, onCreated, onSkip }: Crea
       </div>
 
       <div style={{ fontFamily: SANS, fontSize: 11.5, color: 'rgba(235,231,223,0.35)', maxWidth: 440, lineHeight: 1.5 }}>
-        You can add more local libraries, or remove this one, any time in Settings → Local Library.
+        You can add more local libraries, or remove this one, any time in Settings → Libraries → On this PC.
       </div>
     </div>
   );

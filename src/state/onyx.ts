@@ -95,7 +95,7 @@ async function loadItemsForLibrary(lib: Library, serverUrl: string): Promise<Lib
     // disk is authoritative for *existence*): this drops books deleted on disk and
     // picks up folders added outside Skald, without touching existing metadata.
     // Cheap — a directory walk + diff, no metadata re-derive for known items.
-    await scanLocalLibrary(lib.id).catch(e => console.error('[library] local reconcile failed:', e));
+    await scanLocalLibrary(lib.id).catch(e => log.error('library', 'local reconcile failed', { err: String(e) }));
     return getLocalLibraryItems(lib.id);
   }
   return fetchLibraryItems(serverUrl, lib.id);
@@ -501,6 +501,16 @@ const AUTH_FROM_KEYRING = '__keyring__';
     localStorage.removeItem('skald.authToken');
   }
   localStorage.removeItem('skald.password');
+  // The persisted user profile (`skald.user`) used to carry the raw token too
+  // (User.token is a required field on the login response). Strip it in place —
+  // setUser below keeps it stripped for all future writes.
+  const storedUser = localStorage.getItem('skald.user');
+  if (storedUser && storedUser.includes('"token"')) {
+    try {
+      const u = JSON.parse(storedUser) as User;
+      if (u.token) localStorage.setItem('skald.user', JSON.stringify({ ...u, token: '' }));
+    } catch { /* unparseable — leave it; the next setUser overwrites it stripped */ }
+  }
 }
 
 export function useOnyxState(): OnyxState {
@@ -549,8 +559,13 @@ export function useOnyxState(): OnyxState {
     try { return JSON.parse(stored) as User; } catch { return null; }
   });
   const setUser = useCallback((v: User | null) => {
-    localStorage.setItem('skald.user', v ? JSON.stringify(v) : '');
-    setUserRaw(v);
+    // Strip the token before the profile goes anywhere: login/authorize
+    // responses carry it as a required field, but the keyring is the only
+    // sanctioned store — a copy inside skald.user would quietly undo the
+    // keyring migration. Nothing in the frontend reads user.token.
+    const clean = v ? { ...v, token: '' } : null;
+    localStorage.setItem('skald.user', clean ? JSON.stringify(clean) : '');
+    setUserRaw(clean);
   }, []);
 
   // permissions.upload from /api/me — gates the shelf Upload button for
@@ -637,7 +652,7 @@ export function useOnyxState(): OnyxState {
       // indicator (it may have been set if the app launched from disk cache).
       setIsOffline(false);
     } catch (e) {
-      console.error('[refreshLibrary] failed:', e);
+      log.error('library', 'refreshLibrary failed', { err: String(e) });
     }
   }, [serverUrl, currentLibraryId, pickActiveLibrary]);
 
@@ -658,16 +673,16 @@ export function useOnyxState(): OnyxState {
       // Only the ABS shelf is cached for offline launch; local items live in the
       // catalog already, so caching them would just duplicate state.
       if (lib?.source !== 'local') {
-        saveLibraryCache(items).catch(e => console.error('[library] cache save failed:', e));
+        saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
       } else {
         // Fold this local library's catalog progress into mediaProgress so cover
         // overlays and Pick-it-up reflect local playback.
         getLocalLibraryProgress(lib.id)
           .then(lp => setMediaProgress(prev => mergeProgress(prev, lp)))
-          .catch(e => console.error('[library] local progress load failed:', e));
+          .catch(e => log.error('library', 'local progress load failed', { err: String(e) }));
       }
     } catch (e) {
-      console.error('[setActiveLibrary] failed:', e);
+      log.error('library', 'setActiveLibrary failed', { err: String(e) });
     } finally {
       setLibraryLoadingRaw(false);
     }
@@ -711,7 +726,7 @@ export function useOnyxState(): OnyxState {
         const flat = lps.flat();
         if (flat.length) setMediaProgress(prev => mergeProgress(prev, flat));
       })
-      .catch(e => console.error('[progress] local re-merge after server replace failed:', e));
+      .catch(e => log.error('library', 'local progress re-merge after server refresh failed', { err: String(e) }));
   }, []);
 
   // ── Downloads registry ──────────────────────────────────────────────────────
@@ -731,7 +746,7 @@ export function useOnyxState(): OnyxState {
     // Initial load — reads the registry from disk; works before any server connection.
     getDownloads()
       .then(setDownloads)
-      .catch(e => console.error('[downloads] initial load failed:', e));
+      .catch(e => log.error('downloads', 'initial registry load failed', { err: String(e) }));
 
     // Re-load whenever a download completes. The download-complete event fires
     // after ZIP extraction and registry write, so getDownloads() returns the
@@ -740,7 +755,7 @@ export function useOnyxState(): OnyxState {
     listen('download-complete', () => {
       getDownloads()
         .then(setDownloads)
-        .catch(e => console.error('[downloads] refresh after complete failed:', e));
+        .catch(e => log.error('downloads', 'registry refresh after complete failed', { err: String(e) }));
     }).then(fn => { unlisten = fn; });
 
     return () => { unlisten?.(); };
@@ -775,14 +790,14 @@ export function useOnyxState(): OnyxState {
             }
           }
         } catch (ce) {
-          console.error('[library] cache load also failed:', ce);
+          log.error('library', 'cache load also failed', { err: String(ce) });
         }
       }
 
       // ── Local libraries (always — catalog read, no server needed) ─────────
       let localLibs: Library[] = [];
       try { localLibs = await getLocalLibraries(); }
-      catch (e) { console.error('[library] local libraries load failed:', e); }
+      catch (e) { log.error('library', 'local libraries load failed', { err: String(e) }); }
       if (cancelled) return;
 
       const allLibs = [...absLibs, ...localLibs];
@@ -805,19 +820,19 @@ export function useOnyxState(): OnyxState {
         // Cache only the ABS shelf for offline launch; local items already
         // persist in the catalog.
         if (activeLib.source !== 'local') {
-          saveLibraryCache(items).catch(e => console.error('[library] cache save failed:', e));
+          saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
         } else {
           getLocalLibraryProgress(activeLib.id)
             .then(lp => { if (!cancelled) setMediaProgress(prev => mergeProgress(prev, lp)); })
-            .catch(e => console.error('[library] local progress load failed:', e));
+            .catch(e => log.error('library', 'local progress load failed', { err: String(e) }));
         }
       } catch (e) {
-        console.error('[library] active library load failed:', e);
+        log.error('library', 'active library load failed', { err: String(e) });
       }
 
       // Flush any queued offline progress once a server is reachable.
       if (canQueryServer) {
-        flushOfflineProgress(serverUrl).catch(e => console.error('[offline] startup flush failed:', e));
+        flushOfflineProgress(serverUrl).catch(e => log.error('sync', 'offline progress startup flush failed', { err: String(e) }));
       }
       if (!cancelled) setLibraryLoadingRaw(false);
     })();
@@ -844,10 +859,12 @@ export function useOnyxState(): OnyxState {
         // Capture the upload permission for the shelf Upload button gate.
         setUploadPerm(!!me.permissions?.upload);
         // Refresh user type from server — merge into stored user record and persist.
+        // Deliberately does NOT carry me.token forward: the profile is tokenless
+        // (setUser strips it anyway); the keyring alone holds the session token.
         if (me.type !== undefined) {
           const storedRaw = localStorage.getItem('skald.user');
           const base = storedRaw ? (JSON.parse(storedRaw) as User) : {} as User;
-          setUser({ ...base, id: me.id, username: me.username, token: me.token, type: me.type });
+          setUser({ ...base, id: me.id, username: me.username, token: '', type: me.type });
         }
         const resolvedId = userId || me.id;
         if (!userId && me.id) setUserId(me.id);
@@ -861,10 +878,10 @@ export function useOnyxState(): OnyxState {
           const ss = await fetchServerSettings(serverUrl);
           if (!cancelled) setServerSettings(ss);
         } catch (e) {
-          console.error('Server settings refresh failed', e);
+          log.error('sync', 'server settings refresh failed', { err: String(e) });
         }
       } catch (e) {
-        console.error('Post-library fetch failed', e);
+        log.error('sync', 'post-library /api/me fetch failed', { err: String(e) });
       }
     }, 2000);
     return () => { cancelled = true; clearTimeout(t); };
@@ -930,7 +947,7 @@ export function useOnyxState(): OnyxState {
           // are available for offline playback. The bulk library endpoint returns
           // chapters: [] — only the single-item fetchItem endpoint has real data.
           saveChapterCache(currentBookId, item.media.chapters)
-            .catch(e => console.error('[chapters] cache save failed:', e));
+            .catch(e => log.error('playback', 'chapter cache save failed', { err: String(e) }));
         } else {
           // Server returned the item but with no chapters — unusual but possible
           // on some ABS versions. The per-item cache may still have real data
@@ -942,11 +959,11 @@ export function useOnyxState(): OnyxState {
                 setCurrentBookChapters(bookChapters({ media: { chapters: cached } } as LibraryItem));
               }
             })
-            .catch(e => console.error('[chapters] cache load (empty-response path) failed:', e));
+            .catch(e => log.error('playback', 'chapter cache load (empty-response path) failed', { err: String(e) }));
         }
       })
       .catch(async e => {
-        console.error('[chapters] fetchItem failed:', e);
+        log.error('playback', 'chapter fetchItem failed', { err: String(e) });
         if (cancelled) return;
         // The bulk library endpoint sends chapters: [] — the per-item cache written
         // by the online path above is the only source with real chapter data.
@@ -957,7 +974,7 @@ export function useOnyxState(): OnyxState {
             setCurrentBookChapters(bookChapters({ media: { chapters: cached } } as LibraryItem));
           }
         } catch (ce) {
-          console.error('[chapters] cache load failed:', ce);
+          log.error('playback', 'chapter cache load failed', { err: String(ce) });
         }
       });
     return () => { cancelled = true; };
@@ -1146,8 +1163,9 @@ export function useOnyxState(): OnyxState {
   useEffect(() => {
     if (!serverUrl || library.length === 0) return;
     closeAllOpenSessions(serverUrl)
-      .then(n => { if (n > 0) console.log(`[startup] closed ${n} ghost session(s)`); })
-      .catch(console.error); // non-fatal — stale sessions are a cosmetic issue
+      .then(n => { if (n > 0) log.info('sync', 'startup ghost-session cleanup', { closed: n }); })
+      // non-fatal — stale sessions are a cosmetic issue
+      .catch(e => log.warn('sync', 'ghost-session cleanup failed', { err: String(e) }));
   }, [serverUrl, library.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
@@ -1362,7 +1380,7 @@ export function useOnyxState(): OnyxState {
           setPosition(update.currentTime);
         }
       } catch (e) {
-        console.error('[live progress] parse failed', e);
+        log.error('sync', 'live progress parse failed', { err: String(e) });
       }
     }).then(fn => { unlisten = fn; });
 
@@ -1396,7 +1414,7 @@ export function useOnyxState(): OnyxState {
         if (raw.libraryId !== currentLibraryIdRef.current) return;
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => [...prev, item]);
-      } catch (e) { console.error('library-item-added parse failed', e); }
+      } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
     }).then(fn => { unlistenAdded = fn; });
 
     // item_updated — metadata, cover, or chapters changed; merge the new
@@ -1407,7 +1425,7 @@ export function useOnyxState(): OnyxState {
         if (raw.libraryId !== currentLibraryIdRef.current) return;
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
-      } catch (e) { console.error('library-item-updated parse failed', e); }
+      } catch (e) { log.error('sync', 'library-item-updated parse failed', { err: String(e) }); }
     }).then(fn => { unlistenUpdated = fn; });
 
     // item_removed — book deleted from the server; remove it from the shelf and
@@ -1429,14 +1447,14 @@ export function useOnyxState(): OnyxState {
           if (!prev.some(d => d.itemId === payload.id)) return prev; // not downloaded — no change
           // Persist the flag to disk so it survives a reload.
           markServerDeleted(payload.id).catch(e =>
-            console.error('[downloads] mark server-deleted failed:', e)
+            log.error('downloads', 'mark server-deleted failed', { err: String(e) })
           );
           // Update local state immediately so the badge updates without a disk round-trip.
           return prev.map(d =>
             d.itemId === payload.id ? { ...d, serverDeleted: true } : d
           );
         });
-      } catch (e) { console.error('library-item-removed parse failed', e); }
+      } catch (e) { log.error('sync', 'library-item-removed parse failed', { err: String(e) }); }
     }).then(fn => { unlistenRemoved = fn; });
 
     // Tear down all three listeners together on unmount or auth context change.
@@ -1472,7 +1490,7 @@ export function useOnyxState(): OnyxState {
         // Permissions may have been edited during the outage — refresh the gate.
         setUploadPerm(!!me.permissions?.upload);
       } catch (e) {
-        console.error('[sync] resync failed:', e);
+        log.error('sync', 'resync after reconnect failed', { err: String(e) });
       }
     };
 
@@ -1531,7 +1549,7 @@ export function useOnyxState(): OnyxState {
       // setPlaying alone only updates the React icon — LibVLC keeps running.
       if (e.code === 'Space') {
         e.preventDefault();
-        if (playingRef.current) { pauseAudio().catch(console.error); setPlaying(false); }
+        if (playingRef.current) { pauseAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) })); setPlaying(false); }
         else {
           // Resume: apply the auto-rewind-on-resume preference, mirroring
           // resumePlayback() in playbook.ts (this handler lives inside the hook
@@ -1540,9 +1558,9 @@ export function useOnyxState(): OnyxState {
           if (rw > 0 && positionRef.current > 0) {
             const target = Math.max(0, positionRef.current - rw);
             setPosition(target);
-            seekAudio(target).catch(console.error);
+            seekAudio(target).catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
           }
-          playAudio().catch(console.error);
+          playAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
           setPlaying(true);
         }
       }
@@ -1554,12 +1572,12 @@ export function useOnyxState(): OnyxState {
       if (e.code === 'ArrowLeft'  && !e.metaKey && !e.ctrlKey && currentBookIdRef.current) {
         const np = Math.max(0, positionRef.current - skipSeconds());
         setPosition(np);
-        seekAudio(np).catch(console.error);
+        seekAudio(np).catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
       }
       if (e.code === 'ArrowRight' && !e.metaKey && !e.ctrlKey && currentBookIdRef.current) {
         const np = Math.min(bookSecs, positionRef.current + skipSeconds());
         setPosition(np);
-        seekAudio(np).catch(console.error);
+        seekAudio(np).catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();

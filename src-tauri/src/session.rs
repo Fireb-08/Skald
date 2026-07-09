@@ -207,7 +207,11 @@ impl SessionManager {
             self.spawn_advance_task(Arc::clone(&active));
         }
 
-        Ok(session.current_time)
+        // Return the position the player actually loaded at (honours a caller
+        // start_time override) — the frontend seeds st.position from this, and
+        // returning the server's stale currentTime made the UI open a chapter/
+        // bookmark jump at the wrong spot until the first playback tick.
+        Ok(load_time)
     }
 
     /// Spawn the track-advance loop for the currently-loaded multi-track book. The

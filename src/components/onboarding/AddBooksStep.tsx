@@ -105,8 +105,8 @@ export default function AddBooksStep({ st, library, onContinue }: AddBooksStepPr
           chapters and files it under Author / Series / Title automatically.
         </RouteCard>
         <RouteCard badge="Manual" title="Add books button">
-          Use <span style={{ color: 'rgba(235,231,223,0.85)' }}>Add books…</span> (here, and in Settings → Local
-          Library) to pick audiobook files directly. Same filing, on demand.
+          Use <span style={{ color: 'rgba(235,231,223,0.85)' }}>Add books…</span> (here, and in Settings → Libraries
+          → On this PC) to pick audiobook files directly. Same filing, on demand.
         </RouteCard>
       </div>
 

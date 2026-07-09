@@ -339,7 +339,16 @@ pub fn create_library(name: &str, parent_path: &str, media_type: &str) -> Result
 
     let root_str = root.to_string_lossy().into_owned();
     let staging_str = staging.to_string_lossy().into_owned();
-    let id = stable_lib_id(&root_str);
+    // Idempotency by natural key: reuse the stored id when this root is already
+    // catalogued. Relying on stable_lib_id hashing identically forever is not
+    // safe — DefaultHasher's output is no cross-version contract, so a future
+    // toolchain could mint a different id for the same path and duplicate the
+    // library. With this lookup the hash only matters at first creation.
+    let existing: Option<String> = conn
+        .query_row("SELECT id FROM libraries WHERE root_path = ?1", params![root_str], |r| r.get(0))
+        .optional()
+        .map_err(|e| format!("library lookup: {e}"))?;
+    let id = existing.unwrap_or_else(|| stable_lib_id(&root_str));
     conn.execute(
         "INSERT OR IGNORE INTO libraries (id, name, media_type, root_path, staging_path, organize_mode, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, 'copy', ?6)",
@@ -1285,7 +1294,17 @@ pub fn subscribe_podcast(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let id = podcast_id_for(feed_url);
+    // Idempotency by natural key (see create_library): reuse the stored id for
+    // an already-subscribed feed so identity never depends on hash stability.
+    let id: String = conn
+        .query_row(
+            "SELECT id FROM podcasts WHERE library_id = ?1 AND feed_url = ?2",
+            params![library_id, feed_url],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("podcast lookup: {e}"))?
+        .unwrap_or_else(|| podcast_id_for(feed_url));
     let root = podcasts_root(&conn, library_id)?;
     let folder = root.join(ingest::sanitize_component(&title));
     std::fs::create_dir_all(&folder).map_err(|e| format!("create podcast folder: {e}"))?;

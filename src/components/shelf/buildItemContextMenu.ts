@@ -3,6 +3,7 @@ import type { ContextMenuItem, ContextMenuSection } from '../ContextMenu';
 import { updateProgress, deleteProgress, closeActiveSession, rescanItem, deleteItem, downloadItem, removeDownload, deleteLocalItem, setLocalProgress, seekAudio, pauseAudio } from '../../api/abs';
 // Canonical play function — routes through shared resume and UI-sync logic
 import { playBook } from '../../api/playbook';
+import { log } from '../../lib/log';
 
 // Guard against double-invocation (React portal event bubbling / StrictMode).
 const pendingItems = new Set<string>();
@@ -97,9 +98,10 @@ export function buildItemContextMenu(
               // ABS serves multi-file audiobooks as a zip archive at this endpoint.
               const fileName = `${title}.zip`;
               downloadItem(st.serverUrl, item.id, fileName, title, author)
-                .then(path => console.log('[download] completed:', path))
+                // Item id only — no local paths or titles in the log stream.
+                .then(() => log.info('downloads', 'download completed', { itemId: item.id }))
                 .catch(e => {
-                  console.error('[download] failed:', e);
+                  log.error('downloads', 'download failed', { itemId: item.id, err: String(e) });
                   st.setToast({ message: `Download failed: ${String(e)}`, type: 'error' });
                 });
             },

@@ -77,6 +77,9 @@ export default function Settings({ st, onLogout }: SettingsProps) {
     localStorage.removeItem('skald.userId');
     localStorage.removeItem('skald.username');
     localStorage.removeItem('skald.sessionId');
+    // The persisted profile is tokenless, but a signed-out machine shouldn't
+    // keep the previous account's identity around either.
+    localStorage.removeItem('skald.user');
     // Also exit local-only mode so the auth gate shows the login screen again.
     st.setLocalMode(false);
     onLogout();
