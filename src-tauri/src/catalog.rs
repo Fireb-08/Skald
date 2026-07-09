@@ -327,6 +327,12 @@ fn get_library(conn: &Connection, id: &str) -> Result<Value, String> {
 /// returns the existing row. (Folder name is sanitized for the filesystem.)
 pub fn create_library(name: &str, parent_path: &str, media_type: &str) -> Result<Value, String> {
     let conn = open()?;
+    create_library_conn(&conn, name, parent_path, media_type)
+}
+
+// The `_conn` split (here and below) is the test seam (Test Seams roadmap):
+// in-module tests run these against a tempfile DB, never the real catalog.
+fn create_library_conn(conn: &Connection, name: &str, parent_path: &str, media_type: &str) -> Result<Value, String> {
     // Only "book" and "podcast" are supported local media types; default unknown
     // values to "book" so a bad caller can never write an unroutable library.
     let media_type = if media_type == "podcast" { "podcast" } else { "book" };
@@ -356,7 +362,7 @@ pub fn create_library(name: &str, parent_path: &str, media_type: &str) -> Result
     )
     .map_err(|e| format!("create library: {e}"))?;
     log::info!(target: "skald::library", "catalog: create library id={id} type={media_type} root={root_str}");
-    get_library(&conn, &id)
+    get_library(conn, &id)
 }
 
 /// The `Podcasts/` directory of a local library — where each subscribed podcast's
@@ -367,6 +373,10 @@ fn podcasts_root(conn: &Connection, library_id: &str) -> Result<PathBuf, String>
 
 pub fn list_libraries() -> Result<Vec<Value>, String> {
     let conn = open()?;
+    list_libraries_conn(&conn)
+}
+
+fn list_libraries_conn(conn: &Connection) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare(&format!("SELECT {LIB_COLS} FROM libraries ORDER BY name"))
         .map_err(|e| format!("list libraries: {e}"))?;
@@ -404,6 +414,10 @@ pub fn set_config(
 
 pub fn delete_library(id: &str) -> Result<(), String> {
     let conn = open()?;
+    delete_library_conn(&conn, id)
+}
+
+fn delete_library_conn(conn: &Connection, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM items WHERE library_id = ?1", params![id])
         .map_err(|e| format!("delete library items: {e}"))?;
     conn.execute("DELETE FROM libraries WHERE id = ?1", params![id])
@@ -536,6 +550,10 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
 
 pub fn list_items(library_id: &str) -> Result<Vec<Value>, String> {
     let conn = open()?;
+    list_items_conn(&conn, library_id)
+}
+
+fn list_items_conn(conn: &Connection, library_id: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare("SELECT item_json FROM items WHERE library_id = ?1")
         .map_err(|e| format!("list items: {e}"))?;
@@ -580,6 +598,10 @@ fn media_progress_json(item_id: &str, episode_id: &str, current_time: f64, durat
 /// `libraryItemId|episodeId`, so book and episode rows never collide.
 pub fn set_progress(item_id: &str, episode_id: Option<&str>, current_time: f64, duration: f64, is_finished: bool) -> Result<(), String> {
     let conn = open()?;
+    set_progress_conn(&conn, item_id, episode_id, current_time, duration, is_finished)
+}
+
+fn set_progress_conn(conn: &Connection, item_id: &str, episode_id: Option<&str>, current_time: f64, duration: f64, is_finished: bool) -> Result<(), String> {
     let ep = episode_id.unwrap_or("");
     // Books live in `items`; podcasts live in `podcasts` — try both so the
     // library_id stamp (used by list_progress for Pick-it-up) is always set.
@@ -629,6 +651,10 @@ pub fn set_progress(item_id: &str, episode_id: Option<&str>, current_time: f64, 
 
 pub fn get_progress(item_id: &str, episode_id: Option<&str>) -> Result<Option<Value>, String> {
     let conn = open()?;
+    get_progress_conn(&conn, item_id, episode_id)
+}
+
+fn get_progress_conn(conn: &Connection, item_id: &str, episode_id: Option<&str>) -> Result<Option<Value>, String> {
     let ep = episode_id.unwrap_or("");
     conn.query_row(
         // "current_time" MUST be quoted — unquoted it resolves to the CURRENT_TIME
@@ -643,6 +669,10 @@ pub fn get_progress(item_id: &str, episode_id: Option<&str>) -> Result<Option<Va
 
 pub fn list_progress(library_id: &str) -> Result<Vec<Value>, String> {
     let conn = open()?;
+    list_progress_conn(&conn, library_id)
+}
+
+fn list_progress_conn(conn: &Connection, library_id: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         // "current_time" MUST be quoted — unquoted it resolves to the CURRENT_TIME
         // keyword (wall-clock TEXT), failing the f64 read below so list_progress
@@ -666,8 +696,12 @@ fn bookmark_json(id: &str, item_id: &str, title: &str, time: f64) -> Value {
 }
 
 pub fn add_bookmark(item_id: &str, title: &str, time: f64) -> Result<Value, String> {
-    use std::hash::{Hash, Hasher};
     let conn = open()?;
+    add_bookmark_conn(&conn, item_id, title, time)
+}
+
+fn add_bookmark_conn(conn: &Connection, item_id: &str, title: &str, time: f64) -> Result<Value, String> {
+    use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     format!("{item_id}:{time}:{}", now_ms()).hash(&mut h);
     let id = format!("bm_{:016x}", h.finish());
@@ -681,6 +715,10 @@ pub fn add_bookmark(item_id: &str, title: &str, time: f64) -> Result<Value, Stri
 
 pub fn list_bookmarks(item_id: &str) -> Result<Vec<Value>, String> {
     let conn = open()?;
+    list_bookmarks_conn(&conn, item_id)
+}
+
+fn list_bookmarks_conn(conn: &Connection, item_id: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare("SELECT id, item_id, title, time FROM bookmarks WHERE item_id = ?1 ORDER BY time")
         .map_err(|e| format!("list bookmarks: {e}"))?;
@@ -694,6 +732,10 @@ pub fn list_bookmarks(item_id: &str) -> Result<Vec<Value>, String> {
 
 pub fn delete_bookmark(id: &str) -> Result<(), String> {
     let conn = open()?;
+    delete_bookmark_conn(&conn, id)
+}
+
+fn delete_bookmark_conn(conn: &Connection, id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM bookmarks WHERE id = ?1", params![id])
         .map_err(|e| format!("delete bookmark: {e}"))?;
     Ok(())
@@ -1293,6 +1335,16 @@ pub fn subscribe_podcast(
     auto_download: bool,
 ) -> Result<(String, String, Option<String>), String> {
     let conn = open()?;
+    subscribe_podcast_conn(&conn, library_id, feed, feed_url, auto_download)
+}
+
+fn subscribe_podcast_conn(
+    conn: &Connection,
+    library_id: &str,
+    feed: &Value,
+    feed_url: &str,
+    auto_download: bool,
+) -> Result<(String, String, Option<String>), String> {
     let metadata = feed.get("metadata").cloned().unwrap_or_else(|| json!({}));
     let title = metadata.get("title").and_then(|v| v.as_str()).unwrap_or("Podcast").to_string();
     let cover_url = metadata
@@ -1312,7 +1364,7 @@ pub fn subscribe_podcast(
         .optional()
         .map_err(|e| format!("podcast lookup: {e}"))?
         .unwrap_or_else(|| podcast_id_for(feed_url));
-    let root = podcasts_root(&conn, library_id)?;
+    let root = podcasts_root(conn, library_id)?;
     let folder = root.join(ingest::sanitize_component(&title));
     std::fs::create_dir_all(&folder).map_err(|e| format!("create podcast folder: {e}"))?;
     let folder_str = folder.to_string_lossy().into_owned();
@@ -1338,7 +1390,7 @@ pub fn subscribe_podcast(
     .map_err(|e| format!("insert podcast: {e}"))?;
 
     if let Some(eps) = feed.get("episodes").and_then(|e| e.as_array()) {
-        upsert_episodes_conn(&conn, &id, eps)?;
+        upsert_episodes_conn(conn, &id, eps)?;
     }
     // Host only — private feed URLs carry subscriber tokens (see feed_host).
     log::info!(target: "skald::library", "podcast subscribe lib={library_id} title={title} feed={}", crate::podcast_feed::feed_host(feed_url));
@@ -1435,6 +1487,10 @@ fn podcast_episodes(conn: &Connection, podcast_id: &str) -> Result<Vec<Value>, S
 /// branch of `loadItemsForLibrary`.
 pub fn list_podcast_items(library_id: &str) -> Result<Vec<Value>, String> {
     let conn = open()?;
+    list_podcast_items_conn(&conn, library_id)
+}
+
+fn list_podcast_items_conn(conn: &Connection, library_id: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
         .prepare("SELECT id, item_json, folder_path FROM podcasts WHERE library_id = ?1 ORDER BY title")
         .map_err(|e| format!("list podcasts: {e}"))?;
@@ -1450,7 +1506,7 @@ pub fn list_podcast_items(library_id: &str) -> Result<Vec<Value>, String> {
             Ok(v) => v,
             Err(e) => { log::warn!(target: "skald::library", "bad podcast item_json ({e})"); continue; }
         };
-        let episodes = podcast_episodes(&conn, &id)?;
+        let episodes = podcast_episodes(conn, &id)?;
         let has_cover = Path::new(&folder).join("cover.jpg").is_file();
         if let Some(media) = item.get_mut("media").and_then(|m| m.as_object_mut()) {
             let n = episodes.len();
@@ -1523,6 +1579,10 @@ pub fn episode_audio_path(podcast_id: &str, episode_id: &str) -> Result<Option<S
 /// land it on the right row.
 pub fn set_episode_downloaded(podcast_id: &str, guid: &str, audio_path: &str) -> Result<(), String> {
     let conn = open()?;
+    set_episode_downloaded_conn(&conn, podcast_id, guid, audio_path)
+}
+
+fn set_episode_downloaded_conn(conn: &Connection, podcast_id: &str, guid: &str, audio_path: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE podcast_episodes SET audio_path = ?1, downloaded = 1 WHERE podcast_id = ?2 AND guid = ?3",
         params![audio_path, podcast_id, guid],
@@ -1741,5 +1801,163 @@ fn prune_upwards(start: &Path, stop_root: &Path) {
             Some(p) => cur = p.to_path_buf(),
             None => break,
         }
+    }
+}
+
+// Temp-DB integration tests over the `_conn` seam (Test Seams roadmap). Each
+// test opens its OWN catalog.db inside a tempfile dir — the real app catalog
+// is never touched, and tests stay parallel-safe with no shared state.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn test_conn() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conn = Connection::open(dir.path().join("catalog.db")).expect("open temp db");
+        init_schema(&conn).expect("init schema");
+        (dir, conn)
+    }
+
+    /// Insert a minimal items row (list_items/set_progress only read
+    /// library_id + item_json; source_path keeps the unique path index happy).
+    fn insert_item(conn: &Connection, id: &str, library_id: &str, item_json: &str) {
+        conn.execute(
+            "INSERT INTO items (id, library_id, source_path, item_json, added_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, 0)",
+            params![id, library_id, format!("src/{id}"), item_json],
+        )
+        .expect("insert item");
+    }
+
+    #[test]
+    fn library_create_list_delete_round_trip() {
+        let (dir, conn) = test_conn();
+        let parent = dir.path().to_string_lossy().into_owned();
+
+        let lib = create_library_conn(&conn, "My Books", &parent, "book").unwrap();
+        let id = lib["id"].as_str().unwrap().to_string();
+        assert_eq!(lib["source"], json!("local"));
+        assert_eq!(lib["mediaType"], json!("book"));
+        // The managed folder skeleton exists on disk.
+        let root = lib["folders"][0]["fullPath"].as_str().unwrap();
+        assert!(Path::new(root).join(STAGING_DIR).is_dir());
+        assert!(Path::new(root).join(UNIDENTIFIED_DIR).is_dir());
+
+        // Idempotent: re-creating the same path reuses the stored id.
+        let again = create_library_conn(&conn, "My Books", &parent, "book").unwrap();
+        assert_eq!(again["id"].as_str().unwrap(), id);
+        assert_eq!(list_libraries_conn(&conn).unwrap().len(), 1);
+
+        delete_library_conn(&conn, &id).unwrap();
+        assert!(list_libraries_conn(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn progress_scopes_by_episode_and_preserves_finished_flag() {
+        let (_dir, conn) = test_conn();
+        insert_item(&conn, "book1", "lib1", "{}");
+
+        // Book-level and episode-level rows never collide (composite key).
+        set_progress_conn(&conn, "book1", None, 100.0, 3600.0, false).unwrap();
+        set_progress_conn(&conn, "book1", Some("ep1"), 50.0, 1800.0, false).unwrap();
+        let book = get_progress_conn(&conn, "book1", None).unwrap().unwrap();
+        let ep = get_progress_conn(&conn, "book1", Some("ep1")).unwrap().unwrap();
+        assert_eq!(book["currentTime"], json!(100.0));
+        assert_eq!(ep["currentTime"], json!(50.0));
+        assert_eq!(ep["episodeId"], json!("ep1"));
+
+        // Finish the book, then simulate the playback tick writing is_finished=false
+        // at/after the finished position — the flag must survive (desync fix).
+        set_progress_conn(&conn, "book1", None, 3600.0, 3600.0, true).unwrap();
+        set_progress_conn(&conn, "book1", None, 3600.0, 3600.0, false).unwrap();
+        let p = get_progress_conn(&conn, "book1", None).unwrap().unwrap();
+        assert_eq!(p["isFinished"], json!(true), "forward tick must not un-finish");
+
+        // A clear backward jump (re-listen from the start) is allowed to clear it.
+        set_progress_conn(&conn, "book1", None, 5.0, 3600.0, false).unwrap();
+        let p = get_progress_conn(&conn, "book1", None).unwrap().unwrap();
+        assert_eq!(p["isFinished"], json!(false), "replay must clear the flag");
+
+        // list_progress is scoped by the library stamped at write time.
+        assert_eq!(list_progress_conn(&conn, "lib1").unwrap().len(), 2);
+        assert!(list_progress_conn(&conn, "other").unwrap().is_empty());
+    }
+
+    #[test]
+    fn bookmarks_add_list_delete_round_trip() {
+        let (_dir, conn) = test_conn();
+        let later = add_bookmark_conn(&conn, "book1", "later", 300.0).unwrap();
+        add_bookmark_conn(&conn, "book1", "early", 30.0).unwrap();
+
+        let list = list_bookmarks_conn(&conn, "book1").unwrap();
+        assert_eq!(list.len(), 2);
+        // Ordered by time, not insertion.
+        assert_eq!(list[0]["title"], json!("early"));
+        assert_eq!(list[1]["title"], json!("later"));
+
+        delete_bookmark_conn(&conn, later["id"].as_str().unwrap()).unwrap();
+        let list = list_bookmarks_conn(&conn, "book1").unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["title"], json!("early"));
+    }
+
+    #[test]
+    fn podcast_subscribe_idempotent_and_upsert_preserves_download_state() {
+        let (dir, conn) = test_conn();
+        let parent = dir.path().to_string_lossy().into_owned();
+        let lib = create_library_conn(&conn, "Pods", &parent, "podcast").unwrap();
+        let lib_id = lib["id"].as_str().unwrap().to_string();
+
+        let ep = |guid: &str, title: &str| json!({ "guid": guid, "title": title, "enclosure": { "url": format!("https://x/{guid}.mp3") } });
+        let feed = json!({
+            "metadata": { "title": "Show", "imageUrl": "https://x/art.jpg" },
+            "episodes": [ep("g1", "One"), ep("g2", "Two"), json!({ "title": "identity-less" })],
+        });
+
+        let (pod_id, _cover, cover_url) = subscribe_podcast_conn(&conn, &lib_id, &feed, "https://x/feed.xml", false).unwrap();
+        assert_eq!(cover_url.as_deref(), Some("https://x/art.jpg"));
+        // The guid-less episode is skipped (no identity → cannot dedupe).
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM podcast_episodes WHERE podcast_id = ?1", params![pod_id], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
+
+        // Same feed URL → same podcast id (idempotent by natural key).
+        let (again, _, _) = subscribe_podcast_conn(&conn, &lib_id, &feed, "https://x/feed.xml", false).unwrap();
+        assert_eq!(again, pod_id);
+
+        // Download one episode, then re-poll with refreshed metadata: the
+        // episode_json updates but downloaded/audio_path survive (regression #10).
+        set_episode_downloaded_conn(&conn, &pod_id, "g1", "C:/pods/one.mp3").unwrap();
+        upsert_episodes_conn(&conn, &pod_id, &[ep("g1", "One (renamed)"), ep("g2", "Two")]).unwrap();
+        let (dl, path, ep_json): (i64, Option<String>, String) = conn
+            .query_row(
+                "SELECT downloaded, audio_path, episode_json FROM podcast_episodes WHERE podcast_id = ?1 AND guid = 'g1'",
+                params![pod_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(dl, 1, "re-poll must not clear the downloaded flag");
+        assert_eq!(path.as_deref(), Some("C:/pods/one.mp3"));
+        assert!(ep_json.contains("One (renamed)"), "re-poll must refresh feed metadata");
+
+        // The assembled item carries only downloaded episodes, flagged playable.
+        let items = list_podcast_items_conn(&conn, &lib_id).unwrap();
+        assert_eq!(items.len(), 1);
+        let eps = items[0]["media"]["episodes"].as_array().unwrap();
+        assert_eq!(eps.len(), 1);
+        assert_eq!(eps[0]["localPath"], json!("C:/pods/one.mp3"));
+    }
+
+    #[test]
+    fn corrupt_item_json_is_skipped_not_fatal() {
+        let (_dir, conn) = test_conn();
+        insert_item(&conn, "good", "lib1", r#"{"id":"good"}"#);
+        insert_item(&conn, "bad", "lib1", "{not json");
+
+        // Designed degradation: the bad row logs a warning and is skipped; the
+        // rest of the shelf still loads (no panic, no hard error).
+        let items = list_items_conn(&conn, "lib1").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], json!("good"));
     }
 }
