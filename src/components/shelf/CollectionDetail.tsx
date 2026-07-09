@@ -6,6 +6,7 @@ import { updateCollection, removeBookFromCollection } from '../../api/abs';
 import type { Collection } from '../../api/abs';
 import Cover from '../Cover';
 import { playBook } from '../../api/playbook';
+import { log } from '../../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -52,7 +53,7 @@ export default function CollectionDetail({ collection, serverUrl, st, onClose, o
       const updated = await updateCollection(serverUrl, collection.id, { [field]: value.trim() });
       onUpdated(updated);
     } catch (e) {
-      console.error('[CollectionDetail] save field failed:', e);
+      log.error('library', 'collection save field failed', { field, err: String(e) });
     }
   }
 
@@ -73,7 +74,7 @@ export default function CollectionDetail({ collection, serverUrl, st, onClose, o
       onUpdated(updated);
     } catch (e) {
       setIds(prev); // revert
-      console.error('[CollectionDetail] reorder failed:', e);
+      log.error('library', 'collection reorder failed', { err: String(e) });
     }
   }
 
@@ -84,7 +85,7 @@ export default function CollectionDetail({ collection, serverUrl, st, onClose, o
       setIds(updated.books?.map(b => b.id) ?? ids.filter(x => x !== bookId));
       onUpdated(updated);
     } catch (e) {
-      console.error('[CollectionDetail] remove failed:', e);
+      log.error('library', 'collection remove book failed', { bookId, err: String(e) });
     } finally {
       setRemoving(null);
     }
@@ -93,7 +94,7 @@ export default function CollectionDetail({ collection, serverUrl, st, onClose, o
   async function handlePlayAll() {
     if (!ids.length) return;
     try { await playBook(st, ids[0]); st.setScreen('player'); onClose(); }
-    catch (e) { console.error('[CollectionDetail] play all failed:', e); }
+    catch (e) { log.error('playback', 'collection play all failed', { err: String(e) }); }
   }
 
   const editInput: React.CSSProperties = {

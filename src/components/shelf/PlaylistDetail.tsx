@@ -94,7 +94,7 @@ export default function PlaylistDetail({
       onUpdated(updated);
       setEditingField(null);
     } catch (e) {
-      console.error('[PlaylistDetail] rename failed:', e);
+      log.error('library', 'playlist rename failed', { playlistId: playlist.id, err: String(e) });
     } finally {
       setSaving(false);
     }
@@ -109,7 +109,7 @@ export default function PlaylistDetail({
       onUpdated(updated);
       setEditingField(null);
     } catch (e) {
-      console.error('[PlaylistDetail] description save failed:', e);
+      log.error('library', 'playlist description save failed', { playlistId: playlist.id, err: String(e) });
     } finally {
       setSaving(false);
     }
@@ -169,7 +169,7 @@ export default function PlaylistDetail({
     setRemoving(libraryItemId);
     batchRemoveFromPlaylist(serverUrl, playlist.id, [{ libraryItemId }])
       .then(updated => { setItems(updated.items); })
-      .catch(e => console.error('[PlaylistDetail] remove failed:', e))
+      .catch(e => log.error('library', 'playlist remove item failed', { libraryItemId, err: String(e) }))
       .finally(() => setRemoving(null));
   }
 
@@ -205,7 +205,7 @@ export default function PlaylistDetail({
       st.setScreen('player');
       onClose();
     } catch (e) {
-      console.error('[PlaylistDetail] play all failed:', e);
+      log.error('playback', 'playlist play all failed', { err: String(e) });
     }
   }
 

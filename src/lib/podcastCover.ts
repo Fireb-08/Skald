@@ -3,6 +3,7 @@
 // store no cover/imageUrl and the library item list omits unpublished episodes,
 // so the feed is the source for both artwork and the "latest published" feed.
 import { getPodcastFeed, getLocalPodcastFeed, type PodcastMedia, type RecentEpisode } from '../api/abs';
+import { log } from './log';
 
 interface FeedData { image: string | null; episodes: RecentEpisode[] }
 
@@ -38,7 +39,9 @@ export function resolvePodcastFeed(serverUrl: string, itemId: string, feedUrl: s
       return data;
     })
     .catch(e => {
-      console.warn('[podcastCover] feed fetch failed for', itemId, e);
+      // err goes through the value-level scrubber, so a private feed URL's
+      // token query params never reach the log file.
+      log.warn('library', 'podcast feed fetch failed', { itemId, err: String(e) });
       inflight.delete(itemId);
       return null;
     });

@@ -8,6 +8,7 @@ import BrowseView, { seriesTotalDur } from '../BrowseView';
 import BrowseList from '../BrowseList';
 import BrowseTile from '../BrowseTile';
 import Cover from '../../Cover';
+import { log } from '../../../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -44,7 +45,7 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
     if (isLocal || !st.serverUrl || !st.currentLibraryId) return;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(setFetchedSeries)
-      .catch(console.error);
+      .catch(e => log.error('library', 'series list fetch failed', { err: String(e) }));
   }, [isLocal, st.serverUrl, st.currentLibraryId]);
 
   let seriesList: SeriesGroup[];

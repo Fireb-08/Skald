@@ -44,7 +44,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     : 0;
   const [full, setFull] = useState<LibraryItem | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const bumpRefresh = () => { setRefreshTick(t => t + 1); st.refreshLibrary().catch(e => console.error('[Podcast] refresh failed:', e)); };
+  const bumpRefresh = () => { setRefreshTick(t => t + 1); st.refreshLibrary().catch(e => log.error('library', 'podcast detail refresh failed', { err: String(e) })); };
   const [feedImg, setFeedImg] = useState<string | undefined>(
     () => (st.podcastDetailId ? cachedPodcastImage(st.podcastDetailId) : undefined),
   );
@@ -64,7 +64,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     let cancelled = false;
     fetchItem(st.serverUrl, st.podcastDetailId)
       .then(it => { if (!cancelled) setFull(it); })
-      .catch(e => console.error('[Podcast] fetchItem detail failed:', e));
+      .catch(e => log.error('library', 'podcast detail fetchItem failed', { itemId: st.podcastDetailId, err: String(e) }));
     return () => { cancelled = true; };
   }, [st.podcastDetailId, st.serverUrl, libEpisodeCount, refreshTick, isLocal]);
 
@@ -245,7 +245,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
               }}
             >
               <button
-                onClick={(e) => { e.stopPropagation(); if (!downloaded) { openUndownloaded(ep); return; } if (nowPlaying) togglePlayback(st).catch(console.error); else play(ep); }}
+                onClick={(e) => { e.stopPropagation(); if (!downloaded) { openUndownloaded(ep); return; } if (nowPlaying) togglePlayback(st).catch(err => log.error('playback', 'episode toggle playback failed', { err: String(err) })); else play(ep); }}
                 title={!downloaded ? 'Download episode' : (nowPlaying && st.playing ? 'Pause' : 'Play episode')}
                 style={{
                   width: 34, height: 34, borderRadius: '50%', flexShrink: 0,

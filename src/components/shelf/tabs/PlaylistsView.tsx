@@ -9,6 +9,7 @@ import BrowseList from '../BrowseList';
 import BrowseTile from '../BrowseTile';
 import Cover from '../../Cover';
 import PlaylistDetail from '../PlaylistDetail';
+import { log } from '../../../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -85,7 +86,7 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
       setNewName('');
       setCreateOpen(false);
     } catch (e) {
-      console.error('[PlaylistsView] create failed:', e);
+      log.error('library', 'playlist create failed', { err: String(e) });
     } finally {
       setCreating(false);
     }

@@ -13,7 +13,7 @@ import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
 function PathChip({ label, hint, path }: { label: string; hint?: string; path: string }) {
   return (
     <button
-      onClick={() => revealPath(path).catch(console.error)}
+      onClick={() => revealPath(path).catch(e => log.error('library', 'reveal path failed', { err: String(e) }))}
       title={`Open ${path}`}
       style={{
         display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3,

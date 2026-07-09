@@ -4,6 +4,7 @@ import type { OnyxState } from '../../state/onyx';
 import { getFeeds, deleteShare, closeFeed, getShareBySlug, type RssFeed } from '../../api/abs';
 import { getTrackedShares, removeTrackedShare, getPublicBaseUrl, setPublicBaseUrl, publicBase, absoluteFeedUrl, type TrackedShare } from '../../lib/shareTracker';
 import { SectionHead, MONO, Panel } from './shared';
+import { log } from '../../lib/log';
 
 export interface SharingSectionProps { st: OnyxState; }
 
@@ -76,7 +77,7 @@ export default function SharingSection({ st }: SharingSectionProps) {
     try {
       setFeeds(await getFeeds(st.serverUrl));
     } catch (e) {
-      console.error('[SharingSection] getFeeds failed:', e);
+      log.error('sharing', 'getFeeds failed', { err: String(e) });
       st.setToast({ message: `Failed to load feeds: ${String(e)}`, type: 'error' });
     } finally {
       setFeedsLoading(false);

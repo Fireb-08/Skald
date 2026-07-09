@@ -10,6 +10,7 @@ import Icon from './Icon';
 import ContextMenu from './ContextMenu';
 import { buildItemContextMenu } from './shelf/buildItemContextMenu';
 import { pauseAudio, getContinueListening } from '../api/abs';
+import { log } from '../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -35,7 +36,7 @@ export default function PickItUp({ st }: PickItUpProps) {
     if (!st.serverUrl || !st.currentLibraryId) return;
     getContinueListening(st.serverUrl, st.currentLibraryId)
       .then(setContinueItems)
-      .catch(console.error);
+      .catch(e => log.error('library', 'getContinueListening failed', { err: String(e) }));
   }, [st.serverUrl, st.currentLibraryId, st.mediaProgress, st.activeLibrary, st.library]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -101,7 +102,7 @@ export default function PickItUp({ st }: PickItUpProps) {
     // If a book is actively playing, pause it before switching.
     // This prevents audio from continuing over the transition.
     if (st.playing) {
-      await pauseAudio().catch(console.error);
+      await pauseAudio().catch(e => log.error('playback', 'pause before book switch failed', { err: String(e) }));
       st.setPlaying(false);
     }
 

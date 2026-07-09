@@ -9,6 +9,7 @@ import type { EqSettings, EqPreset } from '../../api/eq';
 import Icon from '../Icon';
 import { SectionHead, Row, Toggle, MONO, Panel, Seg, eyebrowStyle } from './shared';
 import Dropdown from './Dropdown';
+import { log } from '../../lib/log';
 
 function formatHz(hz: number): string {
   if (hz >= 1000) return `${hz / 1000}k`;
@@ -108,7 +109,7 @@ export default function AudioSection() {
         setDevices(list);
         setSelectedId(prev => prev ?? list[0]?.id ?? null);
       })
-      .catch(console.error);
+      .catch(e => log.error('playback', 'getAudioDevices failed', { err: String(e) }));
 
     Promise.all([getEqSettings(), getEqPresets(), getEqBandFrequencies()])
       .then(([s, p, f]) => {
@@ -118,19 +119,19 @@ export default function AudioSection() {
         setLocalBands([...s.bands]);
         setLocalPreamp(s.preamp);
       })
-      .catch(console.error);
+      .catch(e => log.error('playback', 'load EQ settings failed', { err: String(e) }));
   }, []);
 
   const currentDevice = devices.find(d => d.id === selectedId);
 
   function selectDevice(id: string) {
     setSelectedId(id);
-    setAudioDeviceCmd(id).catch(console.error);
+    setAudioDeviceCmd(id).catch(e => log.error('playback', 'setAudioDevice failed', { device: id, err: String(e) }));
   }
 
   function handleToggleEq(enabled: boolean) {
     setEqSettings(s => s ? { ...s, enabled } : s);
-    setEqEnabled(enabled).catch(console.error);
+    setEqEnabled(enabled).catch(e => log.error('playback', 'toggle EQ failed', { enabled, err: String(e) }));
   }
 
   function handlePresetChange(idx: number) {
@@ -141,7 +142,7 @@ export default function AudioSection() {
         setLocalBands([...s.bands]);
         setLocalPreamp(s.preamp);
       })
-      .catch(console.error);
+      .catch(e => log.error('playback', 'apply EQ preset failed', { preset: idx, err: String(e) }));
   }
 
   function handleResetFlat() {
@@ -152,7 +153,7 @@ export default function AudioSection() {
         setLocalBands([...s.bands]);
         setLocalPreamp(s.preamp);
       })
-      .catch(console.error);
+      .catch(e => log.error('playback', 'reset EQ failed', { err: String(e) }));
   }
 
   function handleBandCommit(i: number, gain: number) {
@@ -162,12 +163,12 @@ export default function AudioSection() {
       bands[i] = gain;
       return { ...s, bands, presetName: null };
     });
-    setEqBand(i, gain).catch(console.error);
+    setEqBand(i, gain).catch(e => log.error('playback', 'set EQ band failed', { band: i, gain, err: String(e) }));
   }
 
   function handlePreampCommit(gain: number) {
     setEqSettings(s => s ? { ...s, preamp: gain } : s);
-    setEqPreamp(gain).catch(console.error);
+    setEqPreamp(gain).catch(e => log.error('playback', 'set EQ preamp failed', { gain, err: String(e) }));
   }
 
   const eqEnabled = eqSettings?.enabled ?? false;

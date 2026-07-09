@@ -7,6 +7,7 @@ import { togglePlayback } from '../../api/playbook';
 import { seekAudio } from '../../api/abs';
 import Cover from '../Cover';
 import Icon from '../Icon';
+import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -65,7 +66,7 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
   const returnToNowPlaying = async () => {
     const lib = st.playingItem?.libraryId;
     if (lib && lib !== st.currentLibraryId) {
-      try { await st.setActiveLibrary(lib); } catch (e) { console.error('[MiniPlayer] switch library failed:', e); }
+      try { await st.setActiveLibrary(lib); } catch (e) { log.error('library', 'switch to now-playing library failed', { lib, err: String(e) }); }
     }
     st.setFocusedBookId(st.currentBookId);
     st.setScreen('player');
@@ -76,7 +77,7 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
     if (st.bookSecs <= 0) return;
     const r = e.currentTarget.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-    seekAudio(frac * st.bookSecs).catch(console.error);
+    seekAudio(frac * st.bookSecs).catch(e => log.error('playback', 'waveform seek failed', { err: String(e) }));
   };
 
   return (

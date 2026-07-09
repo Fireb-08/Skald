@@ -8,6 +8,7 @@ import Glass from './Glass';
 import Icon from '../Icon';
 import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
 import UploadModal from '../UploadModal';
+import { log } from '../../lib/log';
 
 export interface TopNavProps {
   st: OnyxState;
@@ -67,7 +68,7 @@ export default function TopNav({ st }: TopNavProps) {
       setAddIndex(0);
       setAddQueue(scanned);
     } catch (e) {
-      console.error('[add books] scan failed:', e);
+      log.error('library', 'add-books folder scan failed', { err: String(e) });
       st.setToast({ message: 'Could not read the selected folder', type: 'error' });
     }
   };
@@ -94,7 +95,7 @@ export default function TopNav({ st }: TopNavProps) {
   // library starts clean (no stale search/filter/tab/focus from the old one).
   const switchLibrary = (id: string) => {
     if (id === st.currentLibraryId) { st.setScreen('library'); return; }
-    st.setActiveLibrary(id).catch(e => console.error('[library] switch failed:', e));
+    st.setActiveLibrary(id).catch(e => log.error('library', 'library switch failed', { id, err: String(e) }));
     st.setScreen('library');
     st.setSearch('');
     st.setContextFilter(null);
@@ -347,8 +348,8 @@ export default function TopNav({ st }: TopNavProps) {
             setAddQueue([]);
             setAddIndex(0);
             st.setToast({ message: `Added ${count} book${count > 1 ? 's' : ''} to your library`, type: 'success' });
-            if (st.currentLibraryId === addLib) st.setActiveLibrary(addLib).catch(console.error);
-            else st.refreshLibrary().catch(console.error);
+            if (st.currentLibraryId === addLib) st.setActiveLibrary(addLib).catch(e => log.error('library', 'reload after add-books failed', { err: String(e) }));
+            else st.refreshLibrary().catch(e => log.error('library', 'refresh after add-books failed', { err: String(e) }));
           } else {
             setAddIndex(next);
           }

@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { cancelDownload } from '../../api/abs';
+import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -183,7 +184,7 @@ export default function DownloadProgressToast({ onComplete, onCancel, onFailed }
                   download-cancelled event will dismiss this card once the partial
                   file has been cleaned up. */}
               <button
-                onClick={() => cancelDownload(itemId).catch(console.error)}
+                onClick={() => cancelDownload(itemId).catch(e => log.error('downloads', 'cancelDownload failed', { itemId, err: String(e) }))}
                 title="Cancel download"
                 style={{
                   flexShrink: 0,

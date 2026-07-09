@@ -8,6 +8,7 @@ import type { SeriesObject } from '../../api/abs';
 import { getLibrarySeries } from '../../api/abs';
 import ViewModeToggle from './ViewModeToggle';
 import FilterPopover from './FilterPopover';
+import { log } from '../../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -90,7 +91,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
     let cancelled = false;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(list => { if (!cancelled) setSeriesCount(list.length); })
-      .catch(console.error);
+      .catch(e => log.error('library', 'series count fetch failed', { err: String(e) }));
     return () => { cancelled = true; };
   }, [st.serverUrl, st.currentLibraryId]);
 

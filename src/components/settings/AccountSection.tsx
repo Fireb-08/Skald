@@ -18,6 +18,7 @@ import {
   getAuthSettings,
 } from '../../api/abs';
 import type { AdminUser, UserPermissions, AuthSettings } from '../../api/abs';
+import { log } from '../../lib/log';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -783,7 +784,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
   // Admin-only: read whether OIDC/SSO is configured (read-only indicator).
   useEffect(() => {
     if (!isAdmin || !st.serverUrl) return;
-    getAuthSettings(st.serverUrl).then(setAuthSettings).catch(e => console.error('[AccountSection] getAuthSettings failed:', e));
+    getAuthSettings(st.serverUrl).then(setAuthSettings).catch(e => log.error('auth', 'getAuthSettings failed', { err: String(e) }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -808,7 +809,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
 
     // Seed the initial online set via HTTP so the dots are correct on mount,
     // before any WebSocket events arrive.
-    getOnlineUsers(st.serverUrl).then(setOnlineUserIds).catch(console.error);
+    getOnlineUsers(st.serverUrl).then(setOnlineUserIds).catch(e => log.error('auth', 'getOnlineUsers failed', { err: String(e) }));
 
     // Subscribe to the Tauri event emitted by socket.rs when ABS fires user_online.
     const unlistenOnline = listen<string>('presence-user-online', event => {
@@ -817,7 +818,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
         // Append the id only if it is not already present.
         setOnlineUserIds(prev => prev.includes(user.id) ? prev : [...prev, user.id]);
       } catch (e) {
-        console.error('presence online parse failed', e);
+        log.error('auth', 'presence online event parse failed', { err: String(e) });
       }
     });
 
@@ -827,7 +828,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
         const user = JSON.parse(event.payload) as { id: string };
         setOnlineUserIds(prev => prev.filter(id => id !== user.id));
       } catch (e) {
-        console.error('presence offline parse failed', e);
+        log.error('auth', 'presence offline event parse failed', { err: String(e) });
       }
     });
 
@@ -935,7 +936,7 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
     } catch (e) {
       // Fall back to the list row — the editor will skip the permissions block
       // (it requires a permissions object) but username/type still work.
-      console.error('[AccountSection] getUser failed:', e);
+      log.error('auth', 'getUser for edit failed, using list row', { userId: u.id, err: String(e) });
       setEditTarget(u);
     }
   }

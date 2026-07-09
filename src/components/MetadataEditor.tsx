@@ -5,6 +5,7 @@ import type { LibraryItem } from '../state/onyx';
 import { bookAuthor, bookNarrator } from '../state/onyx';
 import { updateMedia, updateChapters, fetchItem, applyLocalMetadata, scanFolder, setLocalChapters } from '../api/abs';
 import type { LocalMetadataFields } from '../api/abs';
+import { log } from '../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -191,7 +192,8 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
             freshDuration = f.media?.duration ?? null;
           }
         } catch (e) {
-          console.error('[edit] local file rescan failed, falling back to catalog:', e);
+          // Recoverable: the catalog copy still populates the editor below.
+          log.warn('metadata', 'local file rescan failed, falling back to catalog', { err: String(e) });
         }
         if (cancelled) return;
         const cat = item.media.metadata as unknown as Record<string, unknown>;

@@ -143,17 +143,17 @@ export function buildItemContextMenu(
               st.setPlaying(false);
             }
             setLocalProgress(item.id, item.media.duration, item.media.duration, true)
-              .catch(console.error);
+              .catch(e => log.error('library', 'mark finished (local) failed', { itemId: item.id, err: String(e) }));
           } else {
             await closeActiveSession().catch(() => {}); // no-op if no session open
             st.setSessionReady(false); // force fresh session on next play
             st.setSessionId('');
             st.setPlaying(false);
             updateProgress(st.serverUrl, item.id, item.media.duration, item.media.duration, true)
-              .catch(console.error);
+              .catch(e => log.error('library', 'mark finished (server) failed', { itemId: item.id, err: String(e) }));
           }
         } catch (e) {
-          console.error('[ctx] mark finished failed:', e);
+          log.error('library', 'mark finished failed', { itemId: item.id, err: String(e) });
         } finally {
           pendingItems.delete(item.id);
         }

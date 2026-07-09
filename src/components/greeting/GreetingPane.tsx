@@ -16,6 +16,7 @@ import { bookAuthor } from '../../state/onyx';
 import type { UserStats, LibraryStats } from '../../api/abs';
 import { getUserStats, getLibraryStats } from '../../api/abs';
 import Glass from '../chrome/Glass';
+import { log } from '../../lib/log';
 
 // Font stacks match the rest of the app (FocusPanel.tsx constants).
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -481,7 +482,7 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
     getUserStats(st.serverUrl)
       .then(s => { if (!cancelled) { setUserStats(s); setLoadingUser(false); } })
       .catch(e => {
-        console.error('[GreetingPane] getUserStats failed:', e);
+        log.error('library', 'getUserStats failed', { err: String(e) });
         if (!cancelled) setLoadingUser(false);
       });
 
@@ -492,7 +493,7 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
       getLibraryStats(st.serverUrl, libId)
         .then(s => { if (!cancelled) { setLibStats(s); setLoadingLib(false); } })
         .catch(e => {
-          console.error('[GreetingPane] getLibraryStats failed:', e);
+          log.error('library', 'getLibraryStats failed', { lib: libId, err: String(e) });
           if (!cancelled) setLoadingLib(false);
         });
     } else {

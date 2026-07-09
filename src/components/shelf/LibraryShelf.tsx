@@ -594,7 +594,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             st.updateLibraryItem(updated);
             setMatchItem(null);
           }}
-          onRefresh={() => { st.refreshLibrary().catch(console.error); }}
+          onRefresh={() => { st.refreshLibrary().catch(e => log.error('library', 'refresh after match failed', { err: String(e) })); }}
         />
       )}
       {editItem && (
@@ -606,7 +606,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             st.updateLibraryItem(updated);
             setEditItem(null);
           }}
-          onRefresh={() => { st.refreshLibrary().catch(console.error); }}
+          onRefresh={() => { st.refreshLibrary().catch(e => log.error('library', 'refresh after metadata edit failed', { err: String(e) })); }}
           onNotice={(message, type) => st.setToast({ message, type })}
         />
       )}

@@ -187,7 +187,7 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
       // timer outliving this modal is intentional.
       if (localStorage.getItem('onyx.sync.live') !== 'true') {
         const refresh = st.refreshLibrary;
-        setTimeout(() => { void refresh().catch(e => console.error('[upload] post-upload refresh failed:', e)); }, 10_000);
+        setTimeout(() => { void refresh().catch(e => log.error('library', 'post-upload refresh failed', { err: String(e) })); }, 10_000);
       }
       onClose();
     } catch (e) {
@@ -380,7 +380,7 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
                   {fmtBytes(progress.bytesSent)} / {fmtBytes(progress.totalBytes)}
                 </span>
                 <button
-                  onClick={() => { if (uploadIdRef.current) void cancelUpload(uploadIdRef.current).catch(console.error); }}
+                  onClick={() => { if (uploadIdRef.current) void cancelUpload(uploadIdRef.current).catch(e => log.error('library', 'cancelUpload failed', { err: String(e) })); }}
                   style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '7px 12px', borderRadius: 8, cursor: 'pointer', background: 'transparent', border: '1px solid var(--onyx-glass-edge)', color: 'var(--onyx-text-dim)' }}
                 >Cancel</button>
               </div>

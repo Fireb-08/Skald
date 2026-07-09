@@ -17,6 +17,7 @@ import {
   getOpenSessions, // new: fetches open sessions from GET /api/users/online → openSessions
 } from '../../api/abs';
 import type { ListeningSession, AdminUser } from '../../api/abs';
+import { log } from '../../lib/log';
 
 // ── Sort value extractor ────────────────────────────────────────────────────
 
@@ -391,7 +392,7 @@ export default function ListeningSessionsSection({ st }: ListeningSessionsSectio
   // Load admin user list once on mount — needed for the filter dropdown.
   useEffect(() => {
     if (!isAdmin || !st?.serverUrl) return; // optional chaining: safe when st is transiently undefined
-    getAllUsers(st.serverUrl).then(setAllUsers).catch(console.error); // st defined: guard passed
+    getAllUsers(st.serverUrl).then(setAllUsers).catch(e => log.error('playback', 'getAllUsers for session filter failed', { err: String(e) })); // st defined: guard passed
   }, [isAdmin, st?.serverUrl]); // dep array: optional chaining on st
 
   // Reload historical sessions whenever filter, page, page size, or sort changes.

@@ -5,6 +5,7 @@ import type { OnyxState } from '../../state/onyx';
 import Icon from '../Icon';
 import { getAudioDevices, setAudioDevice } from '../../api/abs';
 import type { AudioDevice } from '../../api/abs';
+import { log } from '../../lib/log';
 
 export interface DeviceSelectorProps {
   st: OnyxState;
@@ -39,7 +40,7 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
           st.setDevice(devs[0].id);
         }
       })
-      .catch(e => console.error('[DeviceSelector] getAudioDevices failed:', e));
+      .catch(e => log.error('playback', 'getAudioDevices failed', { err: String(e) }));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Outside-click handler — must check BOTH the trigger wrapper and the dropdown
@@ -130,7 +131,7 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
               key={d.id}
               onClick={() => {
                 st.setDevice(d.id);
-                setAudioDevice(d.id).catch(e => console.error('[DeviceSelector] setAudioDevice failed:', e));
+                setAudioDevice(d.id).catch(e => log.error('playback', 'setAudioDevice failed', { device: d.id, err: String(e) }));
                 st.setDeviceOpen(false);
               }}
               style={{

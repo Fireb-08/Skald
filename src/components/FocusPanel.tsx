@@ -16,6 +16,7 @@ import Glass from './chrome/Glass';
 import Cover from './Cover';
 import Icon from './Icon';
 import { sanitizeHtml } from '../lib/sanitize';
+import { log } from '../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -63,7 +64,7 @@ function ChaptersStat({ st, chIdx, chapterCount, chapters }: { st: OnyxState; ch
 
   const jump = (i: number) => {
     const pos = chapterStart(chapters, i);
-    seekAudio(pos).catch(console.error);
+    seekAudio(pos).catch(e => log.error('playback', 'chapter seek failed', { err: String(e) }));
     st.setPosition(pos);
     setOpen(false);
   };
@@ -196,7 +197,7 @@ function SpeedStat({ st }: { st: OnyxState }) {
               onClick={() => {
                 st.setSpeed(s);
                 setOpen(false);
-                setAudioSpeed(parseFloat(s)).catch(err => console.error('[speed] failed:', err));
+                setAudioSpeed(parseFloat(s)).catch(err => log.error('playback', 'set speed failed', { speed: s, err: String(err) }));
               }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6,
@@ -307,7 +308,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
         await playBook(st, focus.id);
       }
     } catch (err) {
-      console.error('[handleContinue] failed:', err);
+      log.error('playback', 'continue/play from focus card failed', { err: String(err) });
     }
   };
 
@@ -428,7 +429,7 @@ export default function FocusPanel({ st }: FocusPanelProps) {
               const me = await getMe(st.serverUrl);
               st.setBookmarks(me.bookmarks);
             } catch (err) {
-              console.error('[bookmark] failed:', err);
+              log.error('playback', 'create bookmark failed', { err: String(err) });
             }
           }}
           style={{ width: 44, height: 44, background: 'var(--onyx-glass-strong)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onyx-text-dim)', cursor: 'pointer' }}

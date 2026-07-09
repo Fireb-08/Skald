@@ -3,6 +3,7 @@ import { registerShortcuts } from '../../api/abs';
 import type { ShortcutBinding } from '../../api/abs';
 import { DEFAULT_SHORTCUTS } from '../../hooks/useGlobalShortcuts';
 import { SectionHead, MONO, SERIF, Panel } from './shared';
+import { log } from '../../lib/log';
 
 const ACTION_LABELS: Record<string, string> = {
   play_pause:   'Play / Pause',
@@ -111,7 +112,7 @@ export default function KeyboardSection() {
       );
       setBindings(newBindings);
       localStorage.setItem('onyx.shortcuts', JSON.stringify(newBindings));
-      registerShortcuts(newBindings).catch(console.error);
+      registerShortcuts(newBindings).catch(e => log.error('playback', 'register shortcuts failed', { err: String(e) }));
       setListeningFor(null);
     };
 
@@ -122,7 +123,7 @@ export default function KeyboardSection() {
   function resetDefaults() {
     setBindings(DEFAULT_SHORTCUTS);
     localStorage.setItem('onyx.shortcuts', JSON.stringify(DEFAULT_SHORTCUTS));
-    registerShortcuts(DEFAULT_SHORTCUTS).catch(console.error);
+    registerShortcuts(DEFAULT_SHORTCUTS).catch(e => log.error('playback', 'reset shortcuts to defaults failed', { err: String(e) }));
     setListeningFor(null);
   }
 

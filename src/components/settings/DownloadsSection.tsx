@@ -110,9 +110,9 @@ export default function DownloadsSection({ st }: Props) {
   // so we also push the result into global st.downloads — that's what the sidebar
   // count reads, so opening this section corrects a stale badge.
   useEffect(() => {
-    getDownloadsDir().then(setDownloadsDirState).catch(console.error);
-    getCacheDir().then(setCoverCacheDir).catch(console.error);
-    getDownloads().then(recs => { setRecords(recs); st.setDownloads(recs); }).catch(console.error);
+    getDownloadsDir().then(setDownloadsDirState).catch(e => log.error('downloads', 'getDownloadsDir failed', { err: String(e) }));
+    getCacheDir().then(setCoverCacheDir).catch(e => log.error('downloads', 'getCacheDir failed', { err: String(e) }));
+    getDownloads().then(recs => { setRecords(recs); st.setDownloads(recs); }).catch(e => log.error('downloads', 'load downloads registry failed', { err: String(e) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -164,7 +164,7 @@ export default function DownloadsSection({ st }: Props) {
         return next;
       });
       // Re-fetch the registry so the newly completed entry appears without a page reload.
-      getDownloads().then(setRecords).catch(console.error);
+      getDownloads().then(setRecords).catch(e => log.error('downloads', 'refresh registry after download-complete failed', { err: String(e) }));
       // Note: st.downloads is refreshed by the listener in onyx.ts — no duplicate call needed.
     }).then(fn => { unlistenComplete = fn; });
 
@@ -265,7 +265,7 @@ export default function DownloadsSection({ st }: Props) {
           <StorageControls
             value={downloadsDir}
             busy={relocating === 'downloads'}
-            onOpen={() => revealDownloadsDir().catch(console.error)}
+            onOpen={() => revealDownloadsDir().catch(e => log.error('downloads', 'reveal downloads folder failed', { err: String(e) }))}
             onChange={() => relocate('downloads')}
           />
         </Row>
@@ -273,7 +273,7 @@ export default function DownloadsSection({ st }: Props) {
           <StorageControls
             value={coverCacheDir}
             busy={relocating === 'cache'}
-            onOpen={() => { if (coverCacheDir) revealPath(coverCacheDir).catch(console.error); }}
+            onOpen={() => { if (coverCacheDir) revealPath(coverCacheDir).catch(e => log.error('downloads', 'reveal cache folder failed', { err: String(e) })); }}
             onChange={() => relocate('cache')}
           />
         </Row>
@@ -309,7 +309,7 @@ export default function DownloadsSection({ st }: Props) {
                   </div>
                 </div>
                 <button
-                  onClick={() => cancelDownload(itemId).catch(console.error)}
+                  onClick={() => cancelDownload(itemId).catch(e => log.error('downloads', 'cancelDownload failed', { itemId, err: String(e) }))}
                   title={`Cancel download of "${title}"`}
                   style={{
                     flexShrink: 0, padding: '6px 13px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',

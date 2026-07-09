@@ -140,7 +140,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         (res.episodes ?? []).forEach(e => m.set(episodeKey(e), e));
         setDownloadedMap(m);
       })
-      .catch(e => console.error('[Podcast] recent-episodes failed:', e));
+      .catch(e => log.error('library', 'podcast recent-episodes fetch failed', { err: String(e) }));
     return () => { cancelled = true; };
   }, [st.currentLibraryId, st.serverUrl, st.library, isLocal]);
 
@@ -253,7 +253,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
       st={st}
       library={st.activeLibrary}
       onClose={() => setShowSubscribe(false)}
-      onSubscribed={() => { st.refreshLibrary().catch(e => console.error('[Podcast] refresh after subscribe failed:', e)); }}
+      onSubscribed={() => { st.refreshLibrary().catch(e => log.error('library', 'refresh after podcast subscribe failed', { err: String(e) })); }}
     />
   );
 
@@ -401,7 +401,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               </div>
               {/* Play (downloaded) / Download (not yet downloaded) */}
               <button
-                onClick={(e) => { e.stopPropagation(); if (!downloaded) { openUndownloaded(ep); return; } if (nowPlaying) togglePlayback(st).catch(console.error); else playEp(ep); }}
+                onClick={(e) => { e.stopPropagation(); if (!downloaded) { openUndownloaded(ep); return; } if (nowPlaying) togglePlayback(st).catch(err => log.error('playback', 'episode toggle playback failed', { err: String(err) })); else playEp(ep); }}
                 title={!downloaded ? 'Download episode' : (nowPlaying && st.playing ? 'Pause' : 'Play')}
                 style={{
                   width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
@@ -460,7 +460,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
           st={st}
           item={settingsItem}
           onClose={() => setSettingsItem(null)}
-          onSaved={() => { st.refreshLibrary().catch(e => console.error('[Podcast] refresh after settings failed:', e)); setSettingsItem(null); }}
+          onSaved={() => { st.refreshLibrary().catch(e => log.error('library', 'refresh after podcast settings save failed', { err: String(e) })); setSettingsItem(null); }}
         />
       )}
       {downloadItem && (

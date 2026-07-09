@@ -12,6 +12,7 @@ import {
 } from '../api/abs';
 import type { MetadataResult, LocalMetadataFields, ScannedItem } from '../api/abs';
 import { bustCover } from '../lib/coverBust';
+import { log } from '../lib/log';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -736,7 +737,7 @@ export default function MatchModal({ item, serverUrl, adapter: adapterProp, onCl
       onComplete(updated);
       onRefresh();
     } catch (e) {
-      console.error('[MatchModal] submit failed:', e);
+      log.error('metadata', 'match submit failed', { err: String(e) });
     } finally {
       setSubmitting(false);
     }
