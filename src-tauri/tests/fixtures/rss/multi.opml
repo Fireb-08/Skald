@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="1.0">
+  <head><title>Subscriptions</title></head>
+  <body>
+    <outline type="rss" text="Feed A" xmlUrl="https://a.example/feed" />
+    <outline type="rss" title="Feed B" xmlUrl="https://b.example/feed" />
+    <outline type="rss" text="No URL, must be skipped" />
+    <outline text="Group">
+      <outline type="rss" text="Nested C" xmlUrl="https://c.example/feed" />
+    </outline>
+  </body>
+</opml>

@@ -527,3 +527,119 @@ mod feed_host_tests {
         assert_eq!(feed_host(""), "<invalid-url>");
     }
 }
+
+// Fixture-backed parser regression tests (Test Breadth roadmap, Phase 1).
+// Written immediately after the clippy collapsible_match rewrite turned the
+// nested first-wins `if`s into match guards — these pin exactly those
+// precedence rules against hand-authored minimal feeds.
+#[cfg(test)]
+mod parse_feed_tests {
+    use super::{build_opml, enclosure_extension, parse_feed, parse_opml};
+    use serde_json::Value;
+
+    const SIMPLE: &str = include_str!("../tests/fixtures/rss/simple.xml");
+    const HEAVY: &str = include_str!("../tests/fixtures/rss/itunes-heavy.xml");
+    const CONTENT: &str = include_str!("../tests/fixtures/rss/content-encoded.xml");
+    const OPML: &str = include_str!("../tests/fixtures/rss/multi.opml");
+
+    fn str_of<'a>(v: &'a Value, key: &str) -> &'a str {
+        v.get(key).and_then(|x| x.as_str()).unwrap_or_default()
+    }
+
+    #[test]
+    fn simple_feed_channel_and_episodes() {
+        let feed = parse_feed(SIMPLE, "https://example.com/fallback.xml").unwrap();
+        let meta = &feed["metadata"];
+        assert_eq!(str_of(meta, "title"), "Simple Show");
+        assert_eq!(str_of(meta, "author"), "Jane Host");
+        assert_eq!(str_of(meta, "language"), "en-us");
+        assert_eq!(str_of(meta, "imageUrl"), "https://example.com/art.jpg");
+        // No new-feed-url / atom self link in this feed → the fetched URL wins.
+        assert_eq!(str_of(meta, "feedUrl"), "https://example.com/fallback.xml");
+        assert_eq!(meta["explicit"], Value::Bool(false));
+        // descriptionPlain mirrors ABS: a tag-stripped copy of description.
+        assert_eq!(str_of(meta, "description"), "A <b>plain</b> feed.");
+        assert_eq!(str_of(meta, "descriptionPlain"), "A plain feed.");
+        // Categories dedupe into genres.
+        assert_eq!(meta["genres"], serde_json::json!(["Technology", "History"]));
+
+        let eps = feed["episodes"].as_array().unwrap();
+        assert_eq!(eps.len(), 2);
+        let ep1 = &eps[0];
+        assert_eq!(str_of(ep1, "guid"), "ep-1");
+        assert_eq!(str_of(&ep1["enclosure"], "url"), "https://example.com/ep1.mp3");
+        assert_eq!(ep1["size"], serde_json::json!(12345678));
+        // "1:02:03" → 3723 s; RFC 2822 pubDate → Unix ms.
+        assert_eq!(ep1["duration"], serde_json::json!(3723.0));
+        assert_eq!(ep1["publishedAt"], serde_json::json!(1735718400000i64));
+        // Plain-seconds duration form on episode two.
+        assert_eq!(eps[1]["duration"], serde_json::json!(1800.0));
+    }
+
+    #[test]
+    fn itunes_tags_first_wins_and_fallbacks() {
+        let feed = parse_feed(HEAVY, "https://example.com/fetched.xml").unwrap();
+        let meta = &feed["metadata"];
+        // itunes:author beats the later managingEditor; summary beats description.
+        assert_eq!(str_of(meta, "author"), "iTunes Author");
+        assert_eq!(str_of(meta, "description"), "Summary text.");
+        // itunes:new-feed-url overwrites the earlier atom:link rel=self.
+        assert_eq!(str_of(meta, "feedUrl"), "https://example.com/new.xml");
+        assert_eq!(meta["explicit"], Value::Bool(true));
+        assert_eq!(str_of(meta, "type"), "serial");
+        // <image><url> supplies the art when itunes:image is absent.
+        assert_eq!(str_of(meta, "imageUrl"), "https://example.com/rss-image.png");
+
+        let ep = &feed["episodes"].as_array().unwrap()[0];
+        // <id> serves as the guid fallback; itunes:subtitle wins over <subtitle>.
+        assert_eq!(str_of(ep, "guid"), "alt-id-9");
+        assert_eq!(str_of(ep, "subtitle"), "Short sub");
+        assert_eq!(str_of(ep, "author"), "DC Creator");
+        assert_eq!(str_of(ep, "season"), "2");
+        assert_eq!(str_of(ep, "episode"), "7");
+        assert_eq!(str_of(ep, "episodeType"), "bonus");
+        // "clean" is non-explicit in ABS's mapping.
+        assert_eq!(ep["explicit"], Value::Bool(false));
+        assert_eq!(str_of(ep, "chaptersUrl"), "https://example.com/ch.json");
+        // Audio media:content becomes the enclosure when <enclosure> is absent.
+        assert_eq!(str_of(&ep["enclosure"], "url"), "https://example.com/fancy.m4a");
+    }
+
+    #[test]
+    fn content_encoded_beats_description_in_any_order() {
+        let feed = parse_feed(CONTENT, "https://example.com/f.xml").unwrap();
+        let eps = feed["episodes"].as_array().unwrap();
+        assert_eq!(str_of(&eps[0], "description"), "<p>Rich <em>body</em>.</p>");
+        assert_eq!(str_of(&eps[1], "description"), "<p>Winning body.</p>");
+        // descriptionPlain strips the markup.
+        assert_eq!(str_of(&eps[1], "descriptionPlain"), "Winning body.");
+    }
+
+    #[test]
+    fn opml_parses_multiple_feeds_and_skips_urlless_outlines() {
+        let feeds = parse_opml(OPML).unwrap();
+        assert_eq!(feeds.len(), 3);
+        assert_eq!(str_of(&feeds[0], "title"), "Feed A");
+        assert_eq!(str_of(&feeds[0], "feedUrl"), "https://a.example/feed");
+        // `title` attribute is accepted when `text` is absent; nested outlines count.
+        assert_eq!(str_of(&feeds[1], "title"), "Feed B");
+        assert_eq!(str_of(&feeds[2], "title"), "Nested C");
+    }
+
+    #[test]
+    fn opml_build_round_trips_with_escaping() {
+        let pairs = vec![("A & B <Show>".to_string(), "https://x.example/f?a=1&b=2".to_string())];
+        let feeds = parse_opml(&build_opml(&pairs)).unwrap();
+        assert_eq!(feeds.len(), 1);
+        assert_eq!(str_of(&feeds[0], "title"), "A & B <Show>");
+        assert_eq!(str_of(&feeds[0], "feedUrl"), "https://x.example/f?a=1&b=2");
+    }
+
+    #[test]
+    fn enclosure_extension_prefers_url_then_mime() {
+        assert_eq!(enclosure_extension("https://x/e.m4a?tok=1", None), "m4a");
+        assert_eq!(enclosure_extension("https://x/stream", Some("audio/mpeg")), "mp3");
+        assert_eq!(enclosure_extension("https://x/e.php", Some("audio/ogg")), "ogg");
+        assert_eq!(enclosure_extension("https://x/none", None), "mp3");
+    }
+}

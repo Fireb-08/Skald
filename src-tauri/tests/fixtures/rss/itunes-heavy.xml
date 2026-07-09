@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0"
+     xmlns:media="http://search.yahoo.com/mrss/"
+     xmlns:dc="http://purl.org/dc/elements/1.1/"
+     xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Heavy Show</title>
+    <!-- first-wins: itunes:author must survive the later managingEditor -->
+    <itunes:author>iTunes Author</itunes:author>
+    <managingEditor>editor@example.com</managingEditor>
+    <!-- first-wins: itunes:summary arrives before description -->
+    <itunes:summary>Summary text.</itunes:summary>
+    <description>Later description.</description>
+    <!-- atom self link is a fallback; itunes:new-feed-url is authoritative and overwrites it -->
+    <atom:link rel="self" href="https://example.com/self.xml" />
+    <itunes:new-feed-url>https://example.com/new.xml</itunes:new-feed-url>
+    <itunes:explicit>yes</itunes:explicit>
+    <itunes:type>serial</itunes:type>
+    <!-- channel art via RSS <image><url> (no itunes:image in this feed) -->
+    <image>
+      <url>https://example.com/rss-image.png</url>
+      <title>Heavy Show</title>
+    </image>
+    <item>
+      <title>Fancy Episode</title>
+      <!-- guid|id first-wins: only an Atom-style id here -->
+      <id>alt-id-9</id>
+      <itunes:subtitle>Short sub</itunes:subtitle>
+      <subtitle>Ignored later subtitle</subtitle>
+      <dc:creator>DC Creator</dc:creator>
+      <itunes:season>2</itunes:season>
+      <itunes:episode>7</itunes:episode>
+      <itunes:episodeType>bonus</itunes:episodeType>
+      <itunes:explicit>clean</itunes:explicit>
+      <podcast:chapters url="https://example.com/ch.json" type="application/json+chapters" />
+      <!-- no <enclosure>: the audio media:content must become the fallback enclosure -->
+      <media:content url="https://example.com/fancy.m4a" type="audio/mp4" medium="audio" />
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+  <channel>
+    <title>Simple Show</title>
+    <language>en-us</language>
+    <link>https://example.com/show</link>
+    <description>A &lt;b&gt;plain&lt;/b&gt; feed.</description>
+    <itunes:author>Jane Host</itunes:author>
+    <itunes:image href="https://example.com/art.jpg" />
+    <itunes:explicit>no</itunes:explicit>
+    <itunes:category text="Technology" />
+    <itunes:category text="Technology" />
+    <itunes:category text="History" />
+    <item>
+      <title>Episode One</title>
+      <guid>ep-1</guid>
+      <pubDate>Wed, 01 Jan 2025 08:00:00 +0000</pubDate>
+      <itunes:duration>1:02:03</itunes:duration>
+      <description>First episode.</description>
+      <enclosure url="https://example.com/ep1.mp3" type="audio/mpeg" length="12345678" />
+    </item>
+    <item>
+      <title>Episode Two</title>
+      <guid>ep-2</guid>
+      <pubDate>Wed, 08 Jan 2025 08:00:00 +0000</pubDate>
+      <itunes:duration>1800</itunes:duration>
+      <enclosure url="https://example.com/ep2.mp3" type="audio/mpeg" length="345" />
+    </item>
+  </channel>
+</rss>
