@@ -32,11 +32,13 @@ use crate::probe;
 
 /// Audio extensions the scanner recognises. Mirrors the set `play_local` already
 /// plays (session.rs) plus `wav`, so anything scanned is also playable.
-const AUDIO_EXTS: &[&str] = &["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a", "wav"];
+/// pub: the server-upload folder walk (commands::resolve_upload_files) reuses it.
+pub const AUDIO_EXTS: &[&str] = &["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a", "wav"];
 
 /// Supplemental (non-audio) files worth recording on the item so the ingest layer
 /// can move them alongside the book (cover art, liner notes, etc.).
-const SUPPLEMENTAL_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "pdf", "nfo", "cue", "txt", "opf"];
+/// pub: shared with the server-upload folder walk, same as AUDIO_EXTS.
+pub const SUPPLEMENTAL_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "pdf", "nfo", "cue", "txt", "opf"];
 
 fn ext_lower(path: &Path) -> Option<String> {
     path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase())

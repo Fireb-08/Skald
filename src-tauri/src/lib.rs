@@ -55,6 +55,11 @@ pub fn run() {
     // start_staging_watch with the local libraries' staging paths.
     let staging_watcher: watcher::StagingWatcher = Arc::new(std::sync::Mutex::new(None));
 
+    // Cancel token registry for in-progress server uploads (uploadId → token),
+    // the upload-side mirror of cancel_registry above.
+    let upload_registry =
+        commands::UploadCancelRegistry(Mutex::new(std::collections::HashMap::new()));
+
     tauri::Builder::default()
         // Diagnostic logging — registered first so it captures startup and other
         // plugins. Rust `log::*` and the frontend @tauri-apps/plugin-log API both
@@ -103,6 +108,7 @@ pub fn run() {
         .manage(socket_state) // Socket.IO client — accessed by connect/disconnect commands
         .manage(cancel_registry) // per-download CancellationTokens — accessed by cancel_download
         .manage(staging_watcher) // Local Library staging-folder watcher slot
+        .manage(upload_registry) // per-upload CancellationTokens — accessed by cancel_upload
         .setup(|app| {
             use tauri::Manager;
 
@@ -282,6 +288,10 @@ pub fn run() {
             commands::cancel_download,
             // Downloads — Phase D: offline playback via local file
             commands::play_local_file,
+            // Server upload — POST /api/upload from the shelf's Upload modal
+            commands::upload_media,
+            commands::cancel_upload,
+            commands::resolve_upload_files,
             // Local Library — Phase 1: scan a local folder into ABS-shaped items
             commands::scan_folder,
             // Local Library — Phase 2: SQLite catalog (libraries + items)

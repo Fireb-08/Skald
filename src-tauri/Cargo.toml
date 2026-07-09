@@ -43,9 +43,10 @@ log = "0.4"
 rust_socketio = { version = "0.6", features = ["async"] }
 # Required for .boxed() on async blocks in rust_socketio callbacks
 futures-util = "0.3"
-# CancellationToken — used in download_item to support user-initiated cancel.
-# CancellationToken lives in the "rt" feature, not "sync".
-tokio-util = { version = "0.7", features = ["rt"] }
+# CancellationToken — used in download_item / upload_media to support
+# user-initiated cancel. CancellationToken lives in the "rt" feature, not "sync".
+# "io" adds ReaderStream, which upload_media uses to stream file bodies.
+tokio-util = { version = "0.7", features = ["rt", "io"] }
 # zip: extract downloaded audiobook archives from the ABS server.
 # deflate is the compression codec ABS uses; bzip2/zstd are not needed.
 zip = { version = "2", default-features = false, features = ["deflate"] }

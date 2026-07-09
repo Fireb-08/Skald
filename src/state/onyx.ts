@@ -263,6 +263,10 @@ export interface OnyxState {
   setUser: (user: User | null) => void;
   // True when the logged-in user is admin or root. Derived from user.type.
   isAdmin: boolean;
+  // True when the user may upload media to the server (POST /api/upload).
+  // Admin/root always can (the server's canUpload getter returns true for them);
+  // other users need permissions.upload, captured from /api/me after load.
+  canUpload: boolean;
   // True when running without a server (local-only mode). Opens the app shell
   // just like an auth token does, so non-ABS users can use local libraries.
   localMode: boolean;
@@ -549,6 +553,12 @@ export function useOnyxState(): OnyxState {
     setUserRaw(v);
   }, []);
 
+  // permissions.upload from /api/me — gates the shelf Upload button for
+  // non-admin users. Session-only (not persisted): the button simply appears
+  // once the post-library /api/me fetch lands, keeping revoked permissions from
+  // lingering across sessions.
+  const [uploadPerm, setUploadPerm] = useState(false);
+
   // Local-only mode (no server). Persisted so the app re-opens straight into the
   // shell on next launch without a login.
   const [localMode, setLocalModeRaw] = useState(() => localStorage.getItem('skald.localMode') === 'true');
@@ -827,6 +837,8 @@ export function useOnyxState(): OnyxState {
         if (cancelled) return;
         applyServerProgress(me.mediaProgress);
         setBookmarks(me.bookmarks);
+        // Capture the upload permission for the shelf Upload button gate.
+        setUploadPerm(!!me.permissions?.upload);
         // Refresh user type from server — merge into stored user record and persist.
         if (me.type !== undefined) {
           const storedRaw = localStorage.getItem('skald.user');
@@ -1453,6 +1465,8 @@ export function useOnyxState(): OnyxState {
         // and cover progress overlays are correct without waiting for events.
         const me = await getMe(serverUrl);
         applyServerProgress(me.mediaProgress);
+        // Permissions may have been edited during the outage — refresh the gate.
+        setUploadPerm(!!me.permissions?.upload);
       } catch (e) {
         console.error('[sync] resync failed:', e);
       }
@@ -1561,6 +1575,10 @@ export function useOnyxState(): OnyxState {
     authToken, setAuthToken,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
+    // Server-side, the canUpload getter is true for admin/root regardless of the
+    // permissions object, so mirror that here rather than trusting me.permissions
+    // alone (it also covers the window before the /api/me fetch lands).
+    canUpload: user?.type === 'admin' || user?.type === 'root' || uploadPerm,
     localMode, setLocalMode,
     localDisplayName, setLocalDisplayName,
     onboarded, setOnboarded,

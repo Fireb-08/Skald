@@ -323,6 +323,10 @@ pub struct MeResponse {
     /// "root" | "admin" | "user" | "guest"
     #[serde(rename = "type", default)]
     pub user_type: Option<String>,
+    /// Full permissions object (User.toOldJSONForBrowser includes it) — lets the
+    /// frontend gate the Upload affordance without an extra request.
+    #[serde(default)]
+    pub permissions: Option<UserPermissions>,
 }
 
 /// Minimal per-book entry inside the listening-stats `items` map.

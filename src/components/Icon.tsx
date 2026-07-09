@@ -11,7 +11,7 @@ export type IconName =
   | 'headphones' | 'speaker' | 'airplay' | 'bluetooth' | 'monitor'
   | 'home' | 'grid' | 'list' | 'kbd' | 'cast' | 'sleep'
   // Context-menu action icons
-  | 'download' | 'check-circle' | 'clock' | 'playlist' | 'layers' | 'share'
+  | 'download' | 'upload' | 'check-circle' | 'clock' | 'playlist' | 'layers' | 'share'
   | 'sliders' | 'trash' | 'edit' | 'image' | 'target' | 'file' | 'refresh';
 
 export interface IconProps {
@@ -100,6 +100,8 @@ export default function Icon({ name, size = 16, color, className }: IconProps) {
       return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M13 9 A 5 5 0 1 1 7 3 A 4 4 0 0 0 13 9 Z" {...stroke} /></svg>;
     case 'download':
       return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M8 2 L8 10 M5 7 L8 10 L11 7" {...stroke} /><path d="M3 13 L13 13" {...stroke} /></svg>;
+    case 'upload': // mirror of 'download' — arrow up over the same tray line
+      return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M8 10 L8 2 M5 5 L8 2 L11 5" {...stroke} /><path d="M3 13 L13 13" {...stroke} /></svg>;
     case 'check-circle':
       return <svg style={s} className={className} viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" {...stroke} /><path d="M5.3 8 L7.2 10 L10.7 6" {...stroke} strokeWidth="1.5" /></svg>;
     case 'clock':

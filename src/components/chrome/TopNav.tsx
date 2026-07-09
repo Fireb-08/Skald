@@ -7,6 +7,7 @@ import type { ScannedItem } from '../../api/abs';
 import Glass from './Glass';
 import Icon from '../Icon';
 import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
+import UploadModal from '../UploadModal';
 
 export interface TopNavProps {
   st: OnyxState;
@@ -45,6 +46,10 @@ export default function TopNav({ st }: TopNavProps) {
   const [addQueue, setAddQueue] = useState<ScannedItem[]>([]);
   const [addIndex, setAddIndex] = useState(0);
   const [addLib, setAddLib] = useState('');
+
+  // ── Upload (ABS libraries) ──────────────────────────────────────────────────
+  // The server-side counterpart of Add books: pick files → POST /api/upload.
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const addBooks = async () => {
     const lib = st.activeLibrary;
@@ -204,6 +209,26 @@ export default function TopNav({ st }: TopNavProps) {
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Add books</span>
           </button>
         )}
+        {/* Upload — ABS libraries, users with the upload permission (admin/root
+            always qualify). Same slot + visual language as the local Add-books
+            button; opens the Upload modal (POST /api/upload). */}
+        {st.activeLibrary && st.activeLibrary.source !== 'local' && st.canUpload && (
+          <button
+            onClick={() => setUploadOpen(true)}
+            title="Upload audiobooks to the server"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0,
+              background: 'var(--onyx-accent-dim)', color: 'var(--onyx-text)',
+              border: '1px solid var(--onyx-accent-edge)', borderRadius: 10,
+              padding: '8px 13px', cursor: 'pointer',
+            }}
+          >
+            <span style={{ display: 'inline-flex', color: 'var(--onyx-accent)' }}>
+              <Icon name="upload" size={15} />
+            </span>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Upload</span>
+          </button>
+        )}
       </div>
       <div style={{ flex: 1, marginLeft: 24, position: 'relative' }}>
         <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--onyx-text-mute)', display: 'flex', pointerEvents: 'none' }}>
@@ -331,6 +356,9 @@ export default function TopNav({ st }: TopNavProps) {
         onRefresh={() => {}}
       />
     )}
+
+    {/* Upload flow — server-side item creation via POST /api/upload. */}
+    {uploadOpen && <UploadModal st={st} onClose={() => setUploadOpen(false)} />}
     </>
   );
 }
