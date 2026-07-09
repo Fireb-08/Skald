@@ -200,7 +200,8 @@ npx tsc --noEmit          # frontend type-check (does not touch the VLC DLL; saf
 pnpm test:front           # Vitest unit/hook tests (jsdom; Tauri APIs mocked — see src/test/tauriMocks.ts)
 pnpm test:rust            # cargo test (persistence/redaction/validation units; tempfile dirs, never real app data)
 pnpm verify:commands      # scripts/check-tauri-commands.mjs — #[tauri::command] / generate_handler! / frontend invoke() must all agree
-pnpm verify               # typecheck + test:front + verify:commands + test:rust — run before committing
+pnpm verify:clippy        # cargo clippy --all-targets -D warnings — backend stays lint-clean (compiles the backend: app must not be running)
+pnpm verify               # typecheck + test:front + verify:commands + verify:clippy + test:rust — run before committing
 ```
 
 Verification: run `pnpm verify` before committing (note `test:rust` compiles the backend, so the app must not be running — critical lesson 11), then `pnpm tauri dev` for a manual UI check of anything the unit layers can't see. The automated suite is Phase 1 of the Testing Suite plan (`Vault/Skald/Skald/testing suite/`): regression tests for auth-material persistence, the HTML sanitizer, log redaction, the StrictMode shortcut lifecycle, downloads/offline-progress persistence, upload path validation, and URL redaction.

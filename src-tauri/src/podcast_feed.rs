@@ -227,32 +227,28 @@ fn handle_empty(
     _feed_url: &str,
 ) {
     match e.name().as_ref() {
-        b"enclosure" => {
-            if in_item {
+        b"enclosure" if in_item => {
+            let mut enc = Map::new();
+            if let Some(u) = attr(e, b"url") { enc.insert("url".into(), json!(u)); }
+            if let Some(t) = attr(e, b"type") { enc.insert("type".into(), json!(t)); }
+            if let Some(l) = attr(e, b"length") {
+                enc.insert("length".into(), json!(l.clone()));
+                if let Ok(n) = l.parse::<i64>() { item.insert("size".into(), json!(n)); }
+            }
+            if !enc.is_empty() {
+                item.insert("enclosure".into(), Value::Object(enc));
+            }
+        }
+        // Audio media:content is a fallback enclosure when <enclosure> is absent.
+        b"media:content" if in_item && !item.contains_key("enclosure") => {
+            let is_audio = attr(e, b"type").map(|t| t.starts_with("audio")).unwrap_or(false)
+                || attr(e, b"medium").map(|m| m == "audio").unwrap_or(false);
+            if is_audio {
                 let mut enc = Map::new();
                 if let Some(u) = attr(e, b"url") { enc.insert("url".into(), json!(u)); }
                 if let Some(t) = attr(e, b"type") { enc.insert("type".into(), json!(t)); }
-                if let Some(l) = attr(e, b"length") {
-                    enc.insert("length".into(), json!(l.clone()));
-                    if let Ok(n) = l.parse::<i64>() { item.insert("size".into(), json!(n)); }
-                }
                 if !enc.is_empty() {
                     item.insert("enclosure".into(), Value::Object(enc));
-                }
-            }
-        }
-        b"media:content" => {
-            // Audio media:content is a fallback enclosure when <enclosure> is absent.
-            if in_item && !item.contains_key("enclosure") {
-                let is_audio = attr(e, b"type").map(|t| t.starts_with("audio")).unwrap_or(false)
-                    || attr(e, b"medium").map(|m| m == "audio").unwrap_or(false);
-                if is_audio {
-                    let mut enc = Map::new();
-                    if let Some(u) = attr(e, b"url") { enc.insert("url".into(), json!(u)); }
-                    if let Some(t) = attr(e, b"type") { enc.insert("type".into(), json!(t)); }
-                    if !enc.is_empty() {
-                        item.insert("enclosure".into(), Value::Object(enc));
-                    }
                 }
             }
         }
@@ -266,30 +262,24 @@ fn handle_empty(
                 }
             }
         }
-        b"itunes:category" => {
-            if !in_item {
-                if let Some(t) = attr(e, b"text") {
-                    let t = t.trim().to_string();
-                    if !t.is_empty() && !categories.contains(&t) {
-                        categories.push(t);
-                    }
+        b"itunes:category" if !in_item => {
+            if let Some(t) = attr(e, b"text") {
+                let t = t.trim().to_string();
+                if !t.is_empty() && !categories.contains(&t) {
+                    categories.push(t);
                 }
             }
         }
-        b"podcast:chapters" => {
-            if in_item {
-                if let Some(u) = attr(e, b"url") { item.insert("chaptersUrl".into(), json!(u)); }
-                if let Some(t) = attr(e, b"type") { item.insert("chaptersType".into(), json!(t)); }
-            }
+        b"podcast:chapters" if in_item => {
+            if let Some(u) = attr(e, b"url") { item.insert("chaptersUrl".into(), json!(u)); }
+            if let Some(t) = attr(e, b"type") { item.insert("chaptersType".into(), json!(t)); }
         }
-        b"atom:link" => {
-            // rel="self" carries the canonical feed URL.
-            if !in_item {
-                let rel = attr(e, b"rel").unwrap_or_default();
-                if rel == "self" {
-                    if let Some(href) = attr(e, b"href") {
-                        channel.entry("feedUrl").or_insert_with(|| json!(href));
-                    }
+        // rel="self" carries the canonical feed URL.
+        b"atom:link" if !in_item => {
+            let rel = attr(e, b"rel").unwrap_or_default();
+            if rel == "self" {
+                if let Some(href) = attr(e, b"href") {
+                    channel.entry("feedUrl").or_insert_with(|| json!(href));
                 }
             }
         }
@@ -303,8 +293,8 @@ fn apply_channel_field(name: &[u8], parent: &[u8], value: &str, channel: &mut Ma
         b"title" if parent == b"channel" => set_str(channel, "title", value),
         b"language" if parent == b"channel" => set_str(channel, "language", value),
         b"link" if parent == b"channel" => set_str(channel, "itunesPageUrl", value),
-        b"itunes:author" | b"managingEditor" => {
-            if !channel.contains_key("author") { set_str(channel, "author", value); }
+        b"itunes:author" | b"managingEditor" if !channel.contains_key("author") => {
+            set_str(channel, "author", value);
         }
         b"itunes:type" => set_str(channel, "type", value),
         b"itunes:new-feed-url" => {
@@ -314,8 +304,10 @@ fn apply_channel_field(name: &[u8], parent: &[u8], value: &str, channel: &mut Ma
         b"itunes:explicit" => {
             channel.insert("explicit".into(), json!(is_explicit(value)));
         }
-        b"description" | b"itunes:summary" if parent == b"channel" => {
-            if !channel.contains_key("description") { set_str(channel, "description", value); }
+        b"description" | b"itunes:summary"
+            if parent == b"channel" && !channel.contains_key("description") =>
+        {
+            set_str(channel, "description", value);
         }
         b"pubDate" if parent == b"channel" => set_str(channel, "releaseDate", value),
         // <image><url> — the RSS channel art (used if itunes:image was absent).
@@ -338,24 +330,24 @@ fn apply_item_field(
     let _ = parent;
     match name {
         b"title" => set_str(item, "title", value),
-        b"itunes:subtitle" | b"subtitle" => {
-            if !item.contains_key("subtitle") { set_str(item, "subtitle", value); }
+        b"itunes:subtitle" | b"subtitle" if !item.contains_key("subtitle") => {
+            set_str(item, "subtitle", value);
         }
-        b"itunes:author" | b"author" | b"dc:creator" => {
-            if !item.contains_key("author") { set_str(item, "author", value); }
+        b"itunes:author" | b"author" | b"dc:creator" if !item.contains_key("author") => {
+            set_str(item, "author", value);
         }
         b"content:encoded" => {
             // content:encoded is the richest body — always wins over <description>.
             set_str(item, "description", value);
             *has_content_encoded = true;
         }
-        b"description" | b"itunes:summary" => {
-            if !*has_content_encoded && !item.contains_key("description") {
-                set_str(item, "description", value);
-            }
+        b"description" | b"itunes:summary"
+            if !*has_content_encoded && !item.contains_key("description") =>
+        {
+            set_str(item, "description", value);
         }
-        b"guid" | b"id" => {
-            if !item.contains_key("guid") { set_str(item, "guid", value); }
+        b"guid" | b"id" if !item.contains_key("guid") => {
+            set_str(item, "guid", value);
         }
         b"pubDate" | b"published" => {
             set_str(item, "pubDate", value);

@@ -771,7 +771,7 @@ pub fn ingest_staging(library_id: &str) -> Result<Vec<ingest::IngestOutcome>, St
         .flatten();
     match staging {
         Some(s) if Path::new(&s).exists() => {
-            let outcomes = ingest_sources(library_id, &[s.clone()], true)?;
+            let outcomes = ingest_sources(library_id, std::slice::from_ref(&s), true)?;
             // Books were moved out — remove the empty folder skeletons left in Staging.
             ingest::prune_empty_dirs(Path::new(&s));
             Ok(outcomes)
@@ -1241,6 +1241,16 @@ fn episode_guid(ep: &Value) -> String {
         .to_string()
 }
 
+/// The auto-download/cover knobs of a podcast item JSON, named so the call
+/// site reads as key = value instead of a positional literal soup.
+struct PodcastItemPrefs<'a> {
+    auto_download: bool,
+    schedule: Option<&'a str>,
+    max_new: i64,
+    max_keep: i64,
+    has_cover: bool,
+}
+
 /// Build the ABS-shaped podcast `LibraryItem` JSON (without episodes — the caller
 /// injects the assembled list). Mirrors the shape `asPodcastItem()` reads.
 fn podcast_item_json(
@@ -1248,12 +1258,9 @@ fn podcast_item_json(
     library_id: &str,
     folder_path: &str,
     metadata: &Value,
-    auto_download: bool,
-    schedule: Option<&str>,
-    max_new: i64,
-    max_keep: i64,
-    has_cover: bool,
+    prefs: PodcastItemPrefs<'_>,
 ) -> Value {
+    let PodcastItemPrefs { auto_download, schedule, max_new, max_keep, has_cover } = prefs;
     json!({
         "id": id,
         "ino": id,
@@ -1311,7 +1318,14 @@ pub fn subscribe_podcast(
     let folder_str = folder.to_string_lossy().into_owned();
     let cover_dest = folder.join("cover.jpg").to_string_lossy().into_owned();
 
-    let item = podcast_item_json(&id, library_id, &folder_str, &metadata, auto_download, None, 3, 0, false);
+    // Subscribe-time defaults match the podcasts table's column DEFAULTs (3/0).
+    let item = podcast_item_json(&id, library_id, &folder_str, &metadata, PodcastItemPrefs {
+        auto_download,
+        schedule: None,
+        max_new: 3,
+        max_keep: 0,
+        has_cover: false,
+    });
     let item_str = serde_json::to_string(&item).map_err(|e| format!("serialize podcast: {e}"))?;
     let now = now_ms();
     conn.execute(

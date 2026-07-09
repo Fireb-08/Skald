@@ -498,7 +498,7 @@ impl SessionManager {
                     // Throttled persistence: remember this tick, write on the boundary.
                     pending = Some((report, dur));
                     ticks += 1;
-                    if ticks % PERSIST_EVERY == 0 {
+                    if ticks.is_multiple_of(PERSIST_EVERY) {
                         persist(report, dur, false);
                         pending = None;
                     }

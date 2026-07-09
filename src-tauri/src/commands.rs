@@ -850,9 +850,8 @@ pub async fn close_all_open_sessions(server_url: String) -> Result<u32, String> 
     let ids = client.get_open_sessions().await?;
     let mut closed: u32 = 0;
     for id in &ids {
-        match client.close_session_by_id(id).await {
-            Ok(()) => { closed += 1; }
-            Err(_) => {}
+        if client.close_session_by_id(id).await.is_ok() {
+            closed += 1;
         }
     }
     Ok(closed)
@@ -1388,14 +1387,11 @@ pub async fn subscribe_local_opml(
         let lib = library_id.clone();
         let fu = feed_url.clone();
         let res = tokio::task::spawn_blocking(move || crate::catalog::subscribe_podcast(&lib, &feed, &fu, auto)).await;
-        match res {
-            Ok(Ok((_, cover_dest, cover_url))) => {
-                if let Some(url) = cover_url {
-                    let _ = crate::providers::download_cover(&url, std::path::Path::new(&cover_dest)).await;
-                }
-                ok += 1;
+        if let Ok(Ok((_, cover_dest, cover_url))) = res {
+            if let Some(url) = cover_url {
+                let _ = crate::providers::download_cover(&url, std::path::Path::new(&cover_dest)).await;
             }
-            _ => {}
+            ok += 1;
         }
     }
     log::info!(target: "skald::library", "opml bulk subscribe lib={library_id} subscribed={ok}");
@@ -1934,6 +1930,9 @@ pub async fn create_user(
 /// Any `None` field is omitted from the request body so the server keeps the
 /// existing value. An empty string `password` is converted to `None` here so
 /// that leaving the password field blank in the UI does not overwrite it.
+// Flat args are the frontend invoke() payload keys one-to-one — the IPC
+// contract. Bundling them into a struct would nest the payload; not worth it.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn update_user(
     server_url: String,
@@ -1957,12 +1956,14 @@ pub async fn update_user(
         .with_token(token)
         .update_user(
             &user_id,
-            username.as_deref(),
-            pw,
-            user_type.as_deref(),
-            email.as_deref(),
-            is_active,
-            permissions,
+            crate::api::UserPatch {
+                username: username.as_deref(),
+                password: pw,
+                user_type: user_type.as_deref(),
+                email: email.as_deref(),
+                is_active,
+                permissions,
+            },
         )
         .await
 }
@@ -2543,6 +2544,9 @@ pub fn resolve_upload_files(paths: Vec<String>) -> Result<Vec<UploadFileEntry>, 
 /// upload-complete / upload-cancelled / upload-failed, all keyed by the
 /// client-generated uploadId (mirrors the download event family).
 /// Requires the user's `upload` permission — ABS answers 403 otherwise.
+// Flat args are the frontend invoke() payload keys one-to-one — the IPC
+// contract. Bundling them into a struct would nest the payload; not worth it.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn upload_media(
     server_url: String,
@@ -2621,7 +2625,18 @@ pub async fn upload_media(
 
     let result = AbsClient::new(server_url)
         .with_token(token)
-        .upload_media(&library_id, &folder_id, &title, &author, &series, &file_paths, cancel.clone(), on_progress)
+        .upload_media(
+            crate::api::UploadForm {
+                library_id: &library_id,
+                folder_id: &folder_id,
+                title: &title,
+                author: &author,
+                series: &series,
+            },
+            &file_paths,
+            cancel.clone(),
+            on_progress,
+        )
         .await;
 
     uploads.0.lock().await.remove(&upload_id);

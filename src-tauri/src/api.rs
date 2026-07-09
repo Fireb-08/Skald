@@ -44,6 +44,28 @@ fn mime_for_upload(name: &str) -> &'static str {
     }
 }
 
+/// Text fields of the /api/upload multipart form (upload_media). The server
+/// files the item under folder.path/author/series/title; author/series may be
+/// empty (books only — podcasts never send them) and are then omitted.
+pub struct UploadForm<'a> {
+    pub library_id: &'a str,
+    pub folder_id: &'a str,
+    pub title: &'a str,
+    pub author: &'a str,
+    pub series: &'a str,
+}
+
+/// Sparse field set for PATCH /api/users/{id} (update_user). `None` omits the
+/// field from the body entirely, so the server keeps its existing value.
+pub struct UserPatch<'a> {
+    pub username: Option<&'a str>,
+    pub password: Option<&'a str>,
+    pub user_type: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub is_active: Option<bool>,
+    pub permissions: Option<serde_json::Value>,
+}
+
 impl AbsClient {
     pub fn new(base_url: String) -> Self {
         Self {
@@ -1303,15 +1325,12 @@ impl AbsClient {
     /// Object.values(req.files) and ignores the names.
     pub async fn upload_media(
         &self,
-        library_id: &str,
-        folder_id: &str,
-        title: &str,
-        author: &str,
-        series: &str,
+        form_fields: UploadForm<'_>,
         file_paths: &[String],
         cancel: tokio_util::sync::CancellationToken,
         on_progress: impl Fn(u64) + Clone + Send + Sync + 'static,
     ) -> Result<(), String> {
+        let UploadForm { library_id, folder_id, title, author, series } = form_fields;
         use futures_util::StreamExt;
         use std::sync::atomic::{AtomicU64, Ordering};
         use std::sync::Arc;
@@ -1911,13 +1930,9 @@ impl AbsClient {
     pub async fn update_user(
         &self,
         user_id: &str,
-        username: Option<&str>,
-        password: Option<&str>,
-        user_type: Option<&str>,
-        email: Option<&str>,
-        is_active: Option<bool>,
-        permissions: Option<serde_json::Value>,
+        patch: UserPatch<'_>,
     ) -> Result<AdminUser, String> {
+        let UserPatch { username, password, user_type, email, is_active, permissions } = patch;
         // Build a sparse JSON body with only the fields that were provided.
         let mut body = serde_json::Map::new();
         if let Some(u) = username  { body.insert("username".into(), u.into()); }

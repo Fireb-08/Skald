@@ -15,7 +15,8 @@
     "test:front:watch": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "verify:commands": "node scripts/check-tauri-commands.mjs",
-    "verify": "pnpm typecheck && pnpm test:front && pnpm verify:commands && pnpm test:rust"
+    "verify:clippy": "cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings",
+    "verify": "pnpm typecheck && pnpm test:front && pnpm verify:commands && pnpm verify:clippy && pnpm test:rust"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.2",

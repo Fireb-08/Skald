@@ -25,7 +25,7 @@ fn field_matches(field: &str, v: u32) -> bool {
             return true;
         }
         if let Some(step) = tok.strip_prefix("*/") {
-            return step.parse::<u32>().map(|n| n != 0 && v % n == 0).unwrap_or(false);
+            return step.parse::<u32>().map(|n| n != 0 && v.is_multiple_of(n)).unwrap_or(false);
         }
         if let Some((a, b)) = tok.split_once('-') {
             if let (Ok(a), Ok(b)) = (a.trim().parse::<u32>(), b.trim().parse::<u32>()) {
