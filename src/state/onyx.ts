@@ -828,8 +828,12 @@ export function useOnyxState(): OnyxState {
   // has loaded and we have valid credentials.
   // getMe doesn't need userId; we derive it from the response so this works
   // even when userId was never stored in localStorage from a prior session.
+  // Gated on libraryLoading (not library.length): an EMPTY library is a real,
+  // loaded state, and this fetch must still run for it — it's what captures
+  // permissions.upload, without which a delegated-upload user could never see
+  // the Upload button to bootstrap an empty library.
   useEffect(() => {
-    if (!serverUrl || !authToken || library.length === 0) return;
+    if (!serverUrl || !authToken || libraryLoading) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
@@ -864,7 +868,7 @@ export function useOnyxState(): OnyxState {
       }
     }, 2000);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [library, serverUrl, authToken]);
+  }, [library, libraryLoading, serverUrl, authToken]);
 
   // ── Playback ─────────────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('library');

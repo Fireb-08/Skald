@@ -142,7 +142,24 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
   }
 
   const totalBytes = files.reduce((a, f) => a + f.size, 0);
-  const canStart = files.length > 0 && title.trim().length > 0 && folderId !== '' && progress === null;
+
+  // The server flattens EVERY uploaded file into one destination directory named
+  // by its (sanitized) basename — and still answers 200 when a move collides —
+  // so two picks like "Disc 1/01.mp3" + "Disc 2/01.mp3" would silently drop or
+  // overwrite one file. Detect basename collisions (case-insensitive, matching
+  // Windows/ABS filing semantics) and block the upload until they're resolved.
+  const dupNames = (() => {
+    const seen = new Set<string>();
+    const dups = new Set<string>();
+    for (const f of files) {
+      const key = f.name.toLowerCase();
+      if (seen.has(key)) dups.add(f.name);
+      seen.add(key);
+    }
+    return [...dups];
+  })();
+
+  const canStart = files.length > 0 && dupNames.length === 0 && title.trim().length > 0 && folderId !== '' && progress === null;
 
   async function startUpload() {
     if (!canStart || !lib) return;
@@ -163,6 +180,15 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
         message: 'Uploaded — the server is scanning it in. It can take a moment (or a library scan if the folder watcher is off).',
         type: 'success',
       });
+      // With live sync on, the watcher's item_added socket event appends the new
+      // item to the shelf. Without it there is no automatic path, so schedule a
+      // one-shot refresh — by 10 s the server has typically watched + scanned the
+      // folder in (files are already moved when POST /api/upload returns). The
+      // timer outliving this modal is intentional.
+      if (localStorage.getItem('onyx.sync.live') !== 'true') {
+        const refresh = st.refreshLibrary;
+        setTimeout(() => { void refresh().catch(e => console.error('[upload] post-upload refresh failed:', e)); }, 10_000);
+      }
       onClose();
     } catch (e) {
       const msg = String(e);
@@ -327,6 +353,13 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
           {folders.length === 0 && (
             <div style={{ fontSize: 12, color: '#e8716a', fontFamily: MONO }}>
               This library has no folders to upload into.
+            </div>
+          )}
+
+          {dupNames.length > 0 && (
+            <div style={{ fontSize: 12, color: '#e8716a', fontFamily: MONO, wordBreak: 'break-word' }}>
+              Duplicate file name{dupNames.length > 1 ? 's' : ''}: {dupNames.join(', ')} — the server puts all
+              files in one folder, so one copy would be lost. Remove or rename the duplicates.
             </div>
           )}
 
