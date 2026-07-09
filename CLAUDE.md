@@ -84,12 +84,14 @@ Skald/
 │   ├── App.tsx                   # Screen-switch root composition
 │   ├── index.css                 # Global rules + :root CSS custom properties (Onyx tokens)
 │   ├── api/
-│   │   ├── abs.ts                # Typed Tauri command bindings (the main bridge)
+│   │   ├── abs.ts                # Barrel over abs/ — import path for all command bindings
+│   │   ├── abs/                  # Typed Tauri command bindings, one module per feature domain
 │   │   ├── eq.ts                 # Equalizer command bindings
 │   │   ├── playbook.ts           # Playback helpers
 │   │   └── reviewCache.ts        # Open Library review/rating cache
 │   ├── state/
-│   │   ├── onyx.ts               # useOnyxState — top-level shared state, types, helpers
+│   │   ├── onyx.ts               # useOnyxState — top-level shared state (re-exports bookHelpers)
+│   │   ├── bookHelpers.ts        # Pure book/chapter/time helpers (unit-tested)
 │   │   └── theme.ts              # applyTheme, setAccentColor, palettes
 │   ├── hooks/  lib/              # Shared hooks and utilities
 │   ├── components/
@@ -110,8 +112,8 @@ Skald/
 │   └── src/
 │       ├── lib.rs                # run() — window setup + invoke_handler! registration + shutdown sync
 │       ├── main.rs               # Thin entry point → lib::run()
-│       ├── commands.rs           # #[tauri::command] functions
-│       ├── api.rs                # Audiobookshelf HTTP client (AbsClient)
+│       ├── commands/             # #[tauri::command] fns, one module per domain; mod.rs glob-re-exports
+│       ├── api/                  # AbsClient (mod.rs) + one impl block per domain module
 │       ├── models.rs             # Serde structs (camelCase)
 │       ├── auth.rs               # Token persistence via keyring
 │       ├── audio.rs              # LibVLC playback via vlc-rs
