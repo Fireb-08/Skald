@@ -51,6 +51,11 @@ export default function Library({ st }: LibraryProps) {
       flexDirection: 'column',
       flexShrink: 0,            // prevent width compression (same constraint as FocusPanel)
       minHeight: 0,
+      // Cap at the Focus/Greeting card footprint (360) so a long nowrap episode
+      // title in the MiniPlayer can't stretch the column's intrinsic width past
+      // the card — the title then ellipsizes instead. maxWidth (not width) so
+      // the collapsed FocusPanel rail (76px) still shrinks the column to fit.
+      maxWidth: 360,
     }}>
       {/* Host stretches the Focus/Greeting card to the available height; the
           MiniPlayer (when shown) docks below it at the column's width. */}
