@@ -34,24 +34,41 @@ type SectionId =
 // from non-admin users. Both are filtered at render time but keep their slot.
 interface NavSection { id: SectionId; label: string; icon: IconName; requiresAbs?: boolean; adminOnly?: boolean; }
 
-// Sorted alphabetically by label. ABS-only entries (Server + the admin panes) are
-// hidden when no server is connected; admin panes are also hidden from non-admins.
-const NAV: NavSection[] = [
-  { id: 'about',           label: 'About',           icon: 'dot'        },
-  { id: 'account',         label: 'Account',         icon: 'home'       },
-  { id: 'appearance',      label: 'Appearance',      icon: 'speaker'    },
-  { id: 'audio',           label: 'Audio',           icon: 'headphones' },
-  { id: 'backups',         label: 'Backups',         icon: 'bookmark',   requiresAbs: true, adminOnly: true },
-  { id: 'downloads',       label: 'Downloads',       icon: 'bookmark'   },
-  { id: 'keyboard',        label: 'Keyboard',        icon: 'kbd'        },
-  { id: 'library',         label: 'Libraries',       icon: 'grid'       },
-  { id: 'logs',            label: 'Logs',            icon: 'list',       requiresAbs: true, adminOnly: true },
-  { id: 'notifications',   label: 'Notifications',   icon: 'airplay',    requiresAbs: true, adminOnly: true },
-  { id: 'playback',        label: 'Playback',        icon: 'play'       },
-  { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep',      requiresAbs: true, adminOnly: true },
-  { id: 'server',          label: 'Server',          icon: 'monitor',    requiresAbs: true },
-  { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay',    requiresAbs: true, adminOnly: true },
+interface NavGroup { label: string; sections: NavSection[]; }
+
+// Group by the intent that brought the user to Settings. A whole group vanishes
+// when all of its sections are permission/source gated, keeping local-only mode
+// concise without maintaining a second navigation model.
+const NAV_GROUPS: NavGroup[] = [
+  { label: 'This device', sections: [
+    { id: 'account',    label: 'Account',    icon: 'home'       },
+    { id: 'appearance', label: 'Appearance', icon: 'speaker'    },
+    { id: 'audio',      label: 'Audio',      icon: 'headphones' },
+    { id: 'downloads',  label: 'Downloads',  icon: 'bookmark'   },
+    { id: 'keyboard',   label: 'Keyboard',   icon: 'kbd'        },
+  ]},
+  { label: 'Libraries', sections: [
+    { id: 'library',  label: 'Libraries', icon: 'grid' },
+    { id: 'playback', label: 'Playback',  icon: 'play' },
+  ]},
+  { label: 'Audiobookshelf server', sections: [
+    { id: 'server',          label: 'Server',          icon: 'monitor',  requiresAbs: true },
+    { id: 'logs',            label: 'Logs',            icon: 'list',     requiresAbs: true, adminOnly: true },
+    { id: 'backups',         label: 'Backups',         icon: 'bookmark', requiresAbs: true, adminOnly: true },
+    { id: 'notifications',   label: 'Notifications',   icon: 'airplay',  requiresAbs: true, adminOnly: true },
+    { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep',    requiresAbs: true, adminOnly: true },
+    { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay',  requiresAbs: true, adminOnly: true },
+  ]},
+  { label: 'About', sections: [
+    { id: 'about', label: 'About', icon: 'dot' },
+  ]},
 ];
+
+const NAV = NAV_GROUPS.flatMap(group => group.sections);
+
+function sectionVisible(section: NavSection, hasAbs: boolean, isAdmin: boolean): boolean {
+  return !(section.requiresAbs && !hasAbs) && !(section.adminOnly && !isAdmin);
+}
 
 export default function Settings({ st, onLogout }: SettingsProps) {
   const requestedSection = NAV.some(item => item.id === st.settingsSection)
@@ -63,6 +80,9 @@ export default function Settings({ st, onLogout }: SettingsProps) {
   // skald.hasAuth presence flag, so this is stable across reloads and survives
   // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
+  const visibleGroups = NAV_GROUPS
+    .map(group => ({ ...group, sections: group.sections.filter(item => sectionVisible(item, hasAbs, st.isAdmin)) }))
+    .filter(group => group.sections.length > 0);
 
   // Shell CTAs can target a pane while Settings is already mounted. Keep this
   // reactive rather than treating the requested pane as initial state only.
@@ -114,37 +134,37 @@ export default function Settings({ st, onLogout }: SettingsProps) {
         {/* Sidebar — scrolls vertically when the nav list is taller than the pane
             (low-resolution windows would otherwise spill the last items out). */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
-          {NAV.map(s => {
-            // Hide ABS-only panes in local-only mode (no server connected), and
-            // hide admin-only panes from non-admins. Libraries stays visible for
-            // everyone — it also hosts local libraries (always available); the
-            // admin-only server-library pane inside it is gated within the section.
-            if (s.requiresAbs && !hasAbs) return null;
-            if (s.adminOnly && !st.isAdmin) return null;
-            // Build the label — append a count badge for Downloads when books are present.
-            // This gives the user an at-a-glance view of how many books are stored offline.
-            const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
-            const label = downloadCount > 0 ? `${s.label} (${downloadCount})` : s.label;
-            return (
-              <button
-                key={s.id}
-                onClick={() => { setSection(s.id); st.setSettingsSection(s.id); }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  padding: '9px 12px', borderRadius: 8,
-                  background: section === s.id ? 'var(--onyx-accent-dim)' : 'transparent',
-                  border: `1px solid ${section === s.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
-                  cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' as const,
-                  color: section === s.id ? 'var(--onyx-accent)' : 'var(--onyx-text)',
-                  fontSize: 13, fontWeight: section === s.id ? 500 : 400,
-                  marginBottom: 2,
-                }}
-              >
-                <Icon name={s.icon} size={14} color={section === s.id ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)'} />
-                {label}
-              </button>
-            );
-          })}
+          {visibleGroups.map((group, groupIndex) => (
+            <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : 14 }}>
+              <div style={{ padding: '0 12px 6px', fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>
+                {group.label}
+              </div>
+              {group.sections.map(s => {
+                // Downloads keeps its at-a-glance stored-book count.
+                const downloadCount = s.id === 'downloads' ? st.downloads.length : 0;
+                const label = downloadCount > 0 ? `${s.label} (${downloadCount})` : s.label;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => { setSection(s.id); st.setSettingsSection(s.id); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                      padding: '9px 12px', borderRadius: 8,
+                      background: section === s.id ? 'var(--onyx-accent-dim)' : 'transparent',
+                      border: `1px solid ${section === s.id ? 'var(--onyx-accent-edge)' : 'transparent'}`,
+                      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' as const,
+                      color: section === s.id ? 'var(--onyx-accent)' : 'var(--onyx-text)',
+                      fontSize: 13, fontWeight: section === s.id ? 500 : 400,
+                      marginBottom: 2,
+                    }}
+                  >
+                    <Icon name={s.icon} size={14} color={section === s.id ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)'} />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
 
           <div style={{ flex: 1 }} />
         </Glass>

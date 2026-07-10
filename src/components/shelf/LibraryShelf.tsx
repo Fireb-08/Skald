@@ -84,6 +84,37 @@ function getVal(b: LibraryItem, key: string): string | number {
   }
 }
 
+function ShelfEmptyState({ st }: { st: OnyxState }) {
+  const libraryEmpty = st.library.length === 0;
+  const isLocal = st.activeLibrary?.source === 'local';
+
+  if (libraryEmpty) {
+    return (
+      <div style={{ padding: '58px 24px', textAlign: 'center' }}>
+        <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 9 }}>
+          {isLocal ? 'This PC library' : 'Server library'}
+        </div>
+        <div style={{ fontFamily: SERIF, fontSize: 17, color: 'var(--onyx-text-dim)' }}>
+          {isLocal ? 'No books on this PC shelf yet.' : 'No books in this Audiobookshelf library yet.'}
+        </div>
+        <div style={{ marginTop: 7, fontSize: 11.5, lineHeight: 1.5, color: 'var(--onyx-text-mute)' }}>
+          {isLocal
+            ? 'Use Add books above to choose files or a folder, or open the watched Staging folder.'
+            : st.canUpload
+              ? 'Use Upload above to add books to the server, or scan the library from Audiobookshelf.'
+              : 'Add or scan books on the Audiobookshelf server, then refresh this library.'}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
+      {st.search ? <>No titles match &ldquo;{st.search}&rdquo;.</> : 'No titles match the current filters.'}
+    </div>
+  );
+}
+
 function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
   books: LibraryItem[];
   st: OnyxState;
@@ -122,11 +153,7 @@ function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
   useEmptyWindowDiag('list', sorted.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
 
   if (sorted.length === 0) {
-    return (
-      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
-        No titles match &ldquo;{st.search}&rdquo;.
-      </div>
-    );
+    return <ShelfEmptyState st={st} />;
   }
 
   const TRUNC: React.CSSProperties = { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
@@ -312,11 +339,7 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
   useEmptyWindowDiag('grid', books.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
 
   if (books.length === 0) {
-    return (
-      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
-        No titles match &ldquo;{st.search}&rdquo;.
-      </div>
-    );
+    return <ShelfEmptyState st={st} />;
   }
 
   return (

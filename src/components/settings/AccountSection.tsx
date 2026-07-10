@@ -962,7 +962,12 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
 
   return (
     <div>
-      <SectionHead title="Account" subtitle="Your profile on this Audiobookshelf server." />
+      <SectionHead
+        title="Account"
+        subtitle={hasAbs
+          ? 'Your profile on this Audiobookshelf server.'
+          : 'Your profile on this device. Server accounts appear here after you connect to Audiobookshelf.'}
+      />
 
       {/* ── Profile header card — shown for all users ── */}
       <div style={{
