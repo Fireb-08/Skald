@@ -88,6 +88,27 @@ fn persist_decision(
     }
 }
 
+/// Watch a spawned playback task and make its death observable (review H5): a
+/// panic inside a tick/sync loop is otherwise swallowed by tokio and progress
+/// tracking silently stops for the rest of the session. The watcher logs the
+/// panic and emits `sync-failed` so the frontend can tell the user to restart
+/// playback. Normal task exit (session teardown via the active flag) is not an
+/// error and passes through silently.
+fn watch_task<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    task: &'static str,
+    handle: tokio::task::JoinHandle<()>,
+) {
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            if e.is_panic() {
+                log::error!(target: "skald::sync", "{task} task panicked — progress tracking stopped: {e}");
+                let _ = app.emit("sync-failed", serde_json::json!({ "task": task }));
+            }
+        }
+    });
+}
+
 pub struct SessionManager {
     pub client: AbsClient,
     pub session_id: Option<String>,
@@ -270,7 +291,7 @@ impl SessionManager {
         let active_tick = Arc::clone(&active);
         let app_tick = app.clone();
 
-        tokio::spawn(async move {
+        let tick_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
                 interval.tick().await;
@@ -289,15 +310,18 @@ impl SessionManager {
                 // Guard the shared position against the end-of-media / pre-buffer
                 // collapse to 0 (see commit_position).
                 {
-                    let mut ct = ct_tick.lock().unwrap();
+                    // Poison-tolerant like the player lock (review H5): these plain
+                    // f64 cells can't be left in a broken state, so inheriting a
+                    // poison here would only kill progress capture for no benefit.
+                    let mut ct = ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                     *ct = commit_position(*ct, pos, dur, live, ended);
                 }
                 if playing {
-                    *tl_tick.lock().unwrap() += 1.0;
+                    *tl_tick.lock().unwrap_or_else(|e| e.into_inner()) += 1.0;
                 }
                 // Report the committed position (held through transient states), not
                 // the raw `pos`, so the UI never flashes 0:00 at the end / during buffer.
-                let report = *ct_tick.lock().unwrap();
+                let report = *ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = app_tick.emit(
                     "playback-tick",
                     serde_json::json!({
@@ -308,6 +332,7 @@ impl SessionManager {
                 );
             }
         });
+        watch_task(app.clone(), "online tick", tick_handle);
 
         // ── Sync task: every 10 seconds (CLAUDE.md critical lesson 3) ─────────
         let ct_sync = Arc::clone(&self.current_time);
@@ -316,7 +341,7 @@ impl SessionManager {
         let session_id_sync = session.id.clone();
         let active_sync = Arc::clone(&active);
 
-        tokio::spawn(async move {
+        let sync_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(10));
             interval.tick().await; // skip the immediate first tick
             loop {
@@ -324,11 +349,14 @@ impl SessionManager {
                 if !active_sync.load(Ordering::Relaxed) {
                     break;
                 }
-                let ct = *ct_sync.lock().unwrap();
-                let tl = *tl_sync.lock().unwrap();
+                // Poison-tolerant (review H5): a stale read is strictly better
+                // than the sync loop dying and progress never persisting again.
+                let ct = *ct_sync.lock().unwrap_or_else(|e| e.into_inner());
+                let tl = *tl_sync.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = client_sync.sync_session(&session_id_sync, ct, tl).await;
             }
         });
+        watch_task(app.clone(), "session sync", sync_handle);
 
         // Multi-track ABS book → chain its tracks (see spawn_advance_task).
         if online_multitrack {
@@ -534,7 +562,7 @@ impl SessionManager {
         let tl_tick         = Arc::clone(&self.time_listened);
         let player_tick     = Arc::clone(&self.player);
         let active_tick     = Arc::clone(&active);
-        let app_tick        = app;
+        let app_tick        = app.clone();
         // Clone the item_id string into the task — it outlives this method call.
         let item_id_tick    = item_id.to_string();
         // Episode id (if any) for per-episode catalog progress writes.
@@ -549,7 +577,7 @@ impl SessionManager {
         let listen_pending_tick = Arc::clone(&self.local_listen_pending);
         let listen_session_tick = self.local_listen_session.clone();
 
-        tokio::spawn(async move {
+        let local_tick_handle = tokio::spawn(async move {
             // Persist resume progress at most every PERSIST_EVERY seconds — the UI
             // tick stays at 1 Hz, but 1 Hz disk writes are needless for a resume
             // position. The exact final position is still captured on book-switch /
@@ -613,11 +641,13 @@ impl SessionManager {
                 // Same end-of-media / pre-buffer guard as the online tick (see
                 // commit_position).
                 {
-                    let mut ct = ct_tick.lock().unwrap();
+                    // Poison-tolerant f64 cells (review H5) — same reasoning as the
+                    // online tick: never let an inherited poison stop progress capture.
+                    let mut ct = ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                     *ct = commit_position(*ct, pos, dur, live, ended);
                 }
                 if playing {
-                    *tl_tick.lock().unwrap() += 1.0;
+                    *tl_tick.lock().unwrap_or_else(|e| e.into_inner()) += 1.0;
                     // Local listening stats: count the second, flush to the
                     // catalog once enough accrue (1 Hz SQLite writes for stats
                     // would be needless churn — same reasoning as PERSIST_EVERY).
@@ -633,7 +663,7 @@ impl SessionManager {
                     }
                 }
                 // Report the committed position (never the raw 0 from Ended/buffering).
-                let report = *ct_tick.lock().unwrap();
+                let report = *ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = app_tick.emit(
                     "playback-tick",
                     serde_json::json!({
@@ -649,6 +679,7 @@ impl SessionManager {
                 }
             }
         });
+        watch_task(app, "local tick", local_tick_handle);
 
         // Multi-file book → chain its tracks (see spawn_advance_task).
         if multitrack {

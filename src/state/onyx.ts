@@ -1490,6 +1490,23 @@ export function useOnyxState(): OnyxState {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverUrl, authToken]);
 
+  // A playback tick/sync task panicked in the backend (review H5): progress
+  // tracking has stopped for this session. Rare by design — the watcher only
+  // fires on a genuine panic — so one concise toast plus the structured log
+  // entry is the whole surface; restarting playback respawns the tasks.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ task: string }>('sync-failed', e => {
+      log.error('sync', 'playback task died — progress tracking stopped', { task: e.payload.task });
+      setToast({
+        message: 'Progress tracking stopped unexpectedly — restart playback to resume it.',
+        type: 'error',
+      });
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
