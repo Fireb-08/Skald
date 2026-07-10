@@ -3,6 +3,7 @@
 // not from this file directly.
 import { invoke } from '@tauri-apps/api/core';
 import type { Bookmark, Library, LibraryItem, MediaProgress } from './types';
+import type { UserStats } from './sessions';
 
 // ── Local Library (scanner) ──────────────────────────────────────────────────
 // A scanned book unit: an ABS-shaped LibraryItem the existing shelf/player can
@@ -99,6 +100,13 @@ export async function getLocalLibraryProgress(libraryId: string): Promise<MediaP
 /** Write local-library progress to the catalog (e.g. Mark as Finished). */
 export async function setLocalProgress(itemId: string, currentTime: number, duration: number, isFinished: boolean, episodeId?: string): Promise<void> {
   return invoke('set_local_progress', { itemId, episodeId: episodeId ?? null, currentTime, duration, isFinished });
+}
+
+/** Catalog-tracked local listening stats, in the same UserStats shape (and
+ *  SECONDS units) as GET /api/me/listening-stats — renderable or mergeable
+ *  with the server payload as-is (Local Listening Stats roadmap). */
+export async function getLocalListeningStats(): Promise<UserStats> {
+  return invoke<UserStats>('get_local_listening_stats');
 }
 
 /** Add a local bookmark; returns the stored bookmark (with its catalog id). */

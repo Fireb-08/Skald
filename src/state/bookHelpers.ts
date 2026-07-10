@@ -2,7 +2,7 @@
 // (Large-File Split roadmap, 2026-07-09; pure move, no logic changes).
 // Everything here is side-effect-free and directly unit-testable; onyx.ts
 // re-exports the lot, so consumers keep importing from '../state/onyx'.
-import type { LibraryItem, MediaProgress } from '../api/abs';
+import type { LibraryItem, LibraryStats, MediaProgress, UserStats } from '../api/abs';
 
 export interface Chapter {
   n: number;
@@ -41,6 +41,66 @@ export function mergeProgress(prev: MediaProgress[], next: MediaProgress[]): Med
   const byId = new Map(prev.map(p => [key(p), p]));
   for (const n of next) byId.set(key(n), n);
   return Array.from(byId.values());
+}
+
+// Merge two UserStats payloads (server + local listening stats) into one view
+// for GreetingPane's combine mode (Local Listening Stats roadmap). Both sides
+// use SECONDS throughout, so values sum directly: day totals add per key,
+// numDaysListened counts the day-key UNION (both sources listening on one day
+// is still one day), book counts sum (disjoint item sets — server counts ABS
+// items, local counts catalog items), and recent sessions interleave
+// newest-first capped at 10 (the pane shows 3).
+export function mergeUserStats(a: UserStats, b: UserStats): UserStats {
+  const days: Record<string, number> = { ...a.days };
+  for (const [day, secs] of Object.entries(b.days ?? {})) {
+    days[day] = (days[day] ?? 0) + secs;
+  }
+  const recentSessions = [...(a.recentSessions ?? []), ...(b.recentSessions ?? [])]
+    .sort((x, y) => (y.date ?? '').localeCompare(x.date ?? ''))
+    .slice(0, 10);
+  return {
+    totalTime: (a.totalTime ?? 0) + (b.totalTime ?? 0),
+    numDaysListened: Object.keys(days).length,
+    numBooksFinished: (a.numBooksFinished ?? 0) + (b.numBooksFinished ?? 0),
+    numBooksListened: (a.numBooksListened ?? 0) + (b.numBooksListened ?? 0),
+    recentSessions,
+    days,
+  };
+}
+
+// Compute a LibraryStats payload for a LOCAL library from its loaded items —
+// local libraries have no /stats endpoint, but everything the pane shows
+// (durations, sizes, genres, authors) is already on the items (Local Listening
+// Stats roadmap). Durations are seconds, matching the ABS payload.
+export function computeLocalLibraryStats(items: LibraryItem[]): LibraryStats {
+  const authors = new Set<string>();
+  const genreCounts: Record<string, number> = {};
+  let totalDuration = 0;
+  let numAudioTracks = 0;
+  let totalSize = 0;
+  for (const it of items) {
+    const a = bookAuthor(it);
+    if (a && a !== 'Unknown Author') authors.add(a);
+    for (const g of bookGenres(it)) genreCounts[g] = (genreCounts[g] ?? 0) + 1;
+    // media is pass-through JSON — books carry audioFiles/duration/size,
+    // podcasts carry episodes; read both shapes loosely.
+    const m = it.media as unknown as Record<string, unknown>;
+    totalDuration += typeof m.duration === 'number' ? m.duration : 0;
+    totalSize += typeof m.size === 'number' ? m.size : 0;
+    const audioFiles = m.audioFiles as unknown[] | undefined;
+    const episodes = m.episodes as unknown[] | undefined;
+    numAudioTracks += audioFiles?.length ?? episodes?.length ?? (m.numEpisodes as number | undefined) ?? 1;
+  }
+  return {
+    totalItems: items.length,
+    totalAuthors: authors.size,
+    totalDuration,
+    numAudioTracks,
+    totalAudioFilesSize: totalSize,
+    genres: Object.entries(genreCounts)
+      .sort((x, y) => y[1] - x[1])
+      .map(([genre, count]) => ({ genre, count })),
+  };
 }
 
 // ─── Display helpers for real LibraryItem ─────────────────────────────────────

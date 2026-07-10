@@ -63,6 +63,18 @@ pub async fn delete_local_bookmark(id: String) -> Result<(), String> {
         .map_err(|e| format!("delete_local_bookmark task panicked: {e}"))?
 }
 
+// ── Local listening stats (Local Listening Stats roadmap) ────────────────────
+
+/// Aggregate catalog-tracked local listening into the same UserStats shape the
+/// server returns from GET /api/me/listening-stats, so GreetingPane can render
+/// it directly or merge it with the server payload.
+#[tauri::command]
+pub async fn get_local_listening_stats() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(crate::catalog::get_listening_stats)
+        .await
+        .map_err(|e| format!("get_local_listening_stats task panicked: {e}"))?
+}
+
 // ── Local covers (Local Library roadmap, Phase 8) ────────────────────────────
 
 /// Resolve a local item's cover (sidecar image or embedded art), resize to 400px,

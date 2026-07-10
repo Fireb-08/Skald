@@ -5,10 +5,10 @@ import { describe, it, expect } from 'vitest';
 import {
   bookAuthor, bookTitle, bookPalette, bookTpl, bookChapters,
   fmtTime, fmtRemaining, chapterAt, chapterStart,
-  mergeProgress, patchLibraryItems,
+  mergeProgress, patchLibraryItems, mergeUserStats, computeLocalLibraryStats,
   type Chapter,
 } from './bookHelpers';
-import type { LibraryItem, MediaProgress } from '../api/abs';
+import type { LibraryItem, MediaProgress, UserStats } from '../api/abs';
 
 // Minimal LibraryItem factory — only the fields the helpers read.
 function item(metadata: Record<string, unknown>, extra: Record<string, unknown> = {}): LibraryItem {
@@ -118,5 +118,66 @@ describe('bookChapters', () => {
       { n: 1, t: 'Intro', dur: 90 },
       { n: 2, t: 'Ch 1', dur: 210 },
     ]);
+  });
+});
+
+describe('computeLocalLibraryStats (Local Listening Stats roadmap)', () => {
+  it('aggregates durations, sizes, authors, tracks, and ranked genres', () => {
+    const items = [
+      item({ authorName: 'A', genres: ['Fantasy'] }, { duration: 3600, size: 1000, audioFiles: [{}, {}] }),
+      item({ authorName: 'B', genres: ['Fantasy', 'Epic'] }, { duration: 1800, size: 500 }),
+      // A podcast-shaped item: episodes stand in for tracks; no book duration.
+      item({ authorName: 'A', genres: [] }, { duration: 0, episodes: [{}, {}, {}] }),
+    ];
+    const s = computeLocalLibraryStats(items);
+    expect(s.totalItems).toBe(3);
+    expect(s.totalAuthors).toBe(2);
+    expect(s.totalDuration).toBe(5400);
+    expect(s.totalAudioFilesSize).toBe(1500);
+    // 2 audio files + 1 fallback track + 3 episodes.
+    expect(s.numAudioTracks).toBe(6);
+    expect(s.genres[0]).toEqual({ genre: 'Fantasy', count: 2 });
+  });
+});
+
+describe('mergeUserStats (Local Listening Stats roadmap)', () => {
+  const stats = (over: Partial<UserStats>): UserStats => ({
+    totalTime: 0, numDaysListened: 0, numBooksFinished: 0, numBooksListened: 0,
+    recentSessions: [], days: {}, ...over,
+  });
+
+  it('sums totals and overlapping day keys, counts the day union once', () => {
+    const server = stats({ totalTime: 3600, days: { '2026-07-08': 1800, '2026-07-09': 1800 }, numBooksFinished: 2, numBooksListened: 3 });
+    const local  = stats({ totalTime: 600,  days: { '2026-07-09': 300, '2026-07-10': 300 },  numBooksFinished: 1, numBooksListened: 1 });
+    const m = mergeUserStats(server, local);
+    expect(m.totalTime).toBe(4200);
+    expect(m.days).toEqual({ '2026-07-08': 1800, '2026-07-09': 2100, '2026-07-10': 300 });
+    // 3 distinct days, not 4 — the shared day counts once.
+    expect(m.numDaysListened).toBe(3);
+    expect(m.numBooksFinished).toBe(3);
+    expect(m.numBooksListened).toBe(4);
+  });
+
+  it('interleaves recent sessions newest-first and caps at 10', () => {
+    const sess = (id: string, date: string) =>
+      ({ id, displayTitle: id, timeListening: 60, date, libraryItemId: 'x' });
+    const server = stats({ recentSessions: [sess('srv-new', '2026-07-10'), sess('srv-old', '2026-07-01')] });
+    const local  = stats({ recentSessions: Array.from({ length: 10 }, (_, i) => sess(`loc-${i}`, '2026-07-05')) });
+    const m = mergeUserStats(server, local);
+    expect(m.recentSessions).toHaveLength(10);
+    expect(m.recentSessions[0].id).toBe('srv-new');
+    // The oldest server session falls off the capped tail.
+    expect(m.recentSessions.some(s => s.id === 'srv-old')).toBe(false);
+  });
+
+  it('is identity-like against an empty side (standalone / no local listening)', () => {
+    const server = stats({ totalTime: 120, days: { '2026-07-09': 120 }, numBooksListened: 1 });
+    const m = mergeUserStats(server, stats({}));
+    expect(m.totalTime).toBe(120);
+    expect(m.numDaysListened).toBe(1);
+    expect(m.days).toEqual({ '2026-07-09': 120 });
+    // ABS's own payload omits numDaysListened — the merge recomputes it from
+    // the day keys rather than trusting the (absent → 0) field.
+    expect(mergeUserStats(stats({ days: { a: 1, b: 1 } }), stats({})).numDaysListened).toBe(2);
   });
 });

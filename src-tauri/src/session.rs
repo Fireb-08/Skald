@@ -114,6 +114,52 @@ pub struct SessionManager {
     // the catalog (keyed per (item, episode)). Empty/None for a whole-item book.
     // Set by play_local(); used by the tick loop and the shutdown handler.
     pub local_episode_id: Option<String>,
+    // ── Local listening stats (Local Listening Stats roadmap) ────────────────
+    // Seconds of local-library listening not yet flushed to the catalog. The
+    // 1-second tick increments it; flush_listen_time() drains it every
+    // LISTEN_FLUSH_EVERY seconds, at loop end, and from the shutdown handler.
+    // Shared (Arc) because the tick task and the shutdown path both drain it —
+    // mem::take-style draining makes a concurrent double-flush harmless.
+    pub local_listen_pending: Arc<Mutex<f64>>,
+    // The listen_sessions row id for the CURRENT local-library playback (one
+    // continuous play of one item/episode). None during online playback and for
+    // downloaded ABS books — their listening reaches server stats via session
+    // sync, and counting them locally too would double-represent them in a
+    // combined stats view.
+    pub local_listen_session: Option<String>,
+}
+
+/// How many accumulated local listening seconds trigger a catalog flush. The
+/// tail below this is captured by the loop-end / shutdown drains.
+const LISTEN_FLUSH_EVERY: f64 = 30.0;
+
+/// Drain the pending local listen-time counter into the catalog (listen_days +
+/// listen_sessions). Shared by the tick loop (periodic + loop-end flush) and
+/// lib.rs's ExitRequested handler (final flush — the tick task may never fire
+/// again once the runtime is shutting down). On a failed write the drained
+/// seconds are put back so the next flush retries instead of losing them.
+pub fn flush_listen_time(
+    session_id: Option<&str>,
+    item_id: &str,
+    episode_id: Option<&str>,
+    pending: &Arc<Mutex<f64>>,
+) {
+    let Some(sid) = session_id else { return };
+    let secs = {
+        // Poison-tolerant like the tick's player lock — stats must never be the
+        // thing that blocks a flush during teardown.
+        let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *p)
+    };
+    if secs < 1.0 {
+        return;
+    }
+    if let Err(e) = crate::catalog::add_listen_time(sid, item_id, episode_id, secs) {
+        log::warn!(target: "skald::playback", "local listen flush failed: {e}");
+        *pending.lock().unwrap_or_else(|p| p.into_inner()) += secs;
+    } else {
+        log::debug!(target: "skald::playback", "local listen flush session={sid} secs={secs}");
+    }
 }
 
 impl SessionManager {
@@ -129,6 +175,8 @@ impl SessionManager {
             local_item_id: None,
             is_local_library: false,
             local_episode_id: None,
+            local_listen_pending: Arc::new(Mutex::new(0.0)),
+            local_listen_session: None,
         }
     }
 
@@ -153,6 +201,9 @@ impl SessionManager {
         self.is_local_library = false;
         // Clear the local item ID — no longer tracking offline progress.
         self.local_item_id = None;
+        // Online playback is counted by the server's own listening stats — stop
+        // any local stats session (the old tick task drains pending on exit).
+        self.local_listen_session = None;
 
         // Initialize the audio player on first call (deferred to avoid
         // requiring libvlc.dll on PATH at startup).
@@ -363,6 +414,23 @@ impl SessionManager {
         // Remember the episode (if any) so catalog progress is written per episode.
         self.local_episode_id = episode_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
 
+        // New local playback = new listening-stats session row (Local Listening
+        // Stats roadmap). Only LOCAL-LIBRARY playback is counted — downloaded ABS
+        // books reach server stats via session sync once online. The pending
+        // counter gets a FRESH Arc (same pattern as the active flag) so the
+        // previous tick task's loop-end flush drains its own counter under its
+        // own session id, never racing this session's accumulation.
+        self.local_listen_session = if local_library {
+            let started = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            Some(format!("local-{item_id}-{started}"))
+        } else {
+            None
+        };
+        self.local_listen_pending = Arc::new(Mutex::new(0.0));
+
         // Initialize the audio player on first call (deferred init matches start_session).
         let player_newly_created = {
             let mut p = self.player.lock().unwrap();
@@ -477,6 +545,9 @@ impl SessionManager {
         // Local-library items persist progress to the SQLite catalog; downloaded
         // ABS books persist to the offline queue (which later flushes to the server).
         let local_library_tick = local_library;
+        // Listening-stats accumulation (local-library only — see the field docs).
+        let listen_pending_tick = Arc::clone(&self.local_listen_pending);
+        let listen_session_tick = self.local_listen_session.clone();
 
         tokio::spawn(async move {
             // Persist resume progress at most every PERSIST_EVERY seconds — the UI
@@ -525,6 +596,9 @@ impl SessionManager {
                 interval.tick().await;
                 if !active_tick.load(Ordering::Relaxed) {
                     if let Some((pos, dur)) = pstate.pending.take() { persist(pos, dur, false); }
+                    // Book-switch/stop: drain the listen tail so short sessions
+                    // (< LISTEN_FLUSH_EVERY) still register in the stats.
+                    flush_listen_time(listen_session_tick.as_deref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
                     break;
                 }
                 let (pos, dur, playing, live, ended) = {
@@ -544,6 +618,19 @@ impl SessionManager {
                 }
                 if playing {
                     *tl_tick.lock().unwrap() += 1.0;
+                    // Local listening stats: count the second, flush to the
+                    // catalog once enough accrue (1 Hz SQLite writes for stats
+                    // would be needless churn — same reasoning as PERSIST_EVERY).
+                    if listen_session_tick.is_some() {
+                        let due = {
+                            let mut pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
+                            *pend += 1.0;
+                            *pend >= LISTEN_FLUSH_EVERY
+                        };
+                        if due {
+                            flush_listen_time(listen_session_tick.as_deref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
+                        }
+                    }
                 }
                 // Report the committed position (never the raw 0 from Ended/buffering).
                 let report = *ct_tick.lock().unwrap();

@@ -345,6 +345,10 @@ pub fn run() {
             commands::parse_local_opml,
             commands::subscribe_local_opml,
             commands::export_local_opml,
+            // Podcast Episode Context Menu — per-episode local delete
+            commands::delete_local_episode,
+            // Local Listening Stats — catalog-tracked stats for GreetingPane
+            commands::get_local_listening_stats,
             // Listening sessions — Settings → Playback → Sessions tab
             commands::get_listening_sessions,
             commands::delete_session,
@@ -513,6 +517,18 @@ pub fn run() {
                                         if let Err(e) = downloads::upsert_progress_entry(&dl_dir, entry) {
                                             log::warn!(target: "skald::downloads", "shutdown progress write failed: {e}");
                                         }
+                                    }
+                                    // Final listen-time drain (Local Listening Stats
+                                    // roadmap): the tick task may never fire again once
+                                    // the runtime shuts down, so the ≤30s pending tail
+                                    // is written here — same rule as the progress write.
+                                    if guard.is_local_library {
+                                        session::flush_listen_time(
+                                            guard.local_listen_session.as_deref(),
+                                            item_id,
+                                            guard.local_episode_id.as_deref(),
+                                            &guard.local_listen_pending,
+                                        );
                                     }
                                 }
                                 return; // no server session — nothing more to do

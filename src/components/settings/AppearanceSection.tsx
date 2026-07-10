@@ -134,6 +134,17 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
           <Toggle on={st.showProgressOverlay} onChange={st.setShowProgressOverlay} />
         </Row>
 
+        {/* Only meaningful when there are two stats sources to combine: an ABS
+            login AND at least one local library (Local Listening Stats roadmap). */}
+        {!!st.serverUrl && st.libraries.some(l => l.source === 'local') && (
+          <Row
+            label="Combine listening stats"
+            hint="Merge server and on-this-PC listening into one “Your stats” view. Off: the stats card follows the active library."
+          >
+            <Toggle on={st.combineStats} onChange={st.setCombineStats} />
+          </Row>
+        )}
+
         {/* Optional shelf tabs (Home/Series/Authors/Collections are always shown) */}
         <div style={subEyebrow}>Shelf tabs</div>
 

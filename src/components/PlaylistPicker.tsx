@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react';
 import ReactDOM from 'react-dom';
 import type { LibraryItem } from '../state/onyx';
 import { getPlaylists, createPlaylist, batchAddToPlaylist } from '../api/abs';
-import type { Playlist } from '../api/abs';
+import type { Playlist, PodcastEpisode } from '../api/abs';
 import Icon from './Icon';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -16,11 +16,14 @@ const footBtn: CSSProperties = {
 
 export interface PlaylistPickerProps {
   item: LibraryItem;
+  /** When set, the picker adds this podcast EPISODE (item = its parent podcast)
+   *  instead of the whole item — ABS playlist entries carry an episodeId. */
+  episode?: PodcastEpisode | null;
   serverUrl: string;
   onClose: () => void;
 }
 
-export default function PlaylistPicker({ item, serverUrl, onClose }: PlaylistPickerProps) {
+export default function PlaylistPicker({ item, episode, serverUrl, onClose }: PlaylistPickerProps) {
   const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -39,10 +42,13 @@ export default function PlaylistPicker({ item, serverUrl, onClose }: PlaylistPic
     if (newMode) inputRef.current?.focus();
   }, [newMode]);
 
+  // Episode adds carry the episodeId alongside the parent podcast's item id.
+  const entry = episode?.id ? { libraryItemId: item.id, episodeId: episode.id } : { libraryItemId: item.id };
+
   async function handleAdd(playlist: Playlist) {
     setAdding(playlist.id);
     try {
-      await batchAddToPlaylist(serverUrl, playlist.id, [{ libraryItemId: item.id }]);
+      await batchAddToPlaylist(serverUrl, playlist.id, [entry]);
       onClose();
     } catch (e) {
       setError(String(e));
@@ -56,7 +62,7 @@ export default function PlaylistPicker({ item, serverUrl, onClose }: PlaylistPic
     setCreating(true);
     try {
       // Create the playlist with the item pre-populated — one round-trip instead of two.
-      await createPlaylist(serverUrl, item.libraryId, name, null, [{ libraryItemId: item.id }]);
+      await createPlaylist(serverUrl, item.libraryId, name, null, [entry]);
       onClose();
     } catch (e) {
       setError(String(e));
@@ -90,7 +96,9 @@ export default function PlaylistPicker({ item, serverUrl, onClose }: PlaylistPic
         <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Add to Playlist</div>
-            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>Choose a playlist for this book</div>
+            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {episode ? `Episode — ${episode.title}` : 'Choose a playlist for this book'}
+            </div>
           </div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>✕</button>
         </div>

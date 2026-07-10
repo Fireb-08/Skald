@@ -160,7 +160,28 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
             added_at     INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_episodes_podcast ON podcast_episodes(podcast_id);
-         CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_guid ON podcast_episodes(podcast_id, guid);",
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_episodes_guid ON podcast_episodes(podcast_id, guid);
+         -- ── Local listening stats (Local Listening Stats roadmap) ─────────────
+         -- listen_days: one row per local calendar day with any local-library
+         -- playback. time is SECONDS — the same unit ABS listening-stats uses
+         -- (verified against the web client's totalTime/60 minutes conversion),
+         -- so local and server stats merge without conversion.
+         CREATE TABLE IF NOT EXISTS listen_days (
+            day  TEXT PRIMARY KEY,
+            time REAL NOT NULL DEFAULT 0
+         );
+         -- listen_sessions: one row per continuous local playback of one item or
+         -- episode — powers the Recent sessions list. Pruned to the newest ~100
+         -- on write; day aggregates live in listen_days, so pruning loses nothing.
+         CREATE TABLE IF NOT EXISTS listen_sessions (
+            id             TEXT PRIMARY KEY,
+            item_id        TEXT NOT NULL,
+            episode_id     TEXT NOT NULL DEFAULT '',
+            display_title  TEXT NOT NULL DEFAULT '',
+            date           TEXT NOT NULL DEFAULT '',
+            time_listening REAL NOT NULL DEFAULT 0,
+            updated_at     INTEGER NOT NULL
+         );",
     )
     .map_err(|e| format!("init schema: {e}"))?;
 
@@ -1774,6 +1795,225 @@ pub fn delete_podcast(podcast_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Delete one downloaded episode's audio file and return it to the
+/// not-downloaded state (Podcast Episode Context Menu roadmap). The episode ROW
+/// is kept — its guid powers feed dedupe; deleting it would resurrect the
+/// episode as "new" on the next feed check (and auto-download could immediately
+/// re-fetch it). The (podcast, episode) progress row is removed so a later
+/// re-download starts clean instead of resuming a stale position.
+pub fn delete_local_episode(podcast_id: &str, episode_id: &str) -> Result<(), String> {
+    let conn = open()?;
+    delete_local_episode_conn(&conn, podcast_id, episode_id)
+}
+
+fn delete_local_episode_conn(conn: &Connection, podcast_id: &str, episode_id: &str) -> Result<(), String> {
+    let audio: Option<Option<String>> = conn
+        .query_row(
+            "SELECT audio_path FROM podcast_episodes WHERE podcast_id = ?1 AND id = ?2",
+            params![podcast_id, episode_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("episode lookup: {e}"))?;
+    let Some(audio) = audio else {
+        return Err("episode not found".to_string());
+    };
+    if let Some(p) = audio.as_deref() {
+        // Verify-before-delete (same rule as prune_episodes): only remove a file
+        // that actually exists; already-missing is not an error. A FAILED delete
+        // (e.g. a sharing violation from a player holding the handle) IS an
+        // error — flipping the flag anyway would orphan the file on disk.
+        if Path::new(p).is_file() {
+            std::fs::remove_file(p).map_err(|e| format!("delete episode file: {e}"))?;
+        }
+    }
+    conn.execute(
+        "UPDATE podcast_episodes SET downloaded = 0, audio_path = NULL WHERE podcast_id = ?1 AND id = ?2",
+        params![podcast_id, episode_id],
+    )
+    .map_err(|e| format!("episode delete update: {e}"))?;
+    conn.execute(
+        "DELETE FROM progress WHERE item_id = ?1 AND episode_id = ?2",
+        params![podcast_id, episode_id],
+    )
+    .map_err(|e| format!("episode progress delete: {e}"))?;
+    log::info!(target: "skald::downloads", "local episode delete podcast={podcast_id} episode={episode_id}");
+    Ok(())
+}
+
+// ── Local listening stats (Local Listening Stats roadmap) ─────────────────────
+
+/// Today's local date key ("YYYY-MM-DD") — local time, not UTC, matching both
+/// the ABS stats day keys and the frontend's localDateKey().
+fn local_day_key() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// Resolve a human title for a listen-session row. Episodes read the episode's
+/// feed title (falling back to the podcast title); books read the item's
+/// metadata title. Best-effort — an unknown id leaves the title empty and the
+/// UI shows "Unknown".
+fn display_title_for(conn: &Connection, item_id: &str, episode_id: &str) -> String {
+    if !episode_id.is_empty() {
+        let ep_json: Option<String> = conn
+            .query_row(
+                "SELECT episode_json FROM podcast_episodes WHERE id = ?1",
+                params![episode_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten();
+        if let Some(title) = ep_json
+            .and_then(|j| serde_json::from_str::<Value>(&j).ok())
+            .and_then(|v| v.get("title").and_then(|t| t.as_str()).map(String::from))
+        {
+            return title;
+        }
+        // Episode row gone or unreadable — fall back to the podcast's own title.
+        return conn
+            .query_row("SELECT title FROM podcasts WHERE id = ?1", params![item_id], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+    }
+    let item_json: Option<String> = conn
+        .query_row("SELECT item_json FROM items WHERE id = ?1", params![item_id], |r| r.get(0))
+        .optional()
+        .ok()
+        .flatten();
+    item_json
+        .and_then(|j| serde_json::from_str::<Value>(&j).ok())
+        .and_then(|v| {
+            v.pointer("/media/metadata/title")
+                .and_then(|t| t.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_default()
+}
+
+/// Record local-library listening time: adds `secs` to today's day total and to
+/// the given session row (creating it on first flush). Called from the playback
+/// tick's periodic flush and the shutdown drain — never at 1 Hz.
+pub fn add_listen_time(session_id: &str, item_id: &str, episode_id: Option<&str>, secs: f64) -> Result<(), String> {
+    let conn = open()?;
+    add_listen_time_conn(&conn, session_id, item_id, episode_id, secs, &local_day_key())
+}
+
+fn add_listen_time_conn(
+    conn: &Connection,
+    session_id: &str,
+    item_id: &str,
+    episode_id: Option<&str>,
+    secs: f64,
+    day: &str,
+) -> Result<(), String> {
+    if secs <= 0.0 {
+        return Ok(());
+    }
+    let ep = episode_id.unwrap_or("");
+    conn.execute(
+        "INSERT INTO listen_days (day, time) VALUES (?1, ?2)
+         ON CONFLICT(day) DO UPDATE SET time = time + excluded.time",
+        params![day, secs],
+    )
+    .map_err(|e| format!("listen day upsert: {e}"))?;
+    // The session's date follows its most recent listening — a session spanning
+    // midnight lands wholly on the later day, which is cosmetic (day TOTALS are
+    // per-flush accurate via listen_days above).
+    let title = display_title_for(conn, item_id, ep);
+    conn.execute(
+        "INSERT INTO listen_sessions (id, item_id, episode_id, display_title, date, time_listening, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(id) DO UPDATE SET
+            time_listening = time_listening + excluded.time_listening,
+            date = excluded.date, updated_at = excluded.updated_at",
+        params![session_id, item_id, ep, title, day, secs, now_ms()],
+    )
+    .map_err(|e| format!("listen session upsert: {e}"))?;
+    // Retention: recentSessions only ever shows a handful; keep the newest 100.
+    // rowid breaks updated_at ties (flushes within one millisecond) so the
+    // survivor set is deterministic.
+    conn.execute(
+        "DELETE FROM listen_sessions WHERE id NOT IN
+            (SELECT id FROM listen_sessions ORDER BY updated_at DESC, rowid DESC LIMIT 100)",
+        [],
+    )
+    .map_err(|e| format!("listen session prune: {e}"))?;
+    Ok(())
+}
+
+/// Aggregate local listening stats in the UserStats shape GreetingPane already
+/// consumes from GET /api/me/listening-stats (all times in SECONDS), so the
+/// frontend can render or merge it with the server payload unchanged.
+pub fn get_listening_stats() -> Result<Value, String> {
+    let conn = open()?;
+    get_listening_stats_conn(&conn)
+}
+
+fn get_listening_stats_conn(conn: &Connection) -> Result<Value, String> {
+    let mut days = serde_json::Map::new();
+    let mut total = 0.0f64;
+    {
+        let mut stmt = conn
+            .prepare("SELECT day, time FROM listen_days")
+            .map_err(|e| format!("listen days select: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?)))
+            .map_err(|e| format!("listen days query: {e}"))?;
+        for row in rows {
+            let (d, t) = row.map_err(|e| format!("listen days row: {e}"))?;
+            total += t;
+            days.insert(d, json!(t));
+        }
+    }
+    let num_days = days.len();
+    // Finished/listened counts come from the progress table (whole-item book
+    // rows), not the pruned sessions list, so they stay accurate over time.
+    let finished: i64 = conn
+        .query_row("SELECT COUNT(*) FROM progress WHERE is_finished = 1 AND episode_id = ''", [], |r| r.get(0))
+        .map_err(|e| format!("finished count: {e}"))?;
+    let listened: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM progress WHERE episode_id = '' AND \"current_time\" > 0",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("listened count: {e}"))?;
+    let mut sessions: Vec<Value> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, item_id, display_title, date, time_listening FROM listen_sessions
+                 ORDER BY updated_at DESC, rowid DESC LIMIT 10",
+            )
+            .map_err(|e| format!("listen sessions select: {e}"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(json!({
+                    "id": r.get::<_, String>(0)?,
+                    "libraryItemId": r.get::<_, String>(1)?,
+                    "displayTitle": r.get::<_, String>(2)?,
+                    "date": r.get::<_, String>(3)?,
+                    "timeListening": r.get::<_, f64>(4)?,
+                }))
+            })
+            .map_err(|e| format!("listen sessions query: {e}"))?;
+        for row in rows {
+            sessions.push(row.map_err(|e| format!("listen sessions row: {e}"))?);
+        }
+    }
+    Ok(json!({
+        "totalTime": total,
+        "numDaysListened": num_days,
+        "numBooksFinished": finished,
+        "numBooksListened": listened,
+        "recentSessions": sessions,
+        "days": Value::Object(days),
+    }))
+}
+
 /// True when two paths resolve to the same directory. Canonicalize when both
 /// exist (handles separator / case / `.` differences); otherwise fall back to a
 /// plain comparison — the desired target won't exist when the identity changed,
@@ -1946,6 +2186,102 @@ mod tests {
         let eps = items[0]["media"]["episodes"].as_array().unwrap();
         assert_eq!(eps.len(), 1);
         assert_eq!(eps[0]["localPath"], json!("C:/pods/one.mp3"));
+    }
+
+    #[test]
+    fn delete_local_episode_flips_download_state_and_clears_progress() {
+        let (dir, conn) = test_conn();
+        let parent = dir.path().to_string_lossy().into_owned();
+        let lib = create_library_conn(&conn, "Pods", &parent, "podcast").unwrap();
+        let lib_id = lib["id"].as_str().unwrap().to_string();
+
+        let feed = json!({
+            "metadata": { "title": "Show" },
+            "episodes": [json!({ "guid": "g1", "title": "One", "enclosure": { "url": "https://x/g1.mp3" } })],
+        });
+        let (pod_id, _, _) = subscribe_podcast_conn(&conn, &lib_id, &feed, "https://x/feed.xml", false).unwrap();
+
+        // Download the episode to a real temp file and give it progress.
+        let audio = dir.path().join("one.mp3");
+        std::fs::write(&audio, b"mp3").unwrap();
+        set_episode_downloaded_conn(&conn, &pod_id, "g1", &audio.to_string_lossy()).unwrap();
+        let items = list_podcast_items_conn(&conn, &lib_id).unwrap();
+        let ep_id = items[0]["media"]["episodes"][0]["id"].as_str().unwrap().to_string();
+        set_progress_conn(&conn, &pod_id, Some(&ep_id), 120.0, 1800.0, false).unwrap();
+
+        delete_local_episode_conn(&conn, &pod_id, &ep_id).unwrap();
+
+        // File gone; row kept (guid dedupe) but back to not-downloaded; progress cleared.
+        assert!(!audio.exists(), "audio file must be deleted");
+        let (dl, path, guid): (i64, Option<String>, String) = conn
+            .query_row(
+                "SELECT downloaded, audio_path, guid FROM podcast_episodes WHERE id = ?1",
+                params![ep_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((dl, path), (0, None), "episode must return to not-downloaded");
+        assert_eq!(guid, "g1", "feed identity must survive the delete");
+        assert!(get_progress_conn(&conn, &pod_id, Some(&ep_id)).unwrap().is_none());
+
+        // A second delete (already not-downloaded) is a no-op, not an error;
+        // an unknown episode id is a real error.
+        delete_local_episode_conn(&conn, &pod_id, &ep_id).unwrap();
+        assert!(delete_local_episode_conn(&conn, &pod_id, "nope").is_err());
+    }
+
+    #[test]
+    fn listen_time_accumulates_days_and_sessions() {
+        let (_dir, conn) = test_conn();
+        insert_item(&conn, "b1", "lib1", r#"{"media":{"metadata":{"title":"My Book"}}}"#);
+
+        // Two flushes of one session on one day accumulate both aggregates;
+        // a second session on another day stays separate.
+        add_listen_time_conn(&conn, "s1", "b1", None, 30.0, "2026-07-09").unwrap();
+        add_listen_time_conn(&conn, "s1", "b1", None, 15.0, "2026-07-09").unwrap();
+        add_listen_time_conn(&conn, "s2", "b1", None, 60.0, "2026-07-10").unwrap();
+        // Zero-second flushes are no-ops (no phantom day/session rows).
+        add_listen_time_conn(&conn, "s3", "b1", None, 0.0, "2026-07-11").unwrap();
+
+        let stats = get_listening_stats_conn(&conn).unwrap();
+        assert_eq!(stats["totalTime"], json!(105.0));
+        assert_eq!(stats["numDaysListened"], json!(2));
+        assert_eq!(stats["days"]["2026-07-09"], json!(45.0));
+        assert_eq!(stats["days"]["2026-07-10"], json!(60.0));
+
+        let sessions = stats["recentSessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 2);
+        // Newest first (rowid breaks same-millisecond updated_at ties); the
+        // title is resolved from the items table at write time.
+        assert_eq!(sessions[0]["id"], json!("s2"));
+        assert_eq!(sessions[0]["displayTitle"], json!("My Book"));
+        assert_eq!(sessions[1]["timeListening"], json!(45.0));
+
+        // Finished/listened counts derive from whole-item progress rows.
+        set_progress_conn(&conn, "b1", None, 3600.0, 3600.0, true).unwrap();
+        let stats = get_listening_stats_conn(&conn).unwrap();
+        assert_eq!(stats["numBooksFinished"], json!(1));
+        assert_eq!(stats["numBooksListened"], json!(1));
+    }
+
+    #[test]
+    fn listen_sessions_prune_to_newest_hundred() {
+        let (_dir, conn) = test_conn();
+        for i in 0..105 {
+            add_listen_time_conn(&conn, &format!("s{i}"), "b1", None, 10.0, "2026-07-09").unwrap();
+        }
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM listen_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 100, "sessions must prune to the newest 100");
+        // The earliest sessions are the ones dropped (rowid tiebreak).
+        let oldest: i64 = conn
+            .query_row("SELECT COUNT(*) FROM listen_sessions WHERE id = 's0'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(oldest, 0);
+        // Day totals are untouched by session pruning.
+        let stats = get_listening_stats_conn(&conn).unwrap();
+        assert_eq!(stats["totalTime"], json!(1050.0));
     }
 
     #[test]

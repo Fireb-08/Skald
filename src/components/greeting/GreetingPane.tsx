@@ -12,9 +12,9 @@
 
 import { useState, useEffect } from 'react';
 import type { OnyxState } from '../../state/onyx';
-import { bookAuthor } from '../../state/onyx';
+import { bookAuthor, mergeUserStats, computeLocalLibraryStats } from '../../state/onyx';
 import type { UserStats, LibraryStats } from '../../api/abs';
-import { getUserStats, getLibraryStats } from '../../api/abs';
+import { getUserStats, getLibraryStats, getLocalListeningStats } from '../../api/abs';
 import Glass from '../chrome/Glass';
 import { log } from '../../lib/log';
 
@@ -33,15 +33,16 @@ function localDateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-// Build the last-7-days sparkline data from the ABS "days" map.
+// Build the last-7-days sparkline data from the stats "days" map.
 // Returns oldest-first (index 0 = 6 days ago, index 6 = today).
 function buildLast7(days: Record<string, number>): Array<{ d: string; m: number }> {
   return Array.from({ length: 7 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - 6 + i); // 6 days ago → today
     const key   = localDateKey(date);
-    // ABS stores day totals in milliseconds — divide by 60,000 for whole minutes
-    const mins  = Math.round((days[key] ?? 0) / 60_000); // ms → minutes
+    // Day totals are SECONDS (ABS unit, verified against the web client's own
+    // /60 conversion; local stats match) — divide by 60 for whole minutes.
+    const mins  = Math.round((days[key] ?? 0) / 60);
     // "Mon", "Tue", etc. — slice to 3 chars for consistency.
     const label = date.toLocaleDateString('en-US', { weekday: 'short' }).slice(0, 3);
     return { d: label, m: mins };
@@ -270,11 +271,16 @@ function UserStatsPage({ stats, loading }: { stats: UserStats | null; loading: b
       {/* Hero duo: Minutes · Days listened (Finished appears in the footer, not here) */}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 32 }}> {/* centered with wider gap */}
         <BigStat
-          // ABS returns totalTime in milliseconds — divide by 60,000 to get minutes
-          value={stats ? Math.round((stats.totalTime ?? 0) / 60_000).toLocaleString() : ph}
+          // totalTime is SECONDS (ABS unit; local stats match) — /60 for minutes.
+          value={stats ? Math.round((stats.totalTime ?? 0) / 60).toLocaleString() : ph}
           label="Minutes"
         />
-        <BigStat value={stats ? stats.numDaysListened : ph} label="Days listened" />
+        <BigStat
+          // ABS's payload omits numDaysListened (it arrives 0) — fall back to
+          // counting the day keys, which is how the ABS web client shows it too.
+          value={stats ? (stats.numDaysListened || Object.keys(stats.days ?? {}).length) : ph}
+          label="Days listened"
+        />
         {/* Finished BigStat removed — it duplicated the Finished GreetStat in the footer */}
       </div>
 
@@ -349,8 +355,8 @@ function LibraryStatsPage({
 }) {
   const ph = loading ? '…' : '—';
 
-  // ABS returns totalDuration in milliseconds — divide by 3,600,000 (ms → hours)
-  const hours = stats ? Math.round((stats.totalDuration ?? 0) / 3_600_000).toLocaleString() : ph; // ms → hours
+  // totalDuration is SECONDS (ABS unit; the local computation matches) — /3600 for hours.
+  const hours = stats ? Math.round((stats.totalDuration ?? 0) / 3_600).toLocaleString() : ph;
   // GiB: 1_073_741_824 = 2^30 bytes per gibibyte (matches how storage tools report audio sizes).
   const sizeGb = stats ? ((stats.totalAudioFilesSize ?? 0) / 1_073_741_824).toFixed(1) : ph; // bytes → GiB, one decimal
 
@@ -464,46 +470,66 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
     return p && p.progress >= 0.98;
   }).length;
 
-  // ── Fetch both payloads on mount ─────────────────────────────────────────
+  // The active library's source drives which stats sources are shown (Local
+  // Listening Stats roadmap): local library → catalog stats; ABS library →
+  // server stats; the combine setting fetches both and merges.
+  const isLocalLibrary = st.activeLibrary?.source === 'local';
+  const hasServer = !!st.serverUrl;
+
+  // ── Fetch the user-stats payload(s) ────────────────────────────────────────
   useEffect(() => {
-    if (!st.serverUrl) {
-      // Local-only mode has no server stats endpoints (listening-stats are
-      // ABS-only). Clear the spinners so the panes show their empty states
-      // ("No recent sessions", zeros) instead of hanging on "Loading…". The
-      // footer counts below are derived from local library state regardless.
+    let cancelled = false;
+    // Which sources feed "Your stats": with combine OFF the active library's
+    // source decides; combine ON fetches both. Standalone (no server) is
+    // local-only by construction.
+    const wantServer = hasServer && (!isLocalLibrary || st.combineStats);
+    const wantLocal = !hasServer || isLocalLibrary || st.combineStats;
+
+    setLoadingUser(true);
+    // Each side tolerates failure independently — one dead source must not
+    // blank the other's stats (e.g. server briefly unreachable).
+    const serverP: Promise<UserStats | null> = wantServer
+      ? getUserStats(st.serverUrl).catch(e => {
+          log.error('library', 'getUserStats failed', { err: String(e) });
+          return null;
+        })
+      : Promise.resolve(null);
+    const localP: Promise<UserStats | null> = wantLocal
+      ? getLocalListeningStats().catch(e => {
+          log.error('library', 'getLocalListeningStats failed', { err: String(e) });
+          return null;
+        })
+      : Promise.resolve(null);
+    Promise.all([serverP, localP]).then(([srv, loc]) => {
+      if (cancelled) return;
+      setUserStats(srv && loc ? mergeUserStats(srv, loc) : (srv ?? loc));
       setLoadingUser(false);
+    });
+
+    return () => { cancelled = true; };
+    // Re-fetch when the server, active library, or combine setting changes.
+  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary, st.combineStats]);
+
+  // ── Fetch library stats (ABS libraries only) ───────────────────────────────
+  // Local libraries have no /stats endpoint — their LibraryStats are computed
+  // from the loaded items at render time below, and calling the server with a
+  // local library id would just log a failed request.
+  useEffect(() => {
+    if (isLocalLibrary || !hasServer || !st.currentLibraryId) {
       setLoadingLib(false);
       return;
     }
     let cancelled = false;
-
-    // User stats: GET /api/me/listening-stats
-    setLoadingUser(true);
-    getUserStats(st.serverUrl)
-      .then(s => { if (!cancelled) { setUserStats(s); setLoadingUser(false); } })
-      .catch(e => {
-        log.error('library', 'getUserStats failed', { err: String(e) });
-        if (!cancelled) setLoadingUser(false);
-      });
-
-    // Library stats: GET /api/libraries/{id}/stats — needs the library ID.
     const libId = st.currentLibraryId;
-    if (libId) {
-      setLoadingLib(true);
-      getLibraryStats(st.serverUrl, libId)
-        .then(s => { if (!cancelled) { setLibStats(s); setLoadingLib(false); } })
-        .catch(e => {
-          log.error('library', 'getLibraryStats failed', { lib: libId, err: String(e) });
-          if (!cancelled) setLoadingLib(false);
-        });
-    } else {
-      // No library ID yet (edge case) — stop the spinner immediately.
-      setLoadingLib(false);
-    }
-
+    setLoadingLib(true);
+    getLibraryStats(st.serverUrl, libId)
+      .then(s => { if (!cancelled) { setLibStats(s); setLoadingLib(false); } })
+      .catch(e => {
+        log.error('library', 'getLibraryStats failed', { lib: libId, err: String(e) });
+        if (!cancelled) setLoadingLib(false);
+      });
     return () => { cancelled = true; };
-    // Re-fetch if the server URL or library changes (e.g., after reconnect).
-  }, [st.serverUrl, st.currentLibraryId]);
+  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary]);
 
   // Persist tab choice then update local state.
   const switchPage = (p: 'user' | 'library') => {
@@ -607,7 +633,13 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
       }}>
         {page === 'user'
           ? <UserStatsPage stats={userStats} loading={loadingUser} />
-          : <LibraryStatsPage stats={libStats} loading={loadingLib} library={st.library} />
+          : <LibraryStatsPage
+              // Local libraries compute their stats from the loaded items —
+              // recomputed each render so it tracks scans/deletes live.
+              stats={isLocalLibrary ? computeLocalLibraryStats(st.library) : libStats}
+              loading={isLocalLibrary ? false : loadingLib}
+              library={st.library}
+            />
         }
       </div>
 

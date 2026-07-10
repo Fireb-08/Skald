@@ -12,8 +12,11 @@ import { playEpisode, togglePlayback } from '../api/playbook';
 import { log } from '../lib/log';
 import Cover from '../components/Cover';
 import Icon from '../components/Icon';
+import ContextMenu from '../components/ContextMenu';
+import PlaylistPicker from '../components/PlaylistPicker';
 import PodcastSettingsModal from '../components/podcast/PodcastSettingsModal';
 import PodcastDownloadModal from '../components/podcast/PodcastDownloadModal';
+import { buildEpisodeContextMenu } from '../components/podcast/buildEpisodeContextMenu';
 
 export interface PodcastDetailProps {
   st: OnyxState;
@@ -35,6 +38,9 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   const mono = "'JetBrains Mono', ui-monospace, monospace";
   const [showSettings, setShowSettings] = useState(false);
   const [showDownload, setShowDownload] = useState(false);
+  // Episode right-click menu + the Add-to-Playlist picker it can open.
+  const [epMenu, setEpMenu] = useState<{ x: number; y: number; ep: PodcastEpisode; downloaded: boolean } | null>(null);
+  const [playlistEp, setPlaylistEp] = useState<PodcastEpisode | null>(null);
 
   // The library list returns MINIFIED podcast items (numEpisodes but no
   // episodes[]). Fetch the expanded item for the downloaded episode list.
@@ -239,6 +245,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
               key={episodeKey(ep)}
               className="onyx-row"
               onClick={() => onRow(ep, downloaded)}
+              onContextMenu={(e) => { e.preventDefault(); setEpMenu({ x: e.clientX, y: e.clientY, ep, downloaded }); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 12, padding: '10px 10px',
                 borderRadius: 8, borderBottom: '1px solid var(--onyx-line)', cursor: 'pointer',
@@ -280,6 +287,24 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
           );
         })}
       </div>
+
+      {/* Episode right-click menu (Podcast Episode Context Menu roadmap) */}
+      {epMenu && (
+        <ContextMenu
+          x={epMenu.x}
+          y={epMenu.y}
+          sections={buildEpisodeContextMenu(item, epMenu.ep, epMenu.downloaded, st, {
+            play,
+            openUndownloaded,
+            setPlaylistEpisode: isLocal ? undefined : (_it, ep2) => setPlaylistEp(ep2),
+            onDeleted: bumpRefresh,
+          })}
+          onClose={() => setEpMenu(null)}
+        />
+      )}
+      {playlistEp && (
+        <PlaylistPicker item={item} episode={playlistEp} serverUrl={st.serverUrl} onClose={() => setPlaylistEp(null)} />
+      )}
 
       {showDownload && (
         <PodcastDownloadModal

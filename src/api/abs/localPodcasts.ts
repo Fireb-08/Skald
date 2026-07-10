@@ -62,6 +62,13 @@ export function deleteLocalPodcast(podcastId: string): Promise<void> {
   return invoke('delete_local_podcast', { podcastId });
 }
 
+/** Delete one downloaded episode's audio file and return it to the
+ *  not-downloaded state. The feed entry survives (guid dedupe), so the episode
+ *  reappears as "not downloaded" rather than vanishing or coming back as new. */
+export function deleteLocalEpisode(podcastId: string, episodeId: string): Promise<void> {
+  return invoke('delete_local_episode', { podcastId, episodeId });
+}
+
 /** Search the iTunes podcast directory for discovery. */
 export function searchLocalPodcasts(query: string, region?: string): Promise<PodcastSearchResult[]> {
   return invoke('search_local_podcasts', { query, region: region ?? null });

@@ -135,6 +135,17 @@ pub async fn delete_local_podcast(podcast_id: String) -> Result<(), String> {
         .map_err(|e| format!("delete_local_podcast task panicked: {e}"))?
 }
 
+/// Delete one downloaded episode's audio file and flip it back to
+/// not-downloaded (Podcast Episode Context Menu roadmap). The feed row is kept
+/// so guid dedupe survives; the episode's progress row is cleared. The caller
+/// (episode context menu) stops playback first if this episode is playing.
+#[tauri::command]
+pub async fn delete_local_episode(podcast_id: String, episode_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || crate::catalog::delete_local_episode(&podcast_id, &episode_id))
+        .await
+        .map_err(|e| format!("delete_local_episode task panicked: {e}"))?
+}
+
 /// Search the iTunes podcast directory for discovery (Phase 5).
 #[tauri::command]
 pub async fn search_local_podcasts(

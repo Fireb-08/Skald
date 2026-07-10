@@ -17,10 +17,13 @@ import ContextMenu from '../ContextMenu';
 import CoverPicker from '../CoverPicker';
 import FilesModal from '../shelf/FilesModal';
 import { COVER_SIZES } from '../shelf/LibraryShelf';
+import PlaylistPicker from '../PlaylistPicker';
 import PodcastSubscribeModal from './PodcastSubscribeModal';
 import PodcastSettingsModal from './PodcastSettingsModal';
 import PodcastDownloadModal from './PodcastDownloadModal';
 import { buildPodcastContextMenu } from './buildPodcastContextMenu';
+import { buildEpisodeContextMenu } from './buildEpisodeContextMenu';
+import type { PodcastEpisode } from '../../api/abs';
 
 export interface PodcastBrowseProps {
   st: OnyxState;
@@ -64,6 +67,10 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [genreOpen, setGenreOpen] = useState(false);
   // Right-click context menu + the modals its actions open.
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: LibraryItem } | null>(null);
+  // Episode-row right-click menu + the Add-to-Playlist picker it can open
+  // (Podcast Episode Context Menu roadmap).
+  const [epMenu, setEpMenu] = useState<{ x: number; y: number; ep: RecentEpisode; downloaded: boolean } | null>(null);
+  const [playlistEp, setPlaylistEp] = useState<{ item: LibraryItem; ep: PodcastEpisode } | null>(null);
   const [settingsItem, setSettingsItem] = useState<LibraryItem | null>(null);
   const [downloadItem, setDownloadItem] = useState<LibraryItem | null>(null);
   const [coverItem, setCoverItem] = useState<LibraryItem | null>(null);
@@ -393,6 +400,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               key={(pid ?? '') + episodeKey(ep)}
               className="onyx-row"
               onClick={onRow}
+              onContextMenu={(e) => { e.preventDefault(); setEpMenu({ x: e.clientX, y: e.clientY, ep, downloaded }); }}
               style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 8px', borderBottom: '1px solid var(--onyx-line)', cursor: 'pointer' }}
             >
               {/* Podcast cover thumb */}
@@ -454,6 +462,31 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
           })}
           onClose={() => setContextMenu(null)}
         />
+      )}
+      {/* Episode-row right-click menu (Podcast Episode Context Menu roadmap).
+          The parent item is resolved from the feed row's libraryItemId — rows
+          whose podcast left the library are already filtered out above. */}
+      {epMenu && (() => {
+        const epItem = st.library.find(i => i.id === epMenu.ep.libraryItemId);
+        if (!epItem) return null;
+        return (
+          <ContextMenu
+            x={epMenu.x}
+            y={epMenu.y}
+            sections={buildEpisodeContextMenu(epItem, epMenu.ep, epMenu.downloaded, st, {
+              play: (ep) => playEp(ep as RecentEpisode),
+              openUndownloaded: (ep) => openUndownloaded(ep as RecentEpisode),
+              setPlaylistEpisode: isLocal ? undefined : (it, ep2) => setPlaylistEp({ item: it, ep: ep2 }),
+              // refreshLibrary re-triggers the recent-episodes fetch (it depends
+              // on st.library), so the deleted episode flips back to "New".
+              onDeleted: () => { st.refreshLibrary().catch(e => log.error('library', 'refresh after episode delete failed', { err: String(e) })); },
+            })}
+            onClose={() => setEpMenu(null)}
+          />
+        );
+      })()}
+      {playlistEp && (
+        <PlaylistPicker item={playlistEp.item} episode={playlistEp.ep} serverUrl={st.serverUrl} onClose={() => setPlaylistEp(null)} />
       )}
       {settingsItem && (
         <PodcastSettingsModal

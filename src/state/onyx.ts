@@ -265,6 +265,10 @@ export interface OnyxState {
   setScale: (scale: number) => void;
   enableOpenLibrary: boolean;
   setEnableOpenLibrary: (on: boolean) => void;
+  // Combine server + local listening stats in the greeting card (persisted as
+  // onyx.stats.combineLocal; Local Listening Stats roadmap).
+  combineStats: boolean;
+  setCombineStats: (on: boolean) => void;
   toast: { message: string; type: 'success' | 'error' | 'info' } | null;
   setToast: (t: { message: string; type: 'success' | 'error' | 'info' } | null) => void;
   confirmDialog: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null;
@@ -936,6 +940,14 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('skald.enableOpenLibrary', String(v)); setEnableOpenLibraryRaw(v);
   }, []);
 
+  // Merge server + local listening stats into one "Your stats" view (Local
+  // Listening Stats roadmap). Off by default: the stat card follows the active
+  // library's source. Toggled in Settings → Appearance.
+  const [combineStats, setCombineStatsRaw] = useState(() => localStorage.getItem('onyx.stats.combineLocal') === 'true');
+  const setCombineStats = useCallback((v: boolean) => {
+    localStorage.setItem('onyx.stats.combineLocal', String(v)); setCombineStatsRaw(v);
+  }, []);
+
   const accentRef = useRef(accentColor);
   const themeRef  = useRef(theme);
 
@@ -1471,6 +1483,7 @@ export function useOnyxState(): OnyxState {
     pickItUpCollapsed, setPickItUpCollapsed,
     scale, setScale,
     enableOpenLibrary, setEnableOpenLibrary,
+    combineStats, setCombineStats,
     toast, setToast,
     confirmDialog, setConfirmDialog,
   };
