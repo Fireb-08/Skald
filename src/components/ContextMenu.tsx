@@ -11,7 +11,8 @@ export interface ContextMenuItem {
   danger?: boolean;
   disabled?: boolean;
   icon?: IconName;
-  /** Accent-highlighted row (e.g. the primary "Play Book" action). */
+  /** Accent-colored emphasis row (e.g. the primary "Play Book" action) —
+   *  accent text + heavier weight; background appears only on hover. */
   primary?: boolean;
   /** Nested actions shown in a flyout; the row gets a › affordance. */
   submenu?: ContextMenuItem[];
@@ -102,11 +103,12 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
           ? 'var(--onyx-accent)'
           : (isHover ? 'var(--onyx-accent)' : 'var(--onyx-text)');
 
-    const bg = item.primary
-      ? 'var(--onyx-accent-dim)'
-      : (isHover || subOpen) && !disabled
-        ? (item.danger ? 'rgba(220,80,80,0.12)' : 'var(--onyx-accent-dim)')
-        : 'transparent';
+    // Primary rows are emphasized by accent COLOR + weight only — a resting
+    // background would be indistinguishable from the hover state, reading as a
+    // stuck highlight. Background is reserved for actual hover / open submenu.
+    const bg = (isHover || subOpen) && !disabled
+      ? (item.danger ? 'rgba(220,80,80,0.12)' : 'var(--onyx-accent-dim)')
+      : 'transparent';
 
     return (
       <div
