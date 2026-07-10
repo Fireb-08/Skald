@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { listen } from '@tauri-apps/api/event';
 import type { OnyxState } from '../../state/onyx';
 import type { Library, ScannedItem } from '../../api/abs';
 import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, getUnidentifiedItems, revealPath } from '../../api/abs';
@@ -49,6 +50,7 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
   // Busy id: the library currently scanning (or '__new__' while adding), so the
   // relevant button shows a spinner and is disabled.
   const [busy, setBusy] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<Record<string, { phase: string; processed: number; total: number; currentItem?: string }>>({});
   // Quarantined books per library (from <root>/_Unidentified), and the active
   // match-modal target.
   const [unidentified, setUnidentified] = useState<Record<string, ScannedItem[]>>({});
@@ -78,6 +80,15 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
   // changes (App's app-wide staging watcher calls refreshLibrary after an
   // auto-distribute, which re-runs this). The OS watcher itself lives in App.tsx.
   useEffect(() => { void reloadUnidentified(); }, [reloadUnidentified]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<{ libraryId: string; phase: string; processed: number; total: number; currentItem?: string }>('local-scan-progress', event => {
+      const payload = event.payload;
+      setScanProgress(current => ({ ...current, [payload.libraryId]: payload }));
+    }).then(off => { unlisten = off; });
+    return () => unlisten?.();
+  }, []);
 
   // Choose the parent location where the new library folder will be created.
   async function chooseLocation() {
@@ -218,6 +229,7 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
           locals.map(lib => {
             const active = st.currentLibraryId === lib.id;
             const scanning = busy === lib.id;
+            const progress = scanProgress[lib.id];
             return (
               <div
                 key={lib.id}
@@ -262,6 +274,18 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
                     </button>
                   </div>
                 </div>
+
+                {scanning && progress && (
+                  <div style={{ marginTop: 9 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)' }}>
+                      <span>{progress.phase === 'discovering' ? 'Discovering book folders…' : progress.phase === 'cataloguing' ? 'Updating catalog…' : `Scanning${progress.currentItem ? ` ${progress.currentItem}` : '…'}`}</span>
+                      {progress.total > 0 && <span>{progress.processed} / {progress.total}</span>}
+                    </div>
+                    <div role="progressbar" aria-label={`Scanning ${lib.name}`} aria-valuemin={0} aria-valuemax={progress.total || undefined} aria-valuenow={progress.total ? progress.processed : undefined} style={{ height: 3, marginTop: 6, overflow: 'hidden', borderRadius: 2, background: 'rgba(255,255,255,0.08)' }}>
+                      <div style={{ height: '100%', width: progress.total ? `${Math.min(100, progress.processed / progress.total * 100)}%` : '35%', background: 'var(--onyx-accent)', transition: 'width 0.15s' }} />
+                    </div>
+                  </div>
+                )}
 
                 {/* Folder paths — aligned glass buttons that open the location.
                     Staging is auto-organized by the app-wide watcher on drop. */}

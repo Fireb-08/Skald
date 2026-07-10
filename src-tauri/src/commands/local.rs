@@ -6,10 +6,15 @@ use super::*;
 // ── Local progress & bookmarks (Local Library roadmap, Phase 4) ──────────────
 
 #[tauri::command]
-pub async fn get_local_progress(item_id: String, episode_id: Option<String>) -> Result<Option<serde_json::Value>, String> {
-    tokio::task::spawn_blocking(move || crate::catalog::get_progress(&item_id, episode_id.as_deref()))
-        .await
-        .map_err(|e| format!("get_local_progress task panicked: {e}"))?
+pub async fn get_local_progress(
+    item_id: String,
+    episode_id: Option<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::catalog::get_progress(&item_id, episode_id.as_deref())
+    })
+    .await
+    .map_err(|e| format!("get_local_progress task panicked: {e}"))?
 }
 
 /// Set local-library playback progress for an item — used by user actions like
@@ -23,7 +28,13 @@ pub async fn set_local_progress(
     is_finished: bool,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        crate::catalog::set_progress(&item_id, episode_id.as_deref(), current_time, duration, is_finished)
+        crate::catalog::set_progress(
+            &item_id,
+            episode_id.as_deref(),
+            current_time,
+            duration,
+            is_finished,
+        )
     })
     .await
     .map_err(|e| format!("set_local_progress task panicked: {e}"))?
@@ -85,7 +96,9 @@ pub async fn get_local_listening_stats() -> Result<serde_json::Value, String> {
 pub async fn get_local_cover(item_id: String, bust: Option<u32>) -> Result<String, String> {
     let version = bust.unwrap_or(0);
     if cover_cache::is_cached(&item_id, Some(400), version) {
-        return Ok(cover_cache::cache_path(&item_id, Some(400), version).to_string_lossy().into_owned());
+        return Ok(cover_cache::cache_path(&item_id, Some(400), version)
+            .to_string_lossy()
+            .into_owned());
     }
     let id_for_path = item_id.clone();
     let bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
@@ -105,7 +118,9 @@ pub async fn get_local_cover(item_id: String, bust: Option<u32>) -> Result<Strin
     .await
     .map_err(|e| format!("local cover task panicked: {e}"))??;
     cover_cache::save_cover(&item_id, Some(400), version, &bytes)?;
-    Ok(cover_cache::cache_path(&item_id, Some(400), version).to_string_lossy().into_owned())
+    Ok(cover_cache::cache_path(&item_id, Some(400), version)
+        .to_string_lossy()
+        .into_owned())
 }
 
 /// (Re)start watching the given staging folders; emits `staging-changed` events.
@@ -276,16 +291,37 @@ pub async fn delete_local_library(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn scan_local_library(library_id: String) -> Result<usize, String> {
-    tokio::task::spawn_blocking(move || crate::catalog::scan_library(&library_id))
-        .await
-        .map_err(|e| format!("scan_local_library task panicked: {e}"))?
+pub async fn scan_local_library(
+    library_id: String,
+    app: tauri::AppHandle,
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        let event_library_id = library_id.clone();
+        crate::catalog::scan_library_with_progress(
+            &library_id,
+            |phase, processed, total, current| {
+                let current_item = current
+                    .and_then(|path| std::path::Path::new(path).file_name())
+                    .and_then(|name| name.to_str());
+                let _ = app.emit(
+                    "local-scan-progress",
+                    serde_json::json!({
+                        "libraryId": &event_library_id,
+                        "phase": phase,
+                        "processed": processed,
+                        "total": total,
+                        "currentItem": current_item,
+                    }),
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|e| format!("scan_local_library task panicked: {e}"))?
 }
 
 #[tauri::command]
-pub async fn get_local_library_items(
-    library_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn get_local_library_items(library_id: String) -> Result<Vec<serde_json::Value>, String> {
     tokio::task::spawn_blocking(move || crate::catalog::list_items(&library_id))
         .await
         .map_err(|e| format!("get_local_library_items task panicked: {e}"))?
@@ -324,7 +360,11 @@ pub async fn set_local_library_config(
     organize_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
-        crate::catalog::set_config(&library_id, staging_path.as_deref(), organize_mode.as_deref())
+        crate::catalog::set_config(
+            &library_id,
+            staging_path.as_deref(),
+            organize_mode.as_deref(),
+        )
     })
     .await
     .map_err(|e| format!("set_local_library_config task panicked: {e}"))?

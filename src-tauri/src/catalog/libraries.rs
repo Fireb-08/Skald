@@ -70,16 +70,28 @@ pub fn create_library(name: &str, parent_path: &str, media_type: &str) -> Result
 
 // The `_conn` split (here and below) is the test seam (Test Seams roadmap):
 // in-module tests run these against a tempfile DB, never the real catalog.
-pub(crate) fn create_library_conn(conn: &Connection, name: &str, parent_path: &str, media_type: &str) -> Result<Value, String> {
+pub(crate) fn create_library_conn(
+    conn: &Connection,
+    name: &str,
+    parent_path: &str,
+    media_type: &str,
+) -> Result<Value, String> {
     // Only "book" and "podcast" are supported local media types; default unknown
     // values to "book" so a bad caller can never write an unroutable library.
-    let media_type = if media_type == "podcast" { "podcast" } else { "book" };
+    let media_type = if media_type == "podcast" {
+        "podcast"
+    } else {
+        "book"
+    };
     let root = Path::new(parent_path).join(ingest::sanitize_component(name));
     let staging = root.join(STAGING_DIR);
     std::fs::create_dir_all(&staging).map_err(|e| format!("create library/staging dir: {e}"))?;
-    std::fs::create_dir_all(root.join(UNIDENTIFIED_DIR)).map_err(|e| format!("create quarantine dir: {e}"))?;
-    std::fs::create_dir_all(root.join(AUDIOBOOKS_DIR)).map_err(|e| format!("create audiobooks dir: {e}"))?;
-    std::fs::create_dir_all(root.join(PODCASTS_DIR)).map_err(|e| format!("create podcasts dir: {e}"))?;
+    std::fs::create_dir_all(root.join(UNIDENTIFIED_DIR))
+        .map_err(|e| format!("create quarantine dir: {e}"))?;
+    std::fs::create_dir_all(root.join(AUDIOBOOKS_DIR))
+        .map_err(|e| format!("create audiobooks dir: {e}"))?;
+    std::fs::create_dir_all(root.join(PODCASTS_DIR))
+        .map_err(|e| format!("create podcasts dir: {e}"))?;
 
     let root_str = root.to_string_lossy().into_owned();
     let staging_str = staging.to_string_lossy().into_owned();
@@ -89,7 +101,11 @@ pub(crate) fn create_library_conn(conn: &Connection, name: &str, parent_path: &s
     // toolchain could mint a different id for the same path and duplicate the
     // library. With this lookup the hash only matters at first creation.
     let existing: Option<String> = conn
-        .query_row("SELECT id FROM libraries WHERE root_path = ?1", params![root_str], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM libraries WHERE root_path = ?1",
+            params![root_str],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| format!("library lookup: {e}"))?;
     let id = existing.unwrap_or_else(|| stable_lib_id(&root_str));
@@ -183,6 +199,15 @@ pub(crate) fn library_root(conn: &Connection, id: &str) -> Result<String, String
 /// path in the same operation, so it's never seen as a remove+add. Returns the
 /// current item count. Blocking — call from `spawn_blocking`.
 pub fn scan_library(library_id: &str) -> Result<usize, String> {
+    scan_library_with_progress(library_id, |_, _, _, _| {})
+}
+
+/// Reconcile with directory-count progress after enumeration establishes a
+/// trustworthy denominator.
+pub fn scan_library_with_progress<F>(library_id: &str, mut progress: F) -> Result<usize, String>
+where
+    F: FnMut(&str, usize, usize, Option<&str>),
+{
     let conn = open()?;
     let root = library_root(&conn, library_id)?;
     // The shelf catalog is everything under Audiobooks/ — Staging/Unidentified/
@@ -195,7 +220,10 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
     // already know) was the dominant cost of switching to a local library; we now
     // probe only genuinely-new directories below, so an unchanged library costs
     // just a directory walk + a DB diff.
+    progress("discovering", 0, 0, None);
     let present_dirs = scanner::list_book_dirs(&books_root_str)?;
+    let total = present_dirs.len();
+    progress("scanning", 0, total, None);
     let present: std::collections::HashSet<&str> =
         present_dirs.iter().map(|s| s.as_str()).collect();
 
@@ -218,18 +246,25 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
         }
     }
 
-    let tx = conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("tx: {e}"))?;
     let now = now_ms();
 
     // ADD folders not yet catalogued — probe ONLY these (derive metadata once).
     let mut added = 0usize;
-    for dir in &present_dirs {
+    for (index, dir) in present_dirs.iter().enumerate() {
+        progress("scanning", index, total, Some(dir));
         if existing.contains_key(dir) {
+            progress("scanning", index + 1, total, Some(dir));
             continue; // already catalogued — no probe, preserve its metadata
         }
         let s = match scanner::scan_dir(dir, &books_root_str, library_id) {
             Some(s) => s,
-            None => continue, // raced away / no audio
+            None => {
+                progress("scanning", index + 1, total, Some(dir));
+                continue; // raced away / no audio
+            }
         };
         let id = new_item_id(&s.source_path);
         let mut item = s.item.clone();
@@ -249,22 +284,32 @@ pub fn scan_library(library_id: &str) -> Result<usize, String> {
         )
         .map_err(|e| format!("insert item: {e}"))?;
         added += 1;
+        progress("scanning", index + 1, total, Some(dir));
     }
 
     // REMOVE rows whose folder is gone; clear their progress/bookmarks too.
     for (sp, id) in &existing {
         if !present.contains(sp.as_str()) {
-            tx.execute("DELETE FROM items WHERE id = ?1", params![id]).map_err(|e| format!("del item: {e}"))?;
-            tx.execute("DELETE FROM progress WHERE item_id = ?1", params![id]).map_err(|e| format!("del progress: {e}"))?;
-            tx.execute("DELETE FROM bookmarks WHERE item_id = ?1", params![id]).map_err(|e| format!("del bookmarks: {e}"))?;
+            tx.execute("DELETE FROM items WHERE id = ?1", params![id])
+                .map_err(|e| format!("del item: {e}"))?;
+            tx.execute("DELETE FROM progress WHERE item_id = ?1", params![id])
+                .map_err(|e| format!("del progress: {e}"))?;
+            tx.execute("DELETE FROM bookmarks WHERE item_id = ?1", params![id])
+                .map_err(|e| format!("del bookmarks: {e}"))?;
         }
     }
 
+    progress("cataloguing", total, total, None);
     tx.commit().map_err(|e| format!("commit: {e}"))?;
     let count = conn
-        .query_row("SELECT COUNT(*) FROM items WHERE library_id = ?1", params![library_id], |r| r.get::<_, i64>(0))
+        .query_row(
+            "SELECT COUNT(*) FROM items WHERE library_id = ?1",
+            params![library_id],
+            |r| r.get::<_, i64>(0),
+        )
         .map_err(|e| format!("count: {e}"))? as usize;
     log::info!(target: "skald::library", "catalog: reconciled library {library_id} present={} added={added} items={count}", present.len());
+    progress("complete", total, total, None);
     Ok(count)
 }
 
@@ -290,4 +335,3 @@ pub(crate) fn list_items_conn(conn: &Connection, library_id: &str) -> Result<Vec
     }
     Ok(out)
 }
-
