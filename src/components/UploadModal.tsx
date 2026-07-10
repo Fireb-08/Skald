@@ -12,6 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import type { OnyxState } from '../state/onyx';
 import { resolveUploadFiles, uploadMedia, cancelUpload } from '../api/abs';
 import type { UploadFileEntry } from '../api/abs';
+import { useModalFocus } from '../hooks/useModalFocus';
 import { log } from '../lib/log';
 import Icon from './Icon';
 
@@ -203,9 +204,9 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
     }
   }
 
-  if (!lib) return null;
-
   const uploading = progress !== null;
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !uploading);
+  if (!lib) return null;
   const pct = uploading && progress.totalBytes > 0
     ? Math.min(100, (progress.bytesSent / progress.totalBytes) * 100)
     : 0;
@@ -221,7 +222,7 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
       // Backdrop click closes only while idle — never abandon an active upload silently.
       onMouseDown={e => { if (e.target === e.currentTarget && !uploading) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="upload-dialog-title" style={{
         width: 460, maxHeight: '80vh',
         background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)',
         borderRadius: 16,
@@ -231,7 +232,7 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>
+            <div id="upload-dialog-title" style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>
               Upload to {lib.name}
             </div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>
@@ -239,6 +240,7 @@ export default function UploadModal({ st, onClose }: UploadModalProps) {
             </div>
           </div>
           <button
+            aria-label="Close upload"
             onClick={() => { if (!uploading) onClose(); }}
             disabled={uploading}
             style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: uploading ? 'default' : 'pointer', opacity: uploading ? 0.4 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}

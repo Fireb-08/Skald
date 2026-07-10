@@ -9,6 +9,7 @@ import { log } from '../lib/log';
 import { newQuarantineItems, summarizeImport } from '../lib/localImport';
 import Icon, { type IconName } from './Icon';
 import MatchModal, { makeLocalQuarantineAdapter } from './MatchModal';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -63,6 +64,8 @@ export default function LocalImportDialog({ st, library, onClose, onImported }: 
   const [busy, setBusy] = useState<ImportRoute | 'staging' | null>(null);
   const [error, setError] = useState('');
   const [pendingMatch, setPendingMatch] = useState<PendingMatch | null>(null);
+  const working = busy !== null;
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !working);
 
   async function refreshAfterImport() {
     if (st.currentLibraryId === library.id) await st.setActiveLibrary(library.id);
@@ -172,7 +175,6 @@ export default function LocalImportDialog({ st, library, onClose, onImported }: 
     );
   }
 
-  const working = busy !== null;
   const modalStyle: CSSProperties = {
     width: 500, maxWidth: 'calc(100vw - 48px)',
     background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 16,
@@ -185,13 +187,13 @@ export default function LocalImportDialog({ st, library, onClose, onImported }: 
       style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
       onMouseDown={event => { if (event.target === event.currentTarget && !working) onClose(); }}
     >
-      <div style={modalStyle}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="local-import-title" style={modalStyle}>
         <div style={{ padding: '20px 20px 16px 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, borderBottom: '1px solid var(--onyx-line)' }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500 }}>Add books to “{library.name}”</div>
+            <div id="local-import-title" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500 }}>Add books to “{library.name}”</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>Choose how the books enter this PC library</div>
           </div>
-          <button onClick={onClose} disabled={working} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: 'none', color: 'var(--onyx-text-mute)', cursor: working ? 'wait' : 'pointer', opacity: working ? 0.4 : 1, fontSize: 15 }}>×</button>
+          <button onClick={onClose} aria-label="Close local import" disabled={working} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: 'none', color: 'var(--onyx-text-mute)', cursor: working ? 'wait' : 'pointer', opacity: working ? 0.4 : 1, fontSize: 15 }}>×</button>
         </div>
 
         <div style={{ padding: '18px 22px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
