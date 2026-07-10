@@ -4,6 +4,7 @@ import { logout } from '../api/abs';
 import Glass from '../components/chrome/Glass';
 import Icon from '../components/Icon';
 import type { IconName } from '../components/Icon';
+import { matchesSettingsSearch } from '../lib/settingsSearch';
 import {
   AccountSection,
   ServerSection,
@@ -32,7 +33,7 @@ type SectionId =
 // `requiresAbs` marks panes that only make sense with an Audiobookshelf server
 // connection — they're hidden in local-only mode. `adminOnly` panes are hidden
 // from non-admin users. Both are filtered at render time but keep their slot.
-interface NavSection { id: SectionId; label: string; icon: IconName; requiresAbs?: boolean; adminOnly?: boolean; }
+interface NavSection { id: SectionId; label: string; icon: IconName; keywords: string[]; requiresAbs?: boolean; adminOnly?: boolean; }
 
 interface NavGroup { label: string; sections: NavSection[]; }
 
@@ -41,26 +42,26 @@ interface NavGroup { label: string; sections: NavSection[]; }
 // concise without maintaining a second navigation model.
 const NAV_GROUPS: NavGroup[] = [
   { label: 'This device', sections: [
-    { id: 'account',    label: 'Account',    icon: 'home'       },
-    { id: 'appearance', label: 'Appearance', icon: 'speaker'    },
-    { id: 'audio',      label: 'Audio',      icon: 'headphones' },
-    { id: 'downloads',  label: 'Downloads',  icon: 'bookmark'   },
-    { id: 'keyboard',   label: 'Keyboard',   icon: 'kbd'        },
+    { id: 'account', label: 'Account', icon: 'home', keywords: ['profile', 'password', 'user', 'sign out'] },
+    { id: 'appearance', label: 'Appearance', icon: 'sliders', keywords: ['theme', 'accent', 'scale', 'cover size', 'layout', 'display', 'shelf'] },
+    { id: 'audio', label: 'Audio', icon: 'headphones', keywords: ['device', 'output', 'equalizer', 'eq', 'volume'] },
+    { id: 'downloads', label: 'Downloads', icon: 'download', keywords: ['offline', 'folder', 'storage', 'cache', 'retry'] },
+    { id: 'keyboard', label: 'Keyboard', icon: 'kbd', keywords: ['shortcut', 'hotkey', 'keys'] },
   ]},
   { label: 'Libraries', sections: [
-    { id: 'library',  label: 'Libraries', icon: 'grid' },
-    { id: 'playback', label: 'Playback',  icon: 'play' },
+    { id: 'library', label: 'Libraries', icon: 'grid', keywords: ['local', 'staging', 'import', 'scan', 'provider', 'open library'] },
+    { id: 'playback', label: 'Playback', icon: 'play', keywords: ['sleep timer', 'skip', 'speed', 'session', 'progress', 'resume'] },
   ]},
   { label: 'Audiobookshelf server', sections: [
-    { id: 'server',          label: 'Server',          icon: 'monitor',  requiresAbs: true },
-    { id: 'logs',            label: 'Logs',            icon: 'list',     requiresAbs: true, adminOnly: true },
-    { id: 'backups',         label: 'Backups',         icon: 'bookmark', requiresAbs: true, adminOnly: true },
-    { id: 'notifications',   label: 'Notifications',   icon: 'airplay',  requiresAbs: true, adminOnly: true },
-    { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'sleep',    requiresAbs: true, adminOnly: true },
-    { id: 'sharing',         label: 'Sharing & RSS',   icon: 'airplay',  requiresAbs: true, adminOnly: true },
+    { id: 'server', label: 'Server', icon: 'monitor', keywords: ['sync', 'socket', 'connection', 'address'], requiresAbs: true },
+    { id: 'logs', label: 'Logs', icon: 'list', keywords: ['diagnostic', 'errors', 'debug', 'report'], requiresAbs: true, adminOnly: true },
+    { id: 'backups', label: 'Backups', icon: 'file', keywords: ['restore', 'schedule', 'database'], requiresAbs: true, adminOnly: true },
+    { id: 'notifications', label: 'Notifications', icon: 'bell', keywords: ['apprise', 'alerts', 'events'], requiresAbs: true, adminOnly: true },
+    { id: 'scheduled-tasks', label: 'Scheduled Tasks', icon: 'clock', keywords: ['jobs', 'scanner', 'maintenance'], requiresAbs: true, adminOnly: true },
+    { id: 'sharing', label: 'Sharing & RSS', icon: 'share', keywords: ['feeds', 'public link', 'opds'], requiresAbs: true, adminOnly: true },
   ]},
   { label: 'About', sections: [
-    { id: 'about', label: 'About', icon: 'dot' },
+    { id: 'about', label: 'About', icon: 'info', keywords: ['help', 'quick start', 'version', 'privacy', 'troubleshooting'] },
   ]},
 ];
 
@@ -82,7 +83,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
   // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
   const visibleGroups = NAV_GROUPS
-    .map(group => ({ ...group, sections: group.sections.filter(item => sectionVisible(item, hasAbs, st.isAdmin) && item.label.toLowerCase().includes(navQuery.trim().toLowerCase())) }))
+    .map(group => ({ ...group, sections: group.sections.filter(item => sectionVisible(item, hasAbs, st.isAdmin) && matchesSettingsSearch(item.label, item.id, item.keywords, navQuery)) }))
     .filter(group => group.sections.length > 0);
 
   // Shell CTAs can target a pane while Settings is already mounted. Keep this

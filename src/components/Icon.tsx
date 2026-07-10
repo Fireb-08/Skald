@@ -9,7 +9,7 @@ export type IconName =
   | 'chevron-left' | 'chevron-right' | 'chevron-down'
   | 'check' | 'dot'
   | 'headphones' | 'speaker' | 'airplay' | 'bluetooth' | 'monitor'
-  | 'home' | 'grid' | 'list' | 'kbd' | 'cast' | 'sleep'
+  | 'home' | 'grid' | 'list' | 'kbd' | 'cast' | 'sleep' | 'bell' | 'info'
   // Context-menu action icons
   | 'download' | 'upload' | 'check-circle' | 'clock' | 'playlist' | 'layers' | 'share'
   | 'sliders' | 'trash' | 'edit' | 'image' | 'target' | 'file' | 'refresh';
@@ -98,6 +98,10 @@ export default function Icon({ name, size = 16, color, className }: IconProps) {
       return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M2 6 Q2 3 5 3 L11 3 Q14 3 14 6 L14 11 Q14 13 12 13 L8 13" {...stroke} /><path d="M2 9 Q5 9 7 11 Q7 13 5 13" {...stroke} /><circle cx="2" cy="13" r="0.7" {...fill} /></svg>;
     case 'sleep':
       return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M13 9 A 5 5 0 1 1 7 3 A 4 4 0 0 0 13 9 Z" {...stroke} /></svg>;
+    case 'bell':
+      return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M3 11 L13 11 L12 9 L12 6 Q12 2.5 8 2.5 Q4 2.5 4 6 L4 9 Z" {...stroke} /><path d="M6.5 13 Q8 14.5 9.5 13" {...stroke} /></svg>;
+    case 'info':
+      return <svg style={s} className={className} viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" {...stroke} /><path d="M8 7 L8 12" {...stroke} /><circle cx="8" cy="4.5" r="0.8" {...fill} /></svg>;
     case 'download':
       return <svg style={s} className={className} viewBox="0 0 16 16"><path d="M8 2 L8 10 M5 7 L8 10 L11 7" {...stroke} /><path d="M3 13 L13 13" {...stroke} /></svg>;
     case 'upload': // mirror of 'download' — arrow up over the same tray line
