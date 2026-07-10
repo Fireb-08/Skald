@@ -124,6 +124,24 @@ pub fn prune_empty_dirs(root: &Path) {
     }
 }
 
+/// Delete `path` only if the copy that preceded this call wrote exactly as many
+/// bytes as the source holds; on mismatch the source is left untouched and an
+/// error is returned. Factored out of `place_book`'s move fallback so the
+/// verify-failure branch is directly testable — a same-volume tempdir test
+/// cannot force `rename` to fail, but it can call this with a wrong length.
+fn verify_then_delete(path: &Path, copied: u64) -> Result<(), String> {
+    let src_len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(u64::MAX);
+    if copied == src_len {
+        let _ = std::fs::remove_file(path);
+        Ok(())
+    } else {
+        Err(format!(
+            "verify failed: copied {copied} bytes != source {src_len} for {}",
+            path.display()
+        ))
+    }
+}
+
 /// Move or copy the **direct files** of `source_dir` (audio + supplemental; not
 /// subdirectories, which are separate book units) into `target_dir`.
 ///
@@ -146,19 +164,175 @@ pub fn place_book(source_dir: &Path, target_dir: &Path, move_files: bool) -> Res
             if std::fs::rename(&path, &dest).is_err() {
                 // Cross-volume (or locked) — copy, verify, then delete.
                 let copied = std::fs::copy(&path, &dest).map_err(|e| format!("copy (move fallback): {e}"))?;
-                let src_len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(u64::MAX);
-                if copied == src_len {
-                    let _ = std::fs::remove_file(&path);
-                } else {
-                    return Err(format!(
-                        "verify failed: copied {copied} bytes != source {src_len} for {}",
-                        path.display()
-                    ));
-                }
+                verify_then_delete(&path, copied)?;
             }
         } else {
             std::fs::copy(&path, &dest).map_err(|e| format!("copy: {e}"))?;
         }
     }
     Ok(())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+// File-safety regression tests (review H3): this module moves/copies the user's
+// audio and deletes sources after verification, so every branch that can lose a
+// file is pinned here. Everything runs against tempfile dirs — never real data.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    // ── sanitize_component ────────────────────────────────────────────────────
+
+    #[test]
+    fn sanitize_replaces_reserved_chars_and_control_codes() {
+        assert_eq!(sanitize_component(r#"a<b>c:d"e/f\g|h?i*j"#), "a_b_c_d_e_f_g_h_i_j");
+        assert_eq!(sanitize_component("tab\there"), "tab_here");
+    }
+
+    #[test]
+    fn sanitize_trims_trailing_dots_and_spaces() {
+        // Windows silently strips trailing dots/spaces at the API level, so a
+        // component keeping them would point at a different real path.
+        assert_eq!(sanitize_component("Title..."), "Title");
+        assert_eq!(sanitize_component("Title  "), "Title");
+        assert_eq!(sanitize_component("..."), "_", "all-dot name must not collapse to empty");
+        assert_eq!(sanitize_component(""), "_");
+    }
+
+    #[test]
+    fn sanitize_prefixes_reserved_device_names() {
+        assert_eq!(sanitize_component("CON"), "_CON");
+        assert_eq!(sanitize_component("con"), "_con", "reserved check is case-insensitive");
+        assert_eq!(sanitize_component("COM1.mp3"), "_COM1.mp3", "extension does not un-reserve the stem");
+        assert_eq!(sanitize_component("Console"), "Console", "prefix-only matches are fine");
+    }
+
+    #[test]
+    fn sanitize_caps_component_length_at_120() {
+        let long = "x".repeat(300);
+        assert_eq!(sanitize_component(&long).chars().count(), 120);
+    }
+
+    // ── book_target_dir ───────────────────────────────────────────────────────
+
+    #[test]
+    fn target_dir_includes_series_only_when_present() {
+        let root = Path::new("root");
+        assert_eq!(
+            book_target_dir(root, "Author", Some("Series"), "Title"),
+            root.join("Author").join("Series").join("Title"),
+        );
+        assert_eq!(
+            book_target_dir(root, "Author", None, "Title"),
+            root.join("Author").join("Title"),
+        );
+        // Whitespace-only series must not create an empty path level.
+        assert_eq!(
+            book_target_dir(root, "Author", Some("   "), "Title"),
+            root.join("Author").join("Title"),
+        );
+        // Components are sanitized on the way in (reserved chars become '_').
+        assert_eq!(
+            book_target_dir(root, "A:B", None, "T?"),
+            root.join("A_B").join("T_"),
+        );
+    }
+
+    // ── unique_dir ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn unique_dir_suffixes_on_collision() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("Book");
+
+        // Free path comes back untouched.
+        assert_eq!(unique_dir(target.clone()), target);
+
+        // First collision → " (2)", then " (3)" once that exists too.
+        std::fs::create_dir_all(&target).unwrap();
+        assert_eq!(unique_dir(target.clone()), dir.path().join("Book (2)"));
+        std::fs::create_dir_all(dir.path().join("Book (2)")).unwrap();
+        assert_eq!(unique_dir(target.clone()), dir.path().join("Book (3)"));
+    }
+
+    // ── place_book ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn place_book_copy_leaves_source_and_skips_subdirs() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write(src.path(), "book.m4b", b"audio");
+        write(src.path(), "cover.jpg", b"img");
+        // A subdirectory is a separate book unit — it must never be recursed into.
+        std::fs::create_dir(src.path().join("Sequel")).unwrap();
+        write(&src.path().join("Sequel"), "other.m4b", b"other");
+
+        let target = dst.path().join("Author").join("Title");
+        place_book(src.path(), &target, false).unwrap();
+
+        assert!(target.join("book.m4b").exists());
+        assert!(target.join("cover.jpg").exists());
+        assert!(!target.join("Sequel").exists(), "subdirs are not placed");
+        assert!(src.path().join("book.m4b").exists(), "copy mode leaves the source intact");
+        assert_eq!(std::fs::read(target.join("book.m4b")).unwrap(), b"audio");
+    }
+
+    #[test]
+    fn place_book_move_relocates_files() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        write(src.path(), "book.m4b", b"audio");
+
+        let target = dst.path().join("Title");
+        place_book(src.path(), &target, true).unwrap();
+
+        assert!(target.join("book.m4b").exists());
+        assert!(!src.path().join("book.m4b").exists(), "move mode removes the source file");
+    }
+
+    // ── verify_then_delete (the branch that guards source deletion) ───────────
+
+    #[test]
+    fn verify_mismatch_preserves_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write(dir.path(), "book.m4b", b"0123456789"); // 10 bytes
+
+        // A short copy must fail AND leave the source on disk.
+        let err = verify_then_delete(&src, 5).unwrap_err();
+        assert!(err.contains("verify failed"), "unexpected error: {err}");
+        assert!(src.exists(), "source must survive a failed verification");
+    }
+
+    #[test]
+    fn verify_match_deletes_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = write(dir.path(), "book.m4b", b"0123456789");
+
+        verify_then_delete(&src, 10).unwrap();
+        assert!(!src.exists(), "verified move deletes the source");
+    }
+
+    // ── prune_empty_dirs ──────────────────────────────────────────────────────
+
+    #[test]
+    fn prune_removes_nested_empty_dirs_but_keeps_root_and_content() {
+        let dir = tempfile::tempdir().unwrap();
+        // Empty skeleton left behind after a move-based distribution…
+        std::fs::create_dir_all(dir.path().join("Author").join("Book")).unwrap();
+        // …next to a folder that still holds a file.
+        std::fs::create_dir_all(dir.path().join("Keep")).unwrap();
+        write(&dir.path().join("Keep"), "file.m4b", b"x");
+
+        prune_empty_dirs(dir.path());
+
+        assert!(!dir.path().join("Author").exists(), "empty skeleton pruned depth-first");
+        assert!(dir.path().join("Keep").join("file.m4b").exists(), "non-empty dirs survive");
+        assert!(dir.path().exists(), "root itself is never removed");
+    }
 }
