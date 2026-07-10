@@ -99,8 +99,9 @@ pub struct ApiKeyLoginResult {
     pub server_settings: Option<ServerSettings>,
 }
 
-/// Exchanges an API key through POST /api/authorize. ABS's /api/me response is
-/// a user profile only and does not carry the signed token socket auth needs.
+/// Validates an API key by calling GET /api/me with the key as Bearer token.
+/// Returns both the user profile and the session JWT extracted from the response.
+/// The API key is only used once to obtain the JWT; callers store the JWT.
 #[tauri::command]
 pub async fn login_with_api_key(
     server_url: String,
@@ -130,15 +131,18 @@ pub async fn login_with_api_key(
 
     // Extract the user session JWT from the token field — socket auth needs
     // this JWT, not the raw API key the user entered.
+    let token = body_json["token"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
     // Deserialize User fields — extra fields (mediaProgress, bookmarks, etc.)
     // are silently ignored by serde.
     let user: models::User = serde_json::from_value(body_json)
         .map_err(|e| format!("Failed to parse user: {e}"))?;
-    let token = user.token.clone();
-    if token.is_empty() {
-        return Err("API key validated but the server did not return a socket-compatible user token".to_string());
-    }
 
+    // /api/me does not include serverSettings. Call POST /api/authorize with the
+    // resolved token to retrieve them (same endpoint used by the password login path).
     let server_settings: Option<ServerSettings> = {
         let auth_resp = crate::api::bounded_client()
             .post(format!("{}/api/authorize", server_url.trim_end_matches('/')))
@@ -148,7 +152,8 @@ pub async fn login_with_api_key(
         match auth_resp {
             Ok(r) if r.status().is_success() => {
                 let auth_json: serde_json::Value = r.json().await.unwrap_or(serde_json::Value::Null);
-                auth_json.get("serverSettings").and_then(|ss| serde_json::from_value::<ServerSettings>(ss.clone()).ok())
+                auth_json.get("serverSettings")
+                    .and_then(|ss| serde_json::from_value::<ServerSettings>(ss.clone()).ok())
             }
             _ => None,
         }

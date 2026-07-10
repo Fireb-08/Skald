@@ -63,8 +63,9 @@ export default function Login({ st }: LoginProps) {
       try {
         // Validate the API key — returns user profile + session JWT from /api/me.
         const result = await loginWithApiKey(serverUrl, apiKey.trim());
-        // API keys are their own REST bearer credential. Keep this value only
-        // in the OS keyring, never in localStorage or diagnostics.
+        // Store the session JWT, not the raw API key. The JWT is what the
+        // socket auth middleware validates; the API key was only used once
+        // to obtain it.
         await saveToken(result.token);
         localStorage.setItem('skald.lastServerUrl', serverUrl);
         st.setAuthToken(result.token);
