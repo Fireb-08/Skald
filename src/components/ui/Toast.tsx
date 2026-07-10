@@ -38,7 +38,11 @@ export default function Toast({ message, type, onDismiss }: ToastProps) {
   }, []);
 
   return (
-    <div style={{
+    <div
+      role={type === 'error' ? 'alert' : 'status'}
+      aria-live={type === 'error' ? 'assertive' : 'polite'}
+      aria-atomic="true"
+      style={{
       position: 'fixed',
       bottom: 24,
       right: 24,
@@ -59,9 +63,10 @@ export default function Toast({ message, type, onDismiss }: ToastProps) {
       boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
       padding: '11px 10px 11px 14px',
       pointerEvents: 'auto',
-    }}>
+      }}
+    >
       {ICON[type] && (
-        <span style={{ fontSize: 14, color: BORDER_COLOR[type], flexShrink: 0, lineHeight: 1 }}>
+        <span aria-hidden="true" style={{ fontSize: 14, color: BORDER_COLOR[type], flexShrink: 0, lineHeight: 1 }}>
           {ICON[type]}
         </span>
       )}
@@ -70,6 +75,7 @@ export default function Toast({ message, type, onDismiss }: ToastProps) {
       </span>
       <button
         onClick={onDismiss}
+        aria-label="Dismiss notification"
         style={{
           background: 'none',
           border: 'none',
@@ -81,7 +87,7 @@ export default function Toast({ message, type, onDismiss }: ToastProps) {
           padding: '2px 4px',
           flexShrink: 0,
         }}
-        title="Dismiss"
+        title="Dismiss notification"
       >
         ✕
       </button>
