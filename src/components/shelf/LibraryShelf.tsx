@@ -462,6 +462,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   // attach to the real scrolling element (see the JSX comment below for why this
   // is a plain div inside Glass rather than Glass itself).
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollWriteRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Books for the active series filter, fetched server-side via get_series_items.
   // st.library books lack series IDs (minified shape), so client-side series matching is not possible.
@@ -587,9 +588,20 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   // (shorter) content — TanStack then reports an empty visible range and the
   // shelf renders blank even while the header counts matches. Layout effect so
   // the reset lands before the freshly mounted virtualizer paints.
+  const scrollStorageKey = `onyx.shelf.scroll.${st.currentLibraryId}.${st.libraryView}.${st.filter}.${st.contextFilter?.kind ?? ''}.${st.contextFilter?.value ?? ''}.${st.search}`;
   useLayoutEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 });
-  }, [datasetKey]);
+    const top = Number(localStorage.getItem(scrollStorageKey) ?? '0');
+    scrollRef.current?.scrollTo({ top: Number.isFinite(top) ? top : 0 });
+  }, [scrollStorageKey]);
+  useEffect(() => () => {
+    if (scrollWriteRef.current) clearTimeout(scrollWriteRef.current);
+  }, []);
+  const persistScroll = () => {
+    if (scrollWriteRef.current) clearTimeout(scrollWriteRef.current);
+    scrollWriteRef.current = setTimeout(() => {
+      if (scrollRef.current) localStorage.setItem(scrollStorageKey, String(scrollRef.current.scrollTop));
+    }, 150);
+  };
 
   const openBook = (id: string) => {
     if (selectedId === id) {
@@ -612,6 +624,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
           here. Padding moved off Glass and onto this element. */}
       <div
         ref={scrollRef}
+        onScroll={persistScroll}
         style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: st.libraryView === 'list' ? '12px 14px' : '20px 18px' }}
       >
         {/* Remount the virtualized child whenever the dataset identity changes

@@ -931,7 +931,21 @@ export function useOnyxState(): OnyxState {
   const [filter, setFilter] = useState('all');
   const [contextFilter, setContextFilter] = useState<ContextFilter | null>(null);
   const [advFilter, setAdvFilter] = useState<AdvFilter>(EMPTY_ADV_FILTER);
-  const [search, setSearch] = useState('');
+  // Search belongs to a shelf, not to the entire app: restoring an author query
+  // in an unrelated library is more confusing than useful. Only query text is
+  // persisted; credentials and server data never enter this preference.
+  const [search, setSearchRaw] = useState(() => {
+    const id = localStorage.getItem('skald.activeLibraryId') ?? '';
+    return id ? localStorage.getItem(`onyx.search.${id}`) ?? '' : '';
+  });
+  useEffect(() => {
+    if (!currentLibraryId) return;
+    setSearchRaw(localStorage.getItem(`onyx.search.${currentLibraryId}`) ?? '');
+  }, [currentLibraryId]);
+  const setSearch = useCallback((value: string) => {
+    setSearchRaw(value);
+    if (currentLibraryId) localStorage.setItem(`onyx.search.${currentLibraryId}`, value);
+  }, [currentLibraryId]);
   const [searchScope, setSearchScopeRaw] = useState<SearchScope>(
     () => (localStorage.getItem('onyx.searchScope') as SearchScope) || 'all',
   );
