@@ -5,6 +5,7 @@
 //     the recent-episodes endpoint, re-fetched when the library changes so newly
 //     downloaded episodes appear automatically.
 import React, { useState, useEffect, useRef, type CSSProperties } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import type { OnyxState, LibraryItem } from '../../state/onyx';
 import { fmtRemaining, fmtTime } from '../../state/onyx';
 import { asPodcastItem, getRecentEpisodes, getLocalRecentEpisodes, type RecentEpisode } from '../../api/abs';
@@ -62,6 +63,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   // Downloaded episodes (from recent-episodes), indexed by stable episode key, so
   // a feed episode can be matched to its downloaded (playable) counterpart.
   const [downloadedMap, setDownloadedMap] = useState<Map<string, RecentEpisode>>(new Map());
+  const [downloadProgress, setDownloadProgress] = useState<Map<string, { downloaded: number; total: number }>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [genre, setGenre] = useState<string | null>(null);
   const [episodeSort, setEpisodeSort] = useState<'newest' | 'oldest' | 'title'>(() => (localStorage.getItem('onyx.podcast.episodeSort') as 'newest' | 'oldest' | 'title') ?? 'newest');
@@ -86,6 +88,24 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startScrollLeft: number; didDrag: boolean } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Podcast downloads use the same backend byte events as book downloads. Keep
+  // a row-local projection so the feed and global progress card never disagree.
+  useEffect(() => {
+    let offProgress: (() => void) | undefined;
+    let offComplete: (() => void) | undefined;
+    let offFailed: (() => void) | undefined;
+    let offCancelled: (() => void) | undefined;
+    listen<{ itemId: string; bytesDownloaded: number; totalBytes: number }>('download-progress', event => {
+      const { itemId, bytesDownloaded, totalBytes } = event.payload;
+      setDownloadProgress(current => new Map(current).set(itemId, { downloaded: bytesDownloaded, total: totalBytes }));
+    }).then(off => { offProgress = off; });
+    const clear = (itemId: string) => setDownloadProgress(current => { const next = new Map(current); next.delete(itemId); return next; });
+    listen<{ itemId: string }>('download-complete', event => clear(event.payload.itemId)).then(off => { offComplete = off; });
+    listen<{ itemId: string }>('download-failed', event => clear(event.payload.itemId)).then(off => { offFailed = off; });
+    listen<{ itemId: string }>('download-cancelled', event => clear(event.payload.itemId)).then(off => { offCancelled = off; });
+    return () => { offProgress?.(); offComplete?.(); offFailed?.(); offCancelled?.(); };
+  }, []);
 
   const onCarouselMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = scrollRef.current;
@@ -398,6 +418,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
           const pct = mp ? Math.min(100, Math.round((mp.progress ?? 0) * 100)) : 0;
           const finished = mp?.isFinished ?? false;
           const nowPlaying = downloaded && st.currentEpisodeId === ep.id && st.currentBookId === pid;
+          const transfer = ep.id ? downloadProgress.get(ep.id) : undefined;
           const podTitle = ep.podcast?.metadata?.title
             ?? (podItem ? asPodcastItem(podItem).media?.metadata?.title : '')
             ?? '';
@@ -431,6 +452,11 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
               </button>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, color: downloaded ? 'var(--onyx-text)' : 'var(--onyx-text-dim)', fontWeight: downloaded ? 500 : 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>{ep.title}</div>
+                {transfer && (
+                  <div role="progressbar" aria-label={`Downloading ${ep.title}`} aria-valuemin={0} aria-valuemax={transfer.total || undefined} aria-valuenow={transfer.total ? transfer.downloaded : undefined} style={{ height: 3, marginTop: 5, borderRadius: 2, overflow: 'hidden', background: 'rgba(255,255,255,0.08)' }}>
+                    <div style={{ height: '100%', width: transfer.total ? `${Math.min(100, transfer.downloaded / transfer.total * 100)}%` : '35%', background: 'var(--onyx-accent)', transition: 'width 0.15s' }} />
+                  </div>
+                )}
                 <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.03em', marginTop: 3, display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
                   {!selectedId && podTitle && <><span style={{ color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>{podTitle}</span><span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /></>}
                   {date && <>{date}<span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /></>}
