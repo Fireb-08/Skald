@@ -74,6 +74,14 @@ export function getDownloads(): Promise<DownloadRecord[]> {
   return invoke('get_downloads');
 }
 
+/** Returns and clears the corrupt-persistence notices recorded since launch —
+ *  names of files the backend preserved as *.corrupt before resetting to empty.
+ *  Polled once after the mount registry load so the user learns visible data
+ *  was reset rather than finding it mysteriously empty. */
+export function takeCorruptPersistenceNotices(): Promise<string[]> {
+  return invoke('take_corrupt_persistence_notices');
+}
+
 /** Deletes the audio file from disk and removes its registry entry.
  *  Returns an error if the file was already gone (registry still cleaned up).
  *  Used by the delete button in Settings → Downloads. */

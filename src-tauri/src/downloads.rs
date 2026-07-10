@@ -42,17 +42,71 @@ pub struct DownloadRecord {
 // All registry operations read/write this single file inside the downloads directory.
 const REGISTRY_FILE: &str = "downloads.json";
 
-// Load the registry from disk, returning an empty vec if it does not exist or is unparseable.
-// A missing file is the normal state on first run and is not an error.
-pub fn load_registry(downloads_dir: &Path) -> Vec<DownloadRecord> {
-    let path = downloads_dir.join(REGISTRY_FILE);
-    let bytes = match std::fs::read(&path) {
+// ── Corrupt-file preservation (review L5/L2) ──────────────────────────────────
+// Resetting a corrupt persistence file to empty keeps startup safe, but doing it
+// silently made corruption indistinguishable from ordinarily-empty data — and the
+// next save destroyed the only evidence. The loaders below move the bad file
+// aside as `<name>.corrupt` and log a warning; user-visible resets (registry,
+// offline queue) additionally queue a notice the frontend polls once after mount
+// so the user learns their data was reset rather than mysteriously gone.
+
+// Notices queued for the frontend this launch: human-readable names of the
+// persistence files that were preserved as *.corrupt. Drained (not just read)
+// by take_corrupt_notices so the toast fires once per incident.
+static CORRUPT_NOTICES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+// Returns and clears the corrupt-persistence notices recorded since launch.
+pub fn take_corrupt_notices() -> Vec<String> {
+    // Poison-tolerant like QUEUE_LOCK: a panic elsewhere must not wedge notices.
+    let mut notices = CORRUPT_NOTICES.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::take(&mut *notices)
+}
+
+// Parse a JSON persistence file. A missing file is the normal first-run state
+// and loads silently as the default; an *unparseable* file is preserved as a
+// `<name>.corrupt` sibling (overwriting any previous one) before falling back,
+// so the evidence survives the next save. `what` names the file in the log and
+// in the user-facing notice; pass `notify_user` for files whose reset is
+// user-visible (registry, offline queue) and not for per-book internals.
+fn load_json_or_preserve<T: serde::de::DeserializeOwned + Default>(
+    path: &Path,
+    what: &str,
+    notify_user: bool,
+) -> T {
+    let bytes = match std::fs::read(path) {
         Ok(b) => b,
-        Err(_) => return Vec::new(), // file missing or unreadable — treat as empty registry
+        Err(_) => return T::default(), // missing or unreadable — normal empty state
     };
-    // Corrupt JSON falls back to empty rather than propagating an error; the next
-    // successful write will overwrite the corrupt file.
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            let corrupt = path.with_file_name(format!(
+                "{}.corrupt",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or("persistence.json"),
+            ));
+            // Rename replaces an existing .corrupt from an earlier incident —
+            // the freshest evidence wins. Failure to preserve must not block the
+            // safe empty fallback.
+            let preserved = std::fs::rename(path, &corrupt).is_ok();
+            log::warn!(
+                target: "skald::downloads",
+                "corrupt {what} reset to empty (preserved: {preserved}, err: {e}) — see {}",
+                corrupt.display(),
+            );
+            if notify_user {
+                let mut notices = CORRUPT_NOTICES.lock().unwrap_or_else(|p| p.into_inner());
+                notices.push(what.to_string());
+            }
+            T::default()
+        }
+    }
+}
+
+// Load the registry from disk, returning an empty vec if it does not exist.
+// A missing file is the normal state on first run and is not an error; a
+// corrupt file is preserved as downloads.json.corrupt and reported.
+pub fn load_registry(downloads_dir: &Path) -> Vec<DownloadRecord> {
+    load_json_or_preserve(&downloads_dir.join(REGISTRY_FILE), "downloads registry", true)
 }
 
 // Save the registry to disk.
@@ -148,14 +202,11 @@ const PROGRESS_QUEUE_FILE: &str = "offline_progress.json";
 static QUEUE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // Load the progress queue from disk. Returns an empty vec if the file does not
-// exist (normal on first run) or is corrupt (next write will overwrite it).
+// exist (normal on first run); a corrupt file is preserved as
+// offline_progress.json.corrupt and reported — a silently-emptied queue would
+// lose unsynced listening positions with no trace.
 pub fn load_progress_queue(downloads_dir: &Path) -> Vec<OfflineProgressEntry> {
-    let path = downloads_dir.join(PROGRESS_QUEUE_FILE);
-    let bytes = match std::fs::read(&path) {
-        Ok(b)  => b,
-        Err(_) => return Vec::new(), // missing or unreadable — treat as empty
-    };
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    load_json_or_preserve(&downloads_dir.join(PROGRESS_QUEUE_FILE), "offline progress queue", true)
 }
 
 // Persist the progress queue to disk using a write-then-rename pattern so the
@@ -232,14 +283,10 @@ fn local_log_path(data_dir: &Path, item_id: &str) -> std::path::PathBuf {
 
 // Load stop points for a specific book, most recent first.
 // Returns an empty vec if the file does not exist (normal on first play).
+// A corrupt log is preserved for diagnosis but does NOT notify the user —
+// stop points are a per-book safety net, not user-facing data.
 pub fn load_stop_points(data_dir: &Path, item_id: &str) -> Vec<LocalStopPoint> {
-    let path = local_log_path(data_dir, item_id);
-    let bytes = match std::fs::read(&path) {
-        Ok(b)  => b,
-        Err(_) => return Vec::new(), // missing or unreadable — treat as no history
-    };
-    // Corrupt JSON falls back to empty rather than surfacing an error.
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    load_json_or_preserve(&local_log_path(data_dir, item_id), "stop-point log", false)
 }
 
 // Persist the stop-point list for a book using a write-then-rename pattern
@@ -327,6 +374,42 @@ mod tests {
 
         std::fs::write(dir.path().join("downloads.json"), b"{not json!").unwrap();
         assert!(load_registry(dir.path()).is_empty(), "corrupt file = empty registry");
+    }
+
+    // Review L5: a corrupt file must be moved aside as evidence, not silently
+    // destroyed by the next save.
+    #[test]
+    fn corrupt_registry_is_preserved_with_original_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("downloads.json"), b"{not json!").unwrap();
+
+        assert!(load_registry(dir.path()).is_empty());
+        let corrupt = dir.path().join("downloads.json.corrupt");
+        assert_eq!(std::fs::read(&corrupt).unwrap(), b"{not json!", "evidence preserved verbatim");
+        assert!(!dir.path().join("downloads.json").exists(), "live slot cleared for the next save");
+
+        // A later incident replaces the sibling — freshest evidence wins.
+        std::fs::write(dir.path().join("downloads.json"), b"worse!").unwrap();
+        assert!(load_registry(dir.path()).is_empty());
+        assert_eq!(std::fs::read(&corrupt).unwrap(), b"worse!");
+    }
+
+    #[test]
+    fn corrupt_queue_and_stop_points_are_preserved_healthy_files_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(dir.path().join("offline_progress.json"), b"[broken").unwrap();
+        assert!(load_progress_queue(dir.path()).is_empty());
+        assert!(dir.path().join("offline_progress.json.corrupt").exists());
+
+        std::fs::write(dir.path().join("local_log_book.json"), b"[broken").unwrap();
+        assert!(load_stop_points(dir.path(), "book").is_empty());
+        assert!(dir.path().join("local_log_book.json.corrupt").exists());
+
+        // A healthy file round-trips without growing a .corrupt sibling.
+        upsert_record(dir.path(), record("a")).unwrap();
+        assert_eq!(load_registry(dir.path()).len(), 1);
+        assert!(!dir.path().join("downloads.json.corrupt").exists());
     }
 
     #[test]

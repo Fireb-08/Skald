@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
@@ -656,7 +656,21 @@ export function useOnyxState(): OnyxState {
   useEffect(() => {
     // Initial load — reads the registry from disk; works before any server connection.
     getDownloads()
-      .then(setDownloads)
+      .then(records => {
+        setDownloads(records);
+        // The registry load above is what trips the corrupt-file preservation
+        // path (review L2), so poll its notices right after: a damaged file was
+        // reset to empty and kept as *.corrupt — say so instead of letting the
+        // reset look like ordinary empty data.
+        return takeCorruptPersistenceNotices().then(notices => {
+          if (notices.length === 0) return;
+          log.warn('downloads', 'corrupt persistence reset surfaced to user', { notices });
+          setToast({
+            message: `Damaged ${notices.join(' and ')} reset — the original was kept as a .corrupt file in the downloads folder.`,
+            type: 'info',
+          });
+        });
+      })
       .catch(e => log.error('downloads', 'initial registry load failed', { err: String(e) }));
 
     // Re-load whenever a download completes. The download-complete event fires

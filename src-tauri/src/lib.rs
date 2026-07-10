@@ -294,6 +294,7 @@ pub fn run() {
             // Downloads — Phase A/B/C: stream to disk, progress events, cancellation, registry
             commands::download_item,
             commands::get_downloads,
+            commands::take_corrupt_persistence_notices,
             commands::remove_download,
             commands::cancel_download,
             // Downloads — Phase D: offline playback via local file

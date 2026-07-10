@@ -672,6 +672,16 @@ pub fn get_downloads() -> Result<Vec<downloads::DownloadRecord>, String> {
     Ok(downloads::prune_missing(&dir))
 }
 
+/// Returns and clears the corrupt-persistence notices recorded since launch —
+/// the human-readable names of files the loaders preserved as *.corrupt before
+/// resetting to empty (review L2). Polled once by the frontend after the
+/// registry mount load so the user learns visible data was reset rather than
+/// finding it mysteriously empty.
+#[tauri::command]
+pub fn take_corrupt_persistence_notices() -> Vec<String> {
+    downloads::take_corrupt_notices()
+}
+
 /// Removes a downloaded book: deletes the entire extracted directory (audio file,
 /// cover image, and any other extracted files) and removes the registry entry.
 /// The registry entry is always removed even when the directory is missing so
