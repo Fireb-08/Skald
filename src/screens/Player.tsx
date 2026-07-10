@@ -626,6 +626,21 @@ export default function Player({ st }: PlayerProps) {
     st.setPosition(target);
   };
 
+  const onScrubKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const step = e.shiftKey ? 30 : 5;
+    const start = hasChapters ? chapterStart(chapters, chIdx) : 0;
+    const end = hasChapters ? start + curCh.dur : st.bookSecs;
+    let target: number | null = null;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') target = Math.max(start, st.position - step);
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') target = Math.min(end, st.position + step);
+    if (e.key === 'Home') target = start;
+    if (e.key === 'End') target = end;
+    if (target === null) return;
+    e.preventDefault();
+    seekAudio(target).catch(logErr);
+    st.setPosition(target);
+  };
+
   const bSeries = bookSeries(b);
 
   const handlePlayPause = async () => {
@@ -874,7 +889,19 @@ export default function Player({ st }: PlayerProps) {
                 </div>
               </div>
 
-              <div ref={waveformRef} onClick={onScrub} style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0 }}>
+              <div
+                ref={waveformRef}
+                role="slider"
+                tabIndex={0}
+                aria-label={hasChapters ? `Seek within ${curCh.t || `chapter ${chIdx + 1}`}` : 'Seek within episode'}
+                aria-valuemin={0}
+                aria-valuemax={Math.round(dispTotal)}
+                aria-valuenow={Math.round(dispLocal)}
+                aria-valuetext={`${fmtTime(dispLocal)} of ${fmtTime(dispTotal)}`}
+                onClick={onScrub}
+                onKeyDown={onScrubKeyDown}
+                style={{ cursor: 'pointer', position: 'relative', width: '100%', flex: 1, minWidth: 0, outlineOffset: 4 }}
+              >
                 <Waveform width={waveWidth} height={isCompact ? 36 : 72} progress={dispTotal > 0 ? dispLocal / dispTotal : 0} color="var(--onyx-accent)" dim="rgba(255,255,255,0.15)" bars={140} flat />
               </div>
 

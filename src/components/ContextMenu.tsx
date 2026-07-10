@@ -51,6 +51,7 @@ const HEADER: React.CSSProperties = {
 
 export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const [hovered, setHovered] = useState<string | null>(null);
   const [openSub, setOpenSub] = useState<string | null>(null);
 
@@ -68,6 +69,13 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
     return () => document.removeEventListener('mousedown', onDown);
   }, [onClose]);
 
+  useEffect(() => {
+    // Context menus are often opened by a pointer, but must become immediately
+    // useful to keyboard users as well. Disabled rows are intentionally skipped.
+    ref.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]:not([disabled])')?.focus();
+    return () => { if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus(); };
+  }, []);
+
   // Clear any pending submenu-close timer on unmount.
   useEffect(() => () => { if (subTimer.current) clearTimeout(subTimer.current); }, []);
 
@@ -84,6 +92,31 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
     width: MENU_W,
     ...(flipX ? { right: window.innerWidth - x } : { left: x }),
     ...(flipY ? { bottom: window.innerHeight - y } : { top: y }),
+  };
+
+  const focusRow = (key: string) => {
+    requestAnimationFrame(() => ref.current?.querySelector<HTMLButtonElement>(`button[data-menu-key="${key}"]`)?.focus());
+  };
+
+  const onMenuKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLButtonElement;
+    if (!target.matches('button[role="menuitem"]')) return;
+    const rows = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([disabled])') ?? []);
+    const index = rows.indexOf(target);
+    if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+      rows[next]?.focus();
+      return;
+    }
+    const parentKey = target.dataset.parentKey;
+    if (e.key === 'ArrowRight' && target.dataset.hasSub === 'true') {
+      e.preventDefault(); setOpenSub(target.dataset.menuKey ?? null); focusRow(`${target.dataset.menuKey}.0`); return;
+    }
+    if (e.key === 'ArrowLeft' && parentKey) {
+      e.preventDefault(); setOpenSub(null); focusRow(parentKey); return;
+    }
   };
 
   // Row renderer shared by the main menu and submenu panels.
@@ -129,10 +162,17 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
         }}
       >
         <button
+          role="menuitem"
+          data-menu-key={key}
+          data-parent-key={inSub ? key.slice(0, key.lastIndexOf('.')) : undefined}
+          data-has-sub={hasSub || undefined}
+          aria-haspopup={hasSub ? 'menu' : undefined}
+          aria-expanded={hasSub ? subOpen : undefined}
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
-            if (disabled || hasSub) return;
+            if (disabled) return;
+            if (hasSub) { setOpenSub(subOpen ? null : key); if (!subOpen) focusRow(`${key}.0`); return; }
             item.onClick?.();
             onClose();
           }}
@@ -153,7 +193,7 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
 
         {/* Submenu flyout */}
         {hasSub && subOpen && (
-          <div style={{
+          <div role="menu" aria-label={item.label} style={{
             ...PANEL, position: 'absolute', top: -6, width: SUB_W, zIndex: 1001,
             ...(flipX ? { right: 'calc(100% + 4px)' } : { left: 'calc(100% + 4px)' }),
           }}>
@@ -166,7 +206,7 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
   };
 
   const menu = (
-    <div ref={ref} style={{ ...posStyle, ...PANEL }}>
+    <div ref={ref} role="menu" aria-label="Item actions" onKeyDown={onMenuKeyDown} style={{ ...posStyle, ...PANEL }}>
       {sections.map((section, si) => (
         <div key={si}>
           {/* Divider above every group after the first; header replaces it when present. */}
@@ -174,7 +214,7 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
             <div style={{ height: 1, background: 'var(--onyx-line)', margin: '6px 8px' }} />
           )}
           {section.label && (
-            <div style={{ ...HEADER, ...(si > 0 ? { borderTop: '1px solid var(--onyx-line)', marginTop: 4, paddingTop: 10 } : {}) }}>
+            <div role="presentation" style={{ ...HEADER, ...(si > 0 ? { borderTop: '1px solid var(--onyx-line)', marginTop: 4, paddingTop: 10 } : {}) }}>
               {section.label}
             </div>
           )}

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -15,6 +16,35 @@ export interface ConfirmDialogProps {
 export default function ConfirmDialog({
   title, message, confirmLabel, danger, onConfirm, onCancel,
 }: ConfirmDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    // A confirmation must not leave keyboard users behind the overlay. Focus the
+    // safe action first, cycle Tab locally, and return to the invoking control.
+    const first = dialog.querySelector<HTMLElement>('button:not([disabled])');
+    first?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+      if (e.key !== 'Tab') return;
+      const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])'));
+      if (!controls.length) return;
+      const index = controls.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey && index <= 0) { e.preventDefault(); controls[controls.length - 1].focus(); }
+      if (!e.shiftKey && index === controls.length - 1) { e.preventDefault(); controls[0].focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      // The trigger may have been removed by the action; never focus a stale node.
+      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+    };
+  }, [onCancel]);
+
   // Portaled to document.body so the overlay isn't trapped inside a parent
   // stacking context — without this it renders below body-level modal portals
   // (e.g. ShareModal) regardless of zIndex.
@@ -29,7 +59,7 @@ export default function ConfirmDialog({
       }}
       onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" style={{
         width: 420,
         maxWidth: '90vw',
         background: 'var(--onyx-panel2)',
@@ -43,10 +73,10 @@ export default function ConfirmDialog({
         flexDirection: 'column',
         gap: 12,
       }}>
-        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)', lineHeight: 1.2 }}>
+        <div id="confirm-dialog-title" style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)', lineHeight: 1.2 }}>
           {title}
         </div>
-        <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)', lineHeight: 1.55 }}>
+        <div id="confirm-dialog-message" style={{ fontSize: 13, color: 'var(--onyx-text-dim)', lineHeight: 1.55 }}>
           {message}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>

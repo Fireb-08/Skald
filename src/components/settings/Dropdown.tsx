@@ -38,14 +38,24 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
   // Refs used to detect outside clicks without relying on React state timing.
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  const closeAndRestoreFocus = () => {
+    setOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   // Re-measure the trigger rect each time the dropdown opens so the position
   // stays correct even after scroll or window resize between opens.
   useEffect(() => {
     if (open && triggerRef.current) {
       setRect(triggerRef.current.getBoundingClientRect());
+      // A selected device is the most useful keyboard starting point; fall back
+      // to the first option when none has been selected yet.
+      const index = Math.max(0, items.findIndex(item => item.id === selected));
+      requestAnimationFrame(() => optionRefs.current[index]?.focus());
     }
-  }, [open]);
+  }, [open, items, selected]);
 
   // Close on click outside — attaches only while open to minimise overhead.
   useEffect(() => {
@@ -63,10 +73,28 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
   // Close on Escape.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeAndRestoreFocus(); } };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      setOpen(true);
+    }
+  };
+
+  const onListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const current = optionRefs.current.indexOf(document.activeElement as HTMLButtonElement);
+    if (e.key === 'Escape') { e.preventDefault(); closeAndRestoreFocus(); return; }
+    if (e.key === 'Home' || e.key === 'End' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const last = items.length - 1;
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? last : (current + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      optionRefs.current[next]?.focus();
+    }
+  };
 
   // ── Popout position calculation ────────────────────────────────────────────
   // The popout renders with position: fixed so it is placed relative to the
@@ -111,6 +139,10 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
       <button
         ref={triggerRef}
         onClick={() => setOpen(o => !o)}
+        onKeyDown={onTriggerKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls="onyx-dropdown-options"
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
           padding: '6px 12px',
@@ -141,6 +173,10 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
       {open && rect && createPortal(
         <div
           ref={dropdownRef}
+          id="onyx-dropdown-options"
+          role="listbox"
+          aria-label="Output device"
+          onKeyDown={onListKeyDown}
           style={{
             ...popoutStyle,
             // Visual chrome matching other Onyx panels.
@@ -163,12 +199,15 @@ export default function Dropdown({ trigger, items, selected, onChange, align = '
             Output device
           </div>
 
-          {items.map(item => {
+          {items.map((item, i) => {
             const active = item.id === selected;
             return (
               <button
                 key={item.id}
-                onClick={() => { onChange(item.id); setOpen(false); }}
+                ref={el => { optionRefs.current[i] = el; }}
+                role="option"
+                aria-selected={active}
+                onClick={() => { onChange(item.id); closeAndRestoreFocus(); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10,
                   width: '100%', padding: '8px 10px', borderRadius: 6,
