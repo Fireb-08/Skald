@@ -75,13 +75,14 @@ export default function Settings({ st, onLogout }: SettingsProps) {
     ? st.settingsSection as SectionId
     : 'account';
   const [section, setSection] = useState<SectionId>(requestedSection);
+  const [navQuery, setNavQuery] = useState('');
   // True when connected to an Audiobookshelf server. Local-only users (no token)
   // never see the ABS-only panes. authToken is seeded synchronously from the
   // skald.hasAuth presence flag, so this is stable across reloads and survives
   // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
   const visibleGroups = NAV_GROUPS
-    .map(group => ({ ...group, sections: group.sections.filter(item => sectionVisible(item, hasAbs, st.isAdmin)) }))
+    .map(group => ({ ...group, sections: group.sections.filter(item => sectionVisible(item, hasAbs, st.isAdmin) && item.label.toLowerCase().includes(navQuery.trim().toLowerCase())) }))
     .filter(group => group.sections.length > 0);
 
   // Shell CTAs can target a pane while Settings is already mounted. Keep this
@@ -136,6 +137,13 @@ export default function Settings({ st, onLogout }: SettingsProps) {
         {/* Sidebar — scrolls vertically when the nav list is taller than the pane
             (low-resolution windows would otherwise spill the last items out). */}
         <Glass translucent={st.translucent} style={{ width: 260, padding: '20px 14px', display: 'flex', flexDirection: 'column', flexShrink: 0, minHeight: 0, overflowY: 'auto' }}>
+          <input
+            value={navQuery}
+            onChange={e => setNavQuery(e.target.value)}
+            placeholder="Find a setting…"
+            aria-label="Find a setting"
+            style={{ margin: '0 8px 14px', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-glass)', color: 'var(--onyx-text)', fontFamily: 'inherit', fontSize: 12 }}
+          />
           {visibleGroups.map((group, groupIndex) => (
             <div key={group.label} style={{ marginTop: groupIndex === 0 ? 0 : 14 }}>
               <div style={{ padding: '0 12px 6px', fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)' }}>
