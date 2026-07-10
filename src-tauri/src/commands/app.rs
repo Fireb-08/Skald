@@ -88,8 +88,17 @@ pub fn reveal_cache_dir() -> Result<(), String> {
 /// Library path buttons; mirrors reveal_cache_dir but takes a caller-supplied path.
 #[tauri::command]
 pub fn reveal_path(path: String) -> Result<(), String> {
-    if !std::path::Path::new(&path).exists() {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
         return Err(format!("path does not exist: {path}"));
+    }
+    // Directories only (review H4): `explorer <path>` on a FILE launches it via
+    // its default handler, which would let a compromised renderer execute an
+    // arbitrary local file through this command. Every caller reveals a folder
+    // (staging, cache, library root); a future file-reveal must use
+    // `explorer /select,<file>` rather than lifting this check.
+    if !p.is_dir() {
+        return Err(format!("not a folder: {path}"));
     }
     std::process::Command::new("explorer")
         .arg(&path)
