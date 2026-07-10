@@ -88,7 +88,7 @@ export default function Login({ st }: LoginProps) {
 
     // ── Password method ─────────────────────────────────────────────────────
     if (!user.trim()) return setError('Your name is required.');
-    if (!pass)        return setError('A passphrase is required.');
+    if (!pass)        return setError('A password is required.');
     setError('');
     setPending(true);
     try {
@@ -382,7 +382,7 @@ export default function Login({ st }: LoginProps) {
             </label>
 
             {method === 'password' ? (
-              // ── Password fields: username + passphrase ──────────────────
+              // ── Password fields ─────────────────────────────────────────
               <>
                 {/* Field 2: Username */}
                 <label style={{ display: 'block' }}>
@@ -399,10 +399,10 @@ export default function Login({ st }: LoginProps) {
                   />
                 </label>
 
-                {/* Field 3: Passphrase */}
+                {/* Field 3: Password */}
                 <label style={{ display: 'block' }}>
                   <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>
-                    Your passphrase
+                    Password
                   </div>
                   <input
                     className="saga-input"

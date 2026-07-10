@@ -91,6 +91,17 @@ function ShortcutChord({ shortcut, active }: { shortcut: string; active: boolean
 export default function KeyboardSection() {
   const [bindings, setBindings] = useState<ShortcutBinding[]>(loadBindings);
   const [listeningFor, setListeningFor] = useState<string | null>(null);
+  const [secondsRemaining, setSecondsRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!listeningFor) { setSecondsRemaining(0); return; }
+    setSecondsRemaining(5);
+    const timer = window.setInterval(() => setSecondsRemaining(s => {
+      if (s <= 1) { setListeningFor(null); return 0; }
+      return s - 1;
+    }), 1000);
+    return () => window.clearInterval(timer);
+  }, [listeningFor]);
 
   useEffect(() => {
     if (!listeningFor) return;
@@ -154,6 +165,7 @@ export default function KeyboardSection() {
                 {ACTION_LABELS[b.action] ?? b.action}
               </span>
               <ShortcutChord shortcut={b.shortcut} active={isListening} />
+              {isListening && <span style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-accent)' }}>Press a key · {secondsRemaining}s</span>}
             </div>
           );
         })}
