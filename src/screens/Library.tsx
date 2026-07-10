@@ -27,7 +27,11 @@ export default function Library({ st }: LibraryProps) {
   const isPodcast = st.activeLibrary?.mediaType === 'podcast';
   const isLocalLibrary = st.activeLibrary?.source === 'local';
   const isAllLibraries = st.activeLibrary?.source === 'all';
-  const visibleShelfTab = isAllLibraries ? 'library' : shelfTabForSource(st.shelfTab, isLocalLibrary);
+  // Combined + local sources route through the same gate: only the
+  // library-scoped Collections/Playlists views fall back to Home; the
+  // client-side browse tabs render for every source.
+  const shelfSource = isAllLibraries ? 'all' : isLocalLibrary ? 'local' : 'abs';
+  const visibleShelfTab = shelfTabForSource(st.shelfTab, shelfSource);
 
   useEffect(() => {
     // Open Library review enrichment is book-specific — skip it for podcasts.

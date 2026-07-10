@@ -10,6 +10,7 @@ import ViewModeToggle from './ViewModeToggle';
 import FilterPopover from './FilterPopover';
 import { log } from '../../lib/log';
 import { isServerOnlyShelfTab } from '../../lib/shelfTabs';
+import { seriesGroupName } from './tabs/SeriesView';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -45,8 +46,10 @@ function seriesNameOf(b: LibraryItem): string {
     const first = Array.isArray(s) ? s[0] : s;
     if (first?.name) return first.name;
   }
-  // Fall back to flat seriesName for minified responses that omit the object.
-  return bookSeries(b) ?? '';
+  // Fall back to flat seriesName for minified responses that omit the object,
+  // normalized (ABS embeds "#sequence" there) so it compares against the clean
+  // names the series views and drill-in filters carry.
+  return seriesGroupName(bookSeries(b));
 }
 
 function seriesVolOf(b: LibraryItem): number {
@@ -77,12 +80,14 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
 
   // If the active tab is an optional one that's been hidden, fall back to Home so
   // the user isn't stranded on a view with no corresponding (highlighted) tab.
+  // Server-only tabs (Collections/Playlists) reset for local AND combined
+  // sources — every other tab aggregates the loaded items client-side and
+  // works on the combined shelf too.
   useEffect(() => {
     const optionalHidden = OPTIONAL_TAB_IDS.includes(st.shelfTab as typeof OPTIONAL_TAB_IDS[number]) && !st.optionalTabs[st.shelfTab];
-    const unavailableForSource = (isLocalLibrary && isServerOnlyShelfTab(st.shelfTab))
-      || (isAllLibraries && st.shelfTab !== 'library');
+    const unavailableForSource = (isLocalLibrary || isAllLibraries) && isServerOnlyShelfTab(st.shelfTab);
     if (optionalHidden || unavailableForSource) {
-      log.debug('library', 'reset unavailable shelf tab', { tab: st.shelfTab, source: isLocalLibrary ? 'local' : 'abs' });
+      log.debug('library', 'reset unavailable shelf tab', { tab: st.shelfTab, source: isAllLibraries ? 'all' : isLocalLibrary ? 'local' : 'abs' });
       st.setShelfTab('library');
     }
   }, [st.shelfTab, st.optionalTabs, isLocalLibrary, isAllLibraries]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -257,9 +262,10 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
             {TABS
               .filter(t => {
                 // Optional tabs are shown only when enabled in Settings → Library → Display.
-                // The local catalog has no collection or playlist model yet.
-                if (isAllLibraries && t.id !== 'library') return false;
-                if (isLocalLibrary && isServerOnlyShelfTab(t.id)) return false;
+                // Collections/Playlists are library-scoped server models, so they are
+                // hidden for local libraries AND the combined shelf; the browse tabs
+                // (Series/Authors/…) aggregate loaded items client-side and stay.
+                if ((isAllLibraries || isLocalLibrary) && isServerOnlyShelfTab(t.id)) return false;
                 if (t.optional && !st.optionalTabs[t.id]) return false;
                 // Hide Collections and Playlists tabs when horizontal space is insufficient.
                 // containerWidth measures the full ShelfHeader; 400px leaves enough room

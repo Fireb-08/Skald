@@ -21,6 +21,9 @@ import CollectionPicker from '../CollectionPicker';
 import PlaylistPicker from '../PlaylistPicker';
 import FilesModal from './FilesModal';
 import ShareModal from '../ShareModal';
+// Shared series group key — the same normalization the client-derived Series
+// views (local + combined) use to build their groups, so drill-ins match.
+import { seriesGroupName } from './tabs/SeriesView';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -37,7 +40,14 @@ const LIST_ROW_H = 68;   // px fixed list-row height (also the virtualizer's est
 const LIST_GRID = '48px minmax(0,2.4fr) minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1.4fr) 84px';
 
 function seriesNameOf(s: string | undefined) { return (s || '').split(' · ')[0]; }
-function seriesVolOf(s: string | undefined)  { return parseInt((s || '').split(' · ')[1] || '0', 10); }
+// Volume number from the flat series string — legacy " · n" display form or
+// ABS's "Name #n" seriesName form (the shape name-based drill-ins carry).
+function seriesVolOf(s: string | undefined)  {
+  const legacy = parseInt((s || '').split(' · ')[1] || '0', 10);
+  if (legacy) return legacy;
+  const m = (s || '').match(/#([\d.]+)/);
+  return m ? parseFloat(m[1]) || 0 : 0;
+}
 
 // Diagnostic guard (Library Virtualization bug report, 2026-07-08): a
 // non-empty dataset with an empty virtual window IS the sporadic blank-shelf
@@ -480,14 +490,22 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     setContextMenu({ x: e.clientX, y: e.clientY, item });
   };
 
-  // When a series filter is active, use the server-fetched list (empty array while loading).
-  // st.library books carry only the flat seriesName string, not series IDs, so client-side
-  // series matching always fails — the server-side filter endpoint is the only correct path.
-  const sourceBooks = (st.contextFilter?.kind === 'series') ? (seriesBooks ?? []) : st.library;
+  // When a series filter carries a server series ID, use the server-fetched
+  // list (empty array while loading) — st.library's minified ABS items lack
+  // series IDs, so ID matching must go through the filter endpoint. A filter
+  // WITHOUT an ID comes from the client-derived series views (local libraries
+  // and the combined All Libraries shelf), where the normalized seriesName IS
+  // the group key — match it directly over the loaded items.
+  const sourceBooks = (st.contextFilter?.kind === 'series')
+    ? (st.contextFilter.seriesId
+        ? (seriesBooks ?? [])
+        : st.library.filter(b => seriesGroupName(bookSeries(b)) === st.contextFilter?.value))
+    : st.library;
   // In-flight series drill-in: the body source is deliberately empty while the
   // server fetch resolves, so show a loading placeholder instead of the
   // misleading "No titles match" empty state (UI Bugs Follow-up, 2026-07-08).
-  const seriesLoading = st.contextFilter?.kind === 'series' && seriesBooks === null;
+  // Name-based drill-ins resolve synchronously and never show it.
+  const seriesLoading = st.contextFilter?.kind === 'series' && !!st.contextFilter.seriesId && seriesBooks === null;
 
   const filtered = sourceBooks.filter(b => {
     if (st.contextFilter) {

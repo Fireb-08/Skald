@@ -20,11 +20,23 @@ interface SeriesGroup {
 }
 
 // Series sequence lives at media.metadata.series.sequence as a string (decimals possible).
-// When series is an array, use the first entry.
+// When series is an array, use the first entry. Minified ABS items often omit the
+// series object entirely — fall back to the "#n" suffix ABS embeds in the flat
+// seriesName string so combined-shelf groups still sort in reading order.
 function seriesVolOf(b: LibraryItem): number {
   const s = b.media?.metadata?.series as SeriesObject | SeriesObject[] | null | undefined;
   const first = Array.isArray(s) ? s?.[0] : s;
-  return parseFloat((first?.sequence as string | number | undefined | null) as string ?? '0') || 0;
+  const seq = parseFloat((first?.sequence as string | number | undefined | null) as string ?? '0') || 0;
+  if (seq) return seq;
+  const m = (b.media?.metadata?.seriesName ?? '').match(/#([\d.]+)/);
+  return m ? parseFloat(m[1]) || 0 : 0;
+}
+
+// Group key for client-side series derivation. ABS's flat seriesName embeds the
+// sequence ("Name #2"); the local scanner writes the plain name. Strip the
+// suffix so one series never fragments into per-volume groups.
+export function seriesGroupName(raw: string | null | undefined): string {
+  return (raw ?? '').split(' #')[0].trim();
 }
 
 
@@ -34,26 +46,28 @@ export interface SeriesViewProps {
 }
 
 export default function SeriesView({ st, inline = false }: SeriesViewProps) {
-  // Local libraries have no server series endpoint — derive series from the
-  // loaded items instead. ABS libraries use the dedicated endpoint (clean
-  // names/IDs + a books array per series).
-  const isLocal = st.activeLibrary?.source === 'local';
+  // Local libraries have no server series endpoint, and the combined shelf has
+  // no single library to query — both derive series from the loaded items
+  // instead. ABS libraries use the dedicated endpoint (clean names/IDs + a
+  // books array per series).
+  const deriveClientSide = st.activeLibrary?.source === 'local' || st.activeLibrary?.source === 'all';
 
   // Fetch the canonical series list from the dedicated endpoint — gives clean names and IDs.
   const [fetchedSeries, setFetchedSeries] = useState<Series[]>([]);
   useEffect(() => {
-    if (isLocal || !st.serverUrl || !st.currentLibraryId) return;
+    if (deriveClientSide || !st.serverUrl || !st.currentLibraryId) return;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(setFetchedSeries)
       .catch(e => log.error('library', 'series list fetch failed', { err: String(e) }));
-  }, [isLocal, st.serverUrl, st.currentLibraryId]);
+  }, [deriveClientSide, st.serverUrl, st.currentLibraryId]);
 
   let seriesList: SeriesGroup[];
-  if (isLocal) {
-    // Group loaded items by seriesName (set by the scanner from folder structure).
+  if (deriveClientSide) {
+    // Group loaded items by the normalized seriesName (the scanner writes the
+    // plain name; ABS's minified shape embeds "#sequence" — see seriesGroupName).
     const map = new Map<string, LibraryItem[]>();
     for (const b of st.library) {
-      const name = b.media?.metadata?.seriesName;
+      const name = seriesGroupName(b.media?.metadata?.seriesName);
       if (!name) continue;
       const arr = map.get(name);
       if (arr) arr.push(b); else map.set(name, [b]);
