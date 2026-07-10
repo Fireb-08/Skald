@@ -72,6 +72,8 @@ describe('shared local import dialog', () => {
     expect(screen.getByText('Add files')).toBeTruthy();
     expect(screen.getByText('Add folder')).toBeTruthy();
     expect(screen.getByText('Open Staging')).toBeTruthy();
+    expect(screen.getByText('What happens to your files')).toBeTruthy();
+    expect(screen.getByText(/Copy and keep originals/)).toBeTruthy();
   });
 
   it('imports picked files, reports the added count, and refreshes the active library in place', async () => {

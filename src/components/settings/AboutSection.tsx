@@ -6,6 +6,7 @@ import type { OnyxState } from '../../state/onyx';
 import { SectionHead, Row, SERIF, MONO } from './shared';
 import { exportTextFile } from '../../api/abs';
 import { log } from '../../lib/log';
+import quickStart from '../../../docs/QUICK_START.md?raw';
 
 const ghostBtn = {
   padding: '6px 14px', fontSize: 11, fontFamily: MONO, letterSpacing: '0.06em',
@@ -126,8 +127,28 @@ function LicensesModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function HelpModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 500, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)' }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="quick-start-title" style={{ width: '100%', maxWidth: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 16, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel)', boxShadow: '0 40px 100px rgba(0,0,0,0.72)' }}>
+        <div style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--onyx-line)' }}>
+          <h2 id="quick-start-title" style={{ margin: 0, fontFamily: SERIF, fontSize: 20 }}>Quick start and troubleshooting</h2>
+          <button onClick={onClose} aria-label="Close quick start" style={{ width: 30, height: 30, border: 0, background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontSize: 17 }}>×</button>
+        </div>
+        <pre className="onyx-selectable" style={{ margin: 0, padding: '20px 24px 28px', overflow: 'auto', whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.65, color: 'var(--onyx-text-dim)' }}>{quickStart}</pre>
+      </section>
+    </div>
+  );
+}
+
 export default function AboutSection({ st }: { st: OnyxState }) {
   const [showLicenses, setShowLicenses] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   // Read the app version from Tauri (sourced from tauri.conf.json) so the About
   // header never goes stale on a version bump. Empty until resolved (~instant);
   // the label falls back to just "Onyx" for that first frame.
@@ -162,11 +183,16 @@ export default function AboutSection({ st }: { st: OnyxState }) {
         <button style={ghostBtn} onClick={() => setShowLicenses(true)}>View</button>
       </Row>
 
+      <Row label="Quick start & troubleshooting" hint="Connection, offline use, local-library safety, Staging, diagnostics, and current feature boundaries.">
+        <button style={ghostBtn} onClick={() => setShowHelp(true)}>Open guide</button>
+      </Row>
+
       <Row label="Run setup again" hint="Re-open the first-launch walkthrough — connect a server, create a local library, or review the folders. Your existing setup is kept.">
         <button style={ghostBtn} onClick={runSetupAgain}>Run setup</button>
       </Row>
 
       {showLicenses && <LicensesModal onClose={() => setShowLicenses(false)} />}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
