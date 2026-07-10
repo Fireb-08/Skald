@@ -93,6 +93,15 @@ function EqGraph({ bands }: { bands: number[] }) {
 
 export interface AudioSectionProps {}
 
+interface SavedEqPreset { name: string; bands: number[]; preamp: number; }
+
+function loadSavedPresets(): SavedEqPreset[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('onyx.audio.savedEqPresets') ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter(p => typeof p?.name === 'string' && Array.isArray(p.bands) && typeof p.preamp === 'number') : [];
+  } catch { return []; }
+}
+
 export default function AudioSection() {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -102,6 +111,8 @@ export default function AudioSection() {
   // Local copies so sliders/graph update instantly during drag without invoking Tauri on every tick.
   const [localBands, setLocalBands] = useState<number[]>(Array(10).fill(0));
   const [localPreamp, setLocalPreamp] = useState(0);
+  const [savedPresets, setSavedPresets] = useState<SavedEqPreset[]>(loadSavedPresets);
+  const [presetName, setPresetName] = useState('');
 
   useEffect(() => {
     getAudioDevices()
@@ -171,6 +182,22 @@ export default function AudioSection() {
     setEqPreamp(gain).catch(e => log.error('playback', 'set EQ preamp failed', { gain, err: String(e) }));
   }
 
+  function saveCustomPreset() {
+    const name = presetName.trim();
+    if (!name || !eqSettings) return;
+    const next = [...savedPresets.filter(p => p.name.toLowerCase() !== name.toLowerCase()), { name, bands: [...localBands], preamp: localPreamp }];
+    setSavedPresets(next);
+    localStorage.setItem('onyx.audio.savedEqPresets', JSON.stringify(next));
+    setPresetName('');
+  }
+
+  function applySavedPreset(preset: SavedEqPreset) {
+    setLocalBands([...preset.bands]); setLocalPreamp(preset.preamp);
+    setEqSettings(s => s ? { ...s, bands: [...preset.bands], preamp: preset.preamp, presetName: null } : s);
+    Promise.all(preset.bands.map((gain, i) => setEqBand(i, gain)).concat(setEqPreamp(preset.preamp)))
+      .catch(e => log.error('playback', 'apply saved EQ preset failed', { name: preset.name, err: String(e) }));
+  }
+
   const eqEnabled = eqSettings?.enabled ?? false;
 
   // '__custom__' when bands were manually adjusted (presetName === null);
@@ -231,6 +258,14 @@ export default function AudioSection() {
                 ))}
                 {/* Custom is an indicator (active when bands were hand-tuned), not directly applicable. */}
                 <Seg active={presetSelectValue === '__custom__'} onClick={() => {}}>Custom</Seg>
+              </div>
+            </Row>
+
+            <Row label="Saved profiles" hint="Custom profiles apply to the current output device and are stored on this PC.">
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                {savedPresets.map(p => <Seg key={p.name} active={false} onClick={() => applySavedPreset(p)}>{p.name}</Seg>)}
+                <input value={presetName} onChange={e => setPresetName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveCustomPreset(); }} placeholder="Profile name" aria-label="Saved EQ profile name" style={{ width: 105, padding: '5px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-glass)', color: 'var(--onyx-text)', fontFamily: MONO, fontSize: 10 }} />
+                <button onClick={saveCustomPreset} disabled={!presetName.trim()} style={{ padding: '5px 8px', borderRadius: 5, border: '1px solid var(--onyx-accent-edge)', background: 'var(--onyx-accent-dim)', color: 'var(--onyx-accent)', cursor: 'pointer', fontFamily: MONO, fontSize: 9 }}>SAVE</button>
               </div>
             </Row>
 
