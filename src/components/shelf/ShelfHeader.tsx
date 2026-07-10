@@ -73,17 +73,19 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(9999);
   const isLocalLibrary = st.activeLibrary?.source === 'local';
+  const isAllLibraries = st.activeLibrary?.source === 'all';
 
   // If the active tab is an optional one that's been hidden, fall back to Home so
   // the user isn't stranded on a view with no corresponding (highlighted) tab.
   useEffect(() => {
     const optionalHidden = OPTIONAL_TAB_IDS.includes(st.shelfTab as typeof OPTIONAL_TAB_IDS[number]) && !st.optionalTabs[st.shelfTab];
-    const unavailableForSource = isLocalLibrary && isServerOnlyShelfTab(st.shelfTab);
+    const unavailableForSource = (isLocalLibrary && isServerOnlyShelfTab(st.shelfTab))
+      || (isAllLibraries && st.shelfTab !== 'library');
     if (optionalHidden || unavailableForSource) {
       log.debug('library', 'reset unavailable shelf tab', { tab: st.shelfTab, source: isLocalLibrary ? 'local' : 'abs' });
       st.setShelfTab('library');
     }
-  }, [st.shelfTab, st.optionalTabs, isLocalLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [st.shelfTab, st.optionalTabs, isLocalLibrary, isAllLibraries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Canonical series count from GET /api/libraries/{id}/series — the same
   // authoritative source SeriesView uses. Deriving the count from a Set of
@@ -92,13 +94,13 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   // so we fetch the real list and use its length for the subtitle.
   const [seriesCount, setSeriesCount] = useState<number | null>(null);
   useEffect(() => {
-    if (isLocalLibrary || !st.serverUrl || !st.currentLibraryId) { setSeriesCount(null); return; }
+    if (isLocalLibrary || isAllLibraries || !st.serverUrl || !st.currentLibraryId) { setSeriesCount(null); return; }
     let cancelled = false;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(list => { if (!cancelled) setSeriesCount(list.length); })
       .catch(e => log.error('library', 'series count fetch failed', { err: String(e) }));
     return () => { cancelled = true; };
-  }, [st.serverUrl, st.currentLibraryId, isLocalLibrary]);
+  }, [st.serverUrl, st.currentLibraryId, isLocalLibrary, isAllLibraries]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -248,6 +250,7 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
               .filter(t => {
                 // Optional tabs are shown only when enabled in Settings → Library → Display.
                 // The local catalog has no collection or playlist model yet.
+                if (isAllLibraries && t.id !== 'library') return false;
                 if (isLocalLibrary && isServerOnlyShelfTab(t.id)) return false;
                 if (t.optional && !st.optionalTabs[t.id]) return false;
                 // Hide Collections and Playlists tabs when horizontal space is insufficient.

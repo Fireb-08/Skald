@@ -39,6 +39,7 @@ export function buildItemContextMenu(
   // Local-library items live on disk already (carry a localPath) — they get no
   // Download action, and their own Delete (files + catalog row) in Library tools.
   const isLocal = !!item.localPath;
+  const isCombinedShelf = st.activeLibrary?.source === 'all';
   // Used to toggle the first menu item between Download and Delete Download.
   const existingDownload = st.downloads.find(d => d.itemId === item.id);
 
@@ -186,17 +187,17 @@ export function buildItemContextMenu(
   }
 
   // ── ORGANIZE ─────────────────────────────────────────────────────────────
-  const organize: ContextMenuItem[] = [
+  const organize: ContextMenuItem[] = isLocal || isCombinedShelf ? [] : [
     { label: 'Add to Playlist', icon: 'playlist', onClick: () => setPlaylistItem?.(item), disabled: !setPlaylistItem },
   ];
-  if (isAdmin) {
+  if (!isLocal && !isCombinedShelf && isAdmin) {
     organize.push({ label: 'Add to Collection', icon: 'layers', onClick: () => setCollectionItem?.(item), disabled: !setCollectionItem });
   }
 
   const sections: ContextMenuSection[] = [
     { label: 'Playback', items: playback },
-    { label: 'Organize', items: organize },
   ];
+  if (organize.length > 0) sections.push({ label: 'Organize', items: organize });
 
   // ── MANAGE ─────────────────────────────────────────────────────────────────
   // Local-library items carry a localPath. Their manage tools differ from ABS:

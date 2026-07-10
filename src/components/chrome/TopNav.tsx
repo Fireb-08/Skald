@@ -7,6 +7,7 @@ import LocalImportDialog from '../LocalImportDialog';
 import UploadModal from '../UploadModal';
 import { log } from '../../lib/log';
 import { libraryDisplayLabel, librarySourceBadge } from '../../lib/libraryPresentation';
+import { allLibrariesShelf } from '../../lib/allLibraries';
 
 export interface TopNavProps {
   st: OnyxState;
@@ -90,8 +91,10 @@ export default function TopNav({ st }: TopNavProps) {
           than one library exists) the switcher. Styled as an accent chip so it
           reads as the primary anchor of the bar now that the Library tab is gone. */}
       {(() => {
-        const activeLib = st.libraries.find(l => l.id === st.currentLibraryId);
-        const canSwitch = st.libraries.length > 1;
+        const combined = allLibrariesShelf(st.libraries);
+        const libraryChoices = combined ? [combined, ...st.libraries] : st.libraries;
+        const activeLib = st.activeLibrary;
+        const canSwitch = libraryChoices.length > 1;
         return (
           <div ref={libRef} style={{ position: 'relative' }}>
             <button
@@ -144,7 +147,7 @@ export default function TopNav({ st }: TopNavProps) {
               boxShadow: '0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
               padding: 5, overflow: 'hidden',
             }}>
-              {st.libraries.map(l => {
+              {libraryChoices.map(l => {
                 const active = l.id === st.currentLibraryId;
                 const hover = hoverLib === l.id;
                 // Hover = solid accent fill ("about to pick"); current = accent
@@ -216,7 +219,7 @@ export default function TopNav({ st }: TopNavProps) {
         {/* Upload — ABS libraries, users with the upload permission (admin/root
             always qualify). Same slot + visual language as the local Add-books
             button; opens the Upload modal (POST /api/upload). */}
-        {st.activeLibrary && st.activeLibrary.source !== 'local' && st.canUpload && (
+        {st.activeLibrary && st.activeLibrary.source !== 'local' && st.activeLibrary.source !== 'all' && st.canUpload && (
           <button
             onClick={() => setUploadOpen(true)}
             title="Upload audiobooks to the server"

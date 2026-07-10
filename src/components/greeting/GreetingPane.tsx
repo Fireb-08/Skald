@@ -474,6 +474,7 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
   // Listening Stats roadmap): local library → catalog stats; ABS library →
   // server stats; the combine setting fetches both and merges.
   const isLocalLibrary = st.activeLibrary?.source === 'local';
+  const isAllLibraries = st.activeLibrary?.source === 'all';
   const hasServer = !!st.serverUrl;
 
   // ── Fetch the user-stats payload(s) ────────────────────────────────────────
@@ -482,8 +483,8 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
     // Which sources feed "Your stats": with combine OFF the active library's
     // source decides; combine ON fetches both. Standalone (no server) is
     // local-only by construction.
-    const wantServer = hasServer && (!isLocalLibrary || st.combineStats);
-    const wantLocal = !hasServer || isLocalLibrary || st.combineStats;
+    const wantServer = hasServer && (!isLocalLibrary || st.combineStats || isAllLibraries);
+    const wantLocal = !hasServer || isLocalLibrary || st.combineStats || isAllLibraries;
 
     setLoadingUser(true);
     // Each side tolerates failure independently — one dead source must not
@@ -508,14 +509,14 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
 
     return () => { cancelled = true; };
     // Re-fetch when the server, active library, or combine setting changes.
-  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary, st.combineStats]);
+  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary, isAllLibraries, st.combineStats]);
 
   // ── Fetch library stats (ABS libraries only) ───────────────────────────────
   // Local libraries have no /stats endpoint — their LibraryStats are computed
   // from the loaded items at render time below, and calling the server with a
   // local library id would just log a failed request.
   useEffect(() => {
-    if (isLocalLibrary || !hasServer || !st.currentLibraryId) {
+    if (isLocalLibrary || isAllLibraries || !hasServer || !st.currentLibraryId) {
       setLoadingLib(false);
       return;
     }
@@ -529,7 +530,7 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
         if (!cancelled) setLoadingLib(false);
       });
     return () => { cancelled = true; };
-  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary]);
+  }, [st.serverUrl, st.currentLibraryId, hasServer, isLocalLibrary, isAllLibraries]);
 
   // Persist tab choice then update local state.
   const switchPage = (p: 'user' | 'library') => {
@@ -636,8 +637,8 @@ export default function GreetingPane({ st, name }: GreetingPaneProps) {
           : <LibraryStatsPage
               // Local libraries compute their stats from the loaded items —
               // recomputed each render so it tracks scans/deletes live.
-              stats={isLocalLibrary ? computeLocalLibraryStats(st.library) : libStats}
-              loading={isLocalLibrary ? false : loadingLib}
+              stats={isLocalLibrary || isAllLibraries ? computeLocalLibraryStats(st.library) : libStats}
+              loading={isLocalLibrary || isAllLibraries ? false : loadingLib}
               library={st.library}
             />
         }

@@ -26,7 +26,8 @@ export interface LibraryProps {
 export default function Library({ st }: LibraryProps) {
   const isPodcast = st.activeLibrary?.mediaType === 'podcast';
   const isLocalLibrary = st.activeLibrary?.source === 'local';
-  const visibleShelfTab = shelfTabForSource(st.shelfTab, isLocalLibrary);
+  const isAllLibraries = st.activeLibrary?.source === 'all';
+  const visibleShelfTab = isAllLibraries ? 'library' : shelfTabForSource(st.shelfTab, isLocalLibrary);
 
   useEffect(() => {
     // Open Library review enrichment is book-specific — skip it for podcasts.

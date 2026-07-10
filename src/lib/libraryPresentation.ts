@@ -7,6 +7,7 @@ export function libraryDisplayLabel(library: Pick<Library, 'name' | 'mediaType'>
 
 /** Text badge that makes the library's storage source explicit. */
 export function librarySourceBadge(library: Pick<Library, 'mediaType' | 'source'>): string {
+  if (library.source === 'all') return 'Combined';
   const source = library.source === 'local' ? 'This PC' : 'Server';
   return library.mediaType === 'podcast' ? `${source} Podcast` : source;
 }

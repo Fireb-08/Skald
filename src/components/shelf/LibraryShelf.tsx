@@ -87,18 +87,21 @@ function getVal(b: LibraryItem, key: string): string | number {
 function ShelfEmptyState({ st }: { st: OnyxState }) {
   const libraryEmpty = st.library.length === 0;
   const isLocal = st.activeLibrary?.source === 'local';
+  const isCombined = st.activeLibrary?.source === 'all';
 
   if (libraryEmpty) {
     return (
       <div style={{ padding: '58px 24px', textAlign: 'center' }}>
         <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--onyx-accent)', marginBottom: 9 }}>
-          {isLocal ? 'This PC library' : 'Server library'}
+          {isCombined ? 'All libraries' : isLocal ? 'This PC library' : 'Server library'}
         </div>
         <div style={{ fontFamily: SERIF, fontSize: 17, color: 'var(--onyx-text-dim)' }}>
-          {isLocal ? 'No books on this PC shelf yet.' : 'No books in this Audiobookshelf library yet.'}
+          {isCombined ? 'No books were found across your libraries.' : isLocal ? 'No books on this PC shelf yet.' : 'No books in this Audiobookshelf library yet.'}
         </div>
         <div style={{ marginTop: 7, fontSize: 11.5, lineHeight: 1.5, color: 'var(--onyx-text-mute)' }}>
-          {isLocal
+          {isCombined
+            ? 'Add books to a source library, then return here to search everything together.'
+            : isLocal
             ? 'Use Add books above to choose files or a folder, or open the watched Staging folder.'
             : st.canUpload
               ? 'Use Upload above to add books to the server, or scan the library from Audiobookshelf.'
@@ -112,6 +115,14 @@ function ShelfEmptyState({ st }: { st: OnyxState }) {
     <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
       {st.search ? <>No titles match &ldquo;{st.search}&rdquo;.</> : 'No titles match the current filters.'}
     </div>
+  );
+}
+
+function ItemSourceBadge({ item }: { item: LibraryItem }) {
+  return (
+    <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--onyx-accent)', opacity: 0.82 }}>
+      {item.localPath ? 'This PC' : 'Server'}
+    </span>
   );
 }
 
@@ -243,7 +254,10 @@ function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
               </div>
               {/* Title + series */}
               <div style={{ minWidth: 0 }}>
-                <div style={{ ...TRUNC, fontFamily: SERIF, fontSize: 14.5, fontWeight: 500, color: active ? 'var(--onyx-accent)' : 'var(--onyx-text)', lineHeight: 1.2 }}>{bookTitle(b)}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
+                  <div style={{ ...TRUNC, minWidth: 0, fontFamily: SERIF, fontSize: 14.5, fontWeight: 500, color: active ? 'var(--onyx-accent)' : 'var(--onyx-text)', lineHeight: 1.2 }}>{bookTitle(b)}</div>
+                  {st.activeLibrary?.source === 'all' && <ItemSourceBadge item={b} />}
+                </div>
                 {bookSeries(b) && (
                   <div style={{ ...TRUNC, marginTop: 2, fontFamily: MONO, fontSize: 9.5, color: 'var(--onyx-text-mute)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>{bookSeries(b)}</div>
                 )}
@@ -401,7 +415,10 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
                     )}
                   </div>
                   <div style={{ marginTop: 7, fontSize: 11.5, fontWeight: 500, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--onyx-text)' }}>{bookTitle(b)}</div>
-                  <div style={{ marginTop: 1, fontSize: 10.5, color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookAuthor(b)}</div>
+                  <div style={{ marginTop: 1, display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                    <span style={{ minWidth: 0, fontSize: 10.5, color: 'var(--onyx-text-mute)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bookAuthor(b)}</span>
+                    {st.activeLibrary?.source === 'all' && <ItemSourceBadge item={b} />}
+                  </div>
                 </button>
               );
             })}
@@ -611,7 +628,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         <MatchModal
           item={matchItem}
           serverUrl={st.serverUrl}
-          adapter={st.activeLibrary?.source === 'local' ? makeLocalShelfAdapter(matchItem) : undefined}
+          adapter={matchItem.localPath ? makeLocalShelfAdapter(matchItem) : undefined}
           onClose={() => setMatchItem(null)}
           onComplete={updated => {
             st.updateLibraryItem(updated);

@@ -6,6 +6,7 @@ import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListening
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
+import { ALL_LIBRARIES_ID, allLibrariesShelf, bookLibraries } from '../lib/allLibraries';
 
 export type { ServerSettings };
 
@@ -74,6 +75,31 @@ async function loadItemsForLibrary(lib: Library, serverUrl: string): Promise<Lib
     return getLocalLibraryItems(lib.id);
   }
   return fetchLibraryItems(serverUrl, lib.id);
+}
+
+// The combined shelf is deliberately client-side: load each real book library
+// through its established source router and preserve partial success.
+async function loadAllLibraryItems(libraries: Library[], serverUrl: string): Promise<LibraryItem[]> {
+  const sources = bookLibraries(libraries);
+  const results = await Promise.all(sources.map(async library => {
+    try {
+      return await loadItemsForLibrary(library, serverUrl);
+    } catch (e) {
+      log.warn('library', 'all libraries source load failed', {
+        libraryId: library.id,
+        source: library.source ?? 'abs',
+        err: String(e),
+      });
+      return [] as LibraryItem[];
+    }
+  }));
+  const items = results.flat();
+  log.info('library', 'all libraries load complete', {
+    libraries: sources.length,
+    items: items.length,
+    localItems: items.filter(item => !!item.localPath).length,
+  });
+  return items;
 }
 
 // ─── Static mock data (chapters, bookmarks, devices) ─────────────────────────
@@ -465,6 +491,10 @@ export function useOnyxState(): OnyxState {
   // users who never touch the switcher.
   const pickActiveLibrary = useCallback((libs: Library[]): Library | undefined => {
     const saved = localStorage.getItem('skald.activeLibraryId');
+    if (saved === ALL_LIBRARIES_ID) {
+      const combined = allLibrariesShelf(libs);
+      if (combined) return combined;
+    }
     return libs.find(l => l.id === saved)
       ?? libs.find(l => l.mediaType === 'book')
       ?? libs[0];
@@ -480,10 +510,14 @@ export function useOnyxState(): OnyxState {
       setLibraries(libs);
       // Reload whichever library is currently active; fall back to the picker if
       // the active one vanished (deleted) or was never set.
-      const target = libs.find(l => l.id === currentLibraryId) ?? pickActiveLibrary(libs);
+      const target = currentLibraryId === ALL_LIBRARIES_ID
+        ? allLibrariesShelf(libs) ?? pickActiveLibrary(libs)
+        : libs.find(l => l.id === currentLibraryId) ?? pickActiveLibrary(libs);
       if (!target) return;
       setCurrentLibraryId(target.id);
-      const items = await loadItemsForLibrary(target, serverUrl);
+      const items = target.id === ALL_LIBRARIES_ID
+        ? await loadAllLibraryItems(libs, serverUrl)
+        : await loadItemsForLibrary(target, serverUrl);
       setLibraryRaw(patchLibraryItems(items));
       // A successful refresh means the server is reachable — clear the OFFLINE
       // indicator (it may have been set if the app launched from disk cache).
@@ -503,13 +537,20 @@ export function useOnyxState(): OnyxState {
     try {
       // Route by source: local libraries read the catalog; ABS libraries fetch
       // over HTTP. Look the library up in the already-loaded list.
-      const lib = libraries.find(l => l.id === id);
-      const items = lib ? await loadItemsForLibrary(lib, serverUrl) : [];
+      const lib = id === ALL_LIBRARIES_ID ? allLibrariesShelf(libraries) : libraries.find(l => l.id === id);
+      const items = id === ALL_LIBRARIES_ID
+        ? await loadAllLibraryItems(libraries, serverUrl)
+        : lib ? await loadItemsForLibrary(lib, serverUrl) : [];
       setLibraryRaw(patchLibraryItems(items));
       setIsOffline(false);
       // Only the ABS shelf is cached for offline launch; local items live in the
       // catalog already, so caching them would just duplicate state.
-      if (lib?.source !== 'local') {
+      if (lib?.source === 'all') {
+        const locals = libraries.filter(item => item.source === 'local' && item.mediaType !== 'podcast');
+        Promise.all(locals.map(item => getLocalLibraryProgress(item.id).catch(() => [] as MediaProgress[])))
+          .then(progress => setMediaProgress(prev => mergeProgress(prev, progress.flat())))
+          .catch(e => log.error('library', 'combined local progress load failed', { err: String(e) }));
+      } else if (lib?.source !== 'local') {
         saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
       } else {
         // Fold this local library's catalog progress into mediaProgress so cover
@@ -649,14 +690,21 @@ export function useOnyxState(): OnyxState {
       if (!activeLib) { setLibraryLoadingRaw(false); return; }
       setCurrentLibraryId(activeLib.id);
       try {
-        const items = await loadItemsForLibrary(activeLib, serverUrl);
+        const items = activeLib.id === ALL_LIBRARIES_ID
+          ? await loadAllLibraryItems(allLibs, serverUrl)
+          : await loadItemsForLibrary(activeLib, serverUrl);
         if (cancelled) return;
         setLibraryRaw(patchLibraryItems(items));
         log.info('library', 'library loaded', { libraryId: activeLib.id, items: items.length, source: activeLib.source ?? 'abs' });
         setIsOffline(false);
         // Cache only the ABS shelf for offline launch; local items already
         // persist in the catalog.
-        if (activeLib.source !== 'local') {
+        if (activeLib.source === 'all') {
+          const locals = localLibs.filter(item => item.mediaType !== 'podcast');
+          Promise.all(locals.map(item => getLocalLibraryProgress(item.id).catch(() => [] as MediaProgress[])))
+            .then(progress => { if (!cancelled) setMediaProgress(prev => mergeProgress(prev, progress.flat())); })
+            .catch(e => log.error('library', 'combined local progress load failed', { err: String(e) }));
+        } else if (activeLib.source !== 'local') {
           saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
         } else {
           getLocalLibraryProgress(activeLib.id)
@@ -1030,7 +1078,9 @@ export function useOnyxState(): OnyxState {
     ? currentEpisode.duration
     : tickDuration;
   // The active library object, derived from the list + the active id.
-  const activeLibrary = libraries.find(l => l.id === currentLibraryId);
+  const activeLibrary = currentLibraryId === ALL_LIBRARIES_ID
+    ? allLibrariesShelf(libraries)
+    : libraries.find(l => l.id === currentLibraryId);
 
   // ── Live progress sync ──────────────────────────────────────────────────────
   // Refs that let the event handlers read the current playback and library
@@ -1250,6 +1300,11 @@ export function useOnyxState(): OnyxState {
     let unlistenAdded:   (() => void) | undefined;
     let unlistenUpdated: (() => void) | undefined;
     let unlistenRemoved: (() => void) | undefined;
+    const shelfAcceptsLibrary = (libraryId: string) => {
+      if (libraryId === currentLibraryIdRef.current) return true;
+      return currentLibraryIdRef.current === ALL_LIBRARIES_ID
+        && librariesRef.current.some(library => library.id === libraryId && library.source !== 'local' && library.mediaType !== 'podcast');
+    };
 
     // item_added — a new book arrived; append it to the shelf after normalising
     // author/narrator fields with patchLibraryItems so it matches the rest.
@@ -1257,7 +1312,7 @@ export function useOnyxState(): OnyxState {
       try {
         const raw  = JSON.parse(event.payload) as LibraryItem;
         // Only process items that belong to the currently loaded library.
-        if (raw.libraryId !== currentLibraryIdRef.current) return;
+        if (!shelfAcceptsLibrary(raw.libraryId)) return;
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => [...prev, item]);
       } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
@@ -1268,7 +1323,7 @@ export function useOnyxState(): OnyxState {
     listen<string>('library-item-updated', event => {
       try {
         const raw  = JSON.parse(event.payload) as LibraryItem;
-        if (raw.libraryId !== currentLibraryIdRef.current) return;
+        if (!shelfAcceptsLibrary(raw.libraryId)) return;
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
       } catch (e) { log.error('sync', 'library-item-updated parse failed', { err: String(e) }); }
@@ -1281,7 +1336,7 @@ export function useOnyxState(): OnyxState {
     listen<string>('library-item-removed', event => {
       try {
         const payload = JSON.parse(event.payload) as { id: string; libraryId: string };
-        if (payload.libraryId !== currentLibraryIdRef.current) return;
+        if (!shelfAcceptsLibrary(payload.libraryId)) return;
         setLibraryRaw(prev => prev.filter(b => b.id !== payload.id));
         // Clear currentBookId if the removed item was the one queued to play.
         setCurrentBookId(prev => prev === payload.id ? '' : prev);

@@ -25,7 +25,7 @@ export default function PickItUp({ st }: PickItUpProps) {
   useEffect(() => {
     // Local libraries have no server continue-listening endpoint — derive the
     // in-progress list from loaded items + local progress (newest first).
-    if (st.activeLibrary?.source === 'local') {
+    if (st.activeLibrary?.source === 'local' || st.activeLibrary?.source === 'all') {
       const prog = (id: string) => st.mediaProgress.find(p => p.libraryItemId === id);
       const inProgress = st.library
         .filter(b => { const mp = prog(b.id); return !!mp && mp.currentTime > 0 && !mp.isFinished; })
