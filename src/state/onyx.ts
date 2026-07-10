@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, markServerDeleted, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
+import { useLiveSync } from './useLiveSync';
 
 export type { ServerSettings };
 
@@ -1260,252 +1261,32 @@ export function useOnyxState(): OnyxState {
     return () => { unlisten?.(); };
   }, []);
 
-  // Subscribe to progress-updated events forwarded from the Rust socket layer.
-  // Re-arms when serverUrl/authToken change so reconnects after logout/login
-  // pick up the correct context. Gated on onyx.sync.live so the listener is
-  // dormant when live sync is disabled.
-  useEffect(() => {
-    // Only subscribe when the socket is expected to be connected.
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
-
-    let unlisten: (() => void) | undefined;
-
-    listen<string>('progress-updated', event => {
-      try {
-        // ABS may send the progress record directly or wrapped in { data: {...} }.
-        const raw = JSON.parse(event.payload) as Record<string, unknown>;
-        const update = ((raw.data ?? raw) as Partial<MediaProgress> & {
-          libraryItemId: string;
-          currentTime: number;
-        });
-
-        // ── Self-echo guard ───────────────────────────────────────────────────
-        // Skald syncs its own playback position to the server every 30 seconds.
-        // Those writes echo back here as progress-updated events. If we applied
-        // the echo to the live transport position, it would yank the playhead
-        // backwards on every sync cycle. The guard detects this case by checking
-        // whether the update is for the book/episode we are actively playing
-        // right now. Podcast episodes share their parent's libraryItemId, so the
-        // episodeId must match too — otherwise an echo for a sibling episode
-        // would be treated as ours (and vice versa).
-        const isForCurrentPlayback =
-          update.libraryItemId === currentBookIdRef.current &&
-          (update.episodeId ?? null) === (currentEpisodeIdRef.current ?? null);
-        const isActivelyPlayingThisBook = isForCurrentPlayback && playingRef.current;
-
-        // ── Stored progress reconciliation (always runs) ──────────────────────
-        // Pick it up, library cover overlays, and the progress bar for
-        // non-playing books all read from mediaProgress. Keep it accurate
-        // even for the actively-playing book so the UI is correct on pause.
-        // Match on the (libraryItemId, episodeId) composite key — the same
-        // pattern as mergeProgress — so one podcast episode's progress never
-        // overwrites a sibling episode's row.
-        setMediaProgress((prev: MediaProgress[]) => {
-          const idx = prev.findIndex(p =>
-            p.libraryItemId === update.libraryItemId &&
-            (p.episodeId ?? null) === (update.episodeId ?? null));
-          if (idx >= 0) {
-            // Update existing record without mutating the original array.
-            const copy = [...prev];
-            copy[idx] = { ...copy[idx], ...update };
-            return copy;
-          }
-          // New record — append so newly-started books show in Pick it up.
-          return [...prev, update as MediaProgress];
-        });
-
-        // ── Live transport position (only when safe to update) ────────────────
-        // If this update is for the focused book but we are NOT actively playing
-        // it, advance the position so the player UI reflects the remote device's
-        // current position. If we ARE playing, leave the transport alone.
-        if (!isActivelyPlayingThisBook && isForCurrentPlayback) {
-          setPosition(update.currentTime);
-        }
-      } catch (e) {
-        log.error('sync', 'live progress parse failed', { err: String(e) });
-      }
-    }).then(fn => { unlisten = fn; });
-
-    // Tear down the listener on unmount or when auth context changes so stale
-    // subscriptions do not accumulate across login/logout cycles.
-    return () => { unlisten?.(); };
-  // serverUrl and authToken are the meaningful lifecycle triggers — the
-  // localStorage flag is read once at setup time per the Phase A pattern.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
-
-  // ── Live library sync ──────────────────────────────────────────────────────
-  // Subscribe to library item events forwarded from the Rust socket layer.
-  // Active only when live sync is enabled. Uses the same setup/teardown
-  // lifecycle as the progress listener above.
-  useEffect(() => {
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
-
-    // Three separate unlisten handles — each listener is torn down individually.
-    let unlistenAdded:   (() => void) | undefined;
-    let unlistenUpdated: (() => void) | undefined;
-    let unlistenRemoved: (() => void) | undefined;
-    const shelfAcceptsLibrary = (libraryId: string) => {
-      if (libraryId === currentLibraryIdRef.current) return true;
-      return currentLibraryIdRef.current === ALL_LIBRARIES_ID
-        && librariesRef.current.some(library => library.id === libraryId && library.source !== 'local' && library.mediaType !== 'podcast');
-    };
-
-    // item_added — a new book arrived; append it to the shelf after normalising
-    // author/narrator fields with patchLibraryItems so it matches the rest.
-    listen<string>('library-item-added', event => {
-      try {
-        const raw  = JSON.parse(event.payload) as LibraryItem;
-        // Only process items that belong to the currently loaded library.
-        if (!shelfAcceptsLibrary(raw.libraryId)) return;
-        const item = patchLibraryItems([raw])[0];
-        setLibraryRaw(prev => [...prev, item]);
-      } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenAdded = fn; });
-
-    // item_updated — metadata, cover, or chapters changed; merge the new
-    // data over the existing record so the shelf reflects it immediately.
-    listen<string>('library-item-updated', event => {
-      try {
-        const raw  = JSON.parse(event.payload) as LibraryItem;
-        if (!shelfAcceptsLibrary(raw.libraryId)) return;
-        const item = patchLibraryItems([raw])[0];
-        setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
-      } catch (e) { log.error('sync', 'library-item-updated parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenUpdated = fn; });
-
-    // item_removed — book deleted from the server; remove it from the shelf and
-    // clear any focused/current references so the player doesn't try to play a ghost.
-    // If the book has a local download, flag it as server-deleted rather than
-    // deleting the file — the user retains offline playback, badge changes to amber !.
-    listen<string>('library-item-removed', event => {
-      try {
-        const payload = JSON.parse(event.payload) as { id: string; libraryId: string };
-        if (!shelfAcceptsLibrary(payload.libraryId)) return;
-        setLibraryRaw(prev => prev.filter(b => b.id !== payload.id));
-        // Clear currentBookId if the removed item was the one queued to play.
-        setCurrentBookId(prev => prev === payload.id ? '' : prev);
-        // Clear focusedBookId if the removed item was focused in the shelf.
-        setFocusedBookId(prev => prev === payload.id ? null : prev);
-        // If the book has a local download, mark it server-deleted rather than removing.
-        // Using a functional update reads the latest state without a stale-closure risk.
-        setDownloads(prev => {
-          if (!prev.some(d => d.itemId === payload.id)) return prev; // not downloaded — no change
-          // Persist the flag to disk so it survives a reload.
-          markServerDeleted(payload.id).catch(e =>
-            log.error('downloads', 'mark server-deleted failed', { err: String(e) })
-          );
-          // Update local state immediately so the badge updates without a disk round-trip.
-          return prev.map(d =>
-            d.itemId === payload.id ? { ...d, serverDeleted: true } : d
-          );
-        });
-      } catch (e) { log.error('sync', 'library-item-removed parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenRemoved = fn; });
-
-    // Tear down all three listeners together on unmount or auth context change.
-    return () => {
-      unlistenAdded?.();
-      unlistenUpdated?.();
-      unlistenRemoved?.();
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
-
-  // ── Reconnect resync ───────────────────────────────────────────────────────
-  // When the socket reconnects after a drop, events that fired during the
-  // disconnection window are lost — the ABS server does not replay them.
-  // Perform a full refresh of library and media progress so the UI reflects
-  // the current server state rather than a potentially stale snapshot.
-  useEffect(() => {
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
-
-    let unlistenReconnect: (() => void) | undefined;
-    let unlistenAuth: (() => void) | undefined;
-
-    const resync = async () => {
-      try {
-        // Refresh the library — re-fetches all items (clears the OFFLINE flag on
-        // success) so additions/edits/deletions during the outage are reflected.
-        await refreshLibrary();
-        // Re-fetch /api/me to get the latest mediaProgress array so Pick it up
-        // and cover progress overlays are correct without waiting for events.
-        const me = await getMe(serverUrl);
-        applyServerProgress(me.mediaProgress);
-        // Permissions may have been edited during the outage — refresh the gate.
-        setUploadPerm(!!me.permissions?.upload);
-      } catch (e) {
-        log.error('sync', 'resync after reconnect failed', { err: String(e) });
-      }
-    };
-
-    // Reconnect after a drop — events fired during the outage were lost, so
-    // always resync to reflect current server state.
-    listen('socket-reconnected', () => { void resync(); }).then(fn => { unlistenReconnect = fn; });
-
-    // First successful auth — fires when the socket connects (including the first
-    // connect after an offline launch, where socket-reconnected does NOT fire).
-    // Only resync when we're actually offline so normal online launches don't
-    // trigger a redundant full library refetch right after the initial load.
-    listen('socket-authenticated', () => { if (isOfflineRef.current) void resync(); }).then(fn => { unlistenAuth = fn; });
-
-    return () => { unlistenReconnect?.(); unlistenAuth?.(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
-
-  // ── Background-task stream ──────────────────────────────────────────────────
-  // Maintain the task list from ABS task_started / task_finished socket events.
-  // Lives here (always mounted) rather than in the Scheduled Tasks panel so the
-  // list stays current even when that pane is closed. Requires live sync to be
-  // connected; the panel still seeds via GET /api/tasks on mount as a fallback.
-  useEffect(() => {
-    if (!serverUrl || !authToken) return;
-    let unStart: (() => void) | undefined;
-    let unFinish: (() => void) | undefined;
-
-    // Upsert a task by id and cap growth: keep all running tasks plus the 25
-    // most-recently-finished so the list cannot grow without bound.
-    const upsert = (t: Task) => setTasks(prev => {
-      const others = prev.filter(x => x.id !== t.id);
-      const merged = [t, ...others];
-      const running = merged.filter(x => !x.isFinished);
-      const finished = merged
-        .filter(x => x.isFinished)
-        .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))
-        .slice(0, 25);
-      return [...running, ...finished];
-    });
-
-    const handle = (raw: string) => {
-      try { upsert(JSON.parse(raw) as Task); } catch { /* ignore malformed task payload */ }
-    };
-
-    listen<string>('task-started',  e => handle(e.payload)).then(fn => { unStart = fn; });
-    listen<string>('task-finished', e => handle(e.payload)).then(fn => { unFinish = fn; });
-
-    return () => { unStart?.(); unFinish?.(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
-
-  // A playback tick/sync task panicked in the backend (review H5): progress
-  // tracking has stopped for this session. Rare by design — the watcher only
-  // fires on a genuine panic — so one concise toast plus the structured log
-  // entry is the whole surface; restarting playback respawns the tasks.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<{ task: string }>('sync-failed', e => {
-      log.error('sync', 'playback task died — progress tracking stopped', { task: e.payload.task });
-      setToast({
-        message: 'Progress tracking stopped unexpectedly — restart playback to resume it.',
-        type: 'error',
-      });
-    }).then(fn => { unlisten = fn; });
-    return () => { unlisten?.(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Socket-driven live sync (progress echo guard, library item events,
+  // reconnect resync, background-task stream, sync-failed toast) — composed
+  // from useLiveSync (God-File Decomposition roadmap, L3/L7). The effects read
+  // playback state through the refs above, so the listeners re-subscribe only
+  // on serverUrl/authToken changes, exactly as before the split.
+  useLiveSync({
+    serverUrl,
+    authToken,
+    currentBookIdRef,
+    currentEpisodeIdRef,
+    playingRef,
+    currentLibraryIdRef,
+    librariesRef,
+    isOfflineRef,
+    setMediaProgress,
+    setPosition,
+    setLibraryRaw,
+    setCurrentBookId,
+    setFocusedBookId,
+    setDownloads,
+    setTasks,
+    setToast,
+    setUploadPerm,
+    refreshLibrary,
+    applyServerProgress,
+  });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
