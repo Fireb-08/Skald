@@ -8,6 +8,86 @@ use tauri::Emitter;
 
 use crate::{api::AbsClient, audio::AudioPlayer};
 
+// ── Pure tick decisions (Test Seams roadmap) ─────────────────────────────────
+// The per-tick position/persistence rules, extracted from the two tick loops so
+// they are unit-testable without a LibVLC player. Values in, decision out — no
+// I/O may creep in here (that would break the seam).
+
+/// The position the player should load at: an explicit caller start (chapter/
+/// bookmark jump) always beats the server's possibly-stale currentTime.
+fn resolve_load_time(start_time: Option<f64>, server_current_time: f64) -> f64 {
+    start_time.unwrap_or(server_current_time)
+}
+
+/// End-of-media / pre-buffer guard: on a true end commit the exact duration (so
+/// the server marks the item finished instead of resetting it to 0%); while
+/// steadily playing commit the live position; through transient Opening/
+/// Buffering states hold the last good value, so the UI never flashes 0:00 and
+/// progress never regresses on a transient 0.
+fn commit_position(prev: f64, pos: f64, dur: f64, live: bool, ended: bool) -> f64 {
+    if ended && dur > 0.0 {
+        dur
+    } else if live {
+        pos
+    } else {
+        prev
+    }
+}
+
+/// Throttle state for the offline persist loop (play_local's tick task).
+#[derive(Default)]
+struct PersistState {
+    ticks: u32,
+    /// Most recent (pos, dur) not yet persisted; the loop-end flush writes it
+    /// on stop/book-switch so a throttled write is never lost.
+    pending: Option<(f64, f64)>,
+    /// Set once the completed book is recorded so the finished row isn't
+    /// rewritten every tick while the player sits in Ended.
+    finished_recorded: bool,
+}
+
+/// A progress write the loop should perform on this tick.
+struct PersistRecord {
+    pos: f64,
+    dur: f64,
+    finished: bool,
+}
+
+/// The offline loop's per-tick persistence decision — three cases mirroring the
+/// position guard: a true end records completion exactly once; a live tick
+/// buffers into `pending` and flushes every `every`th tick (1 Hz ticks, but
+/// 1 Hz disk writes are needless for a resume position); transient states leave
+/// `pending` intact for the loop-end flush. A live position after an end means
+/// the book was restarted, so the finished latch re-arms.
+fn persist_decision(
+    st: &mut PersistState,
+    report: f64,
+    dur: f64,
+    live: bool,
+    ended: bool,
+    every: u32,
+) -> Option<PersistRecord> {
+    if ended && dur > 0.0 {
+        if !st.finished_recorded {
+            st.finished_recorded = true;
+            st.pending = None;
+            return Some(PersistRecord { pos: dur, dur, finished: true });
+        }
+        None
+    } else if live {
+        st.finished_recorded = false;
+        st.pending = Some((report, dur));
+        st.ticks += 1;
+        if st.ticks.is_multiple_of(every) {
+            st.pending = None;
+            return Some(PersistRecord { pos: report, dur, finished: false });
+        }
+        None
+    } else {
+        None
+    }
+}
+
 pub struct SessionManager {
     pub client: AbsClient,
     pub session_id: Option<String>,
@@ -98,7 +178,7 @@ impl SessionManager {
         self.session_id = Some(session.id.clone());
         // Prefer the caller-supplied start_time so LibVLC loads at the exact
         // chapter position even if the server's currentTime differs slightly.
-        let load_time = start_time.unwrap_or(session.current_time);
+        let load_time = resolve_load_time(start_time, session.current_time);
         *self.current_time.lock().unwrap() = load_time;
         *self.time_listened.lock().unwrap() = 0.0;
 
@@ -156,13 +236,10 @@ impl SessionManager {
                     }
                 };
                 // Guard the shared position against the end-of-media / pre-buffer
-                // collapse to 0: only commit `pos` when the engine reports a live
-                // position. On a true book end, commit the exact duration so the
-                // server marks the item finished instead of resetting it to 0%.
-                if ended && dur > 0.0 {
-                    *ct_tick.lock().unwrap() = dur;
-                } else if live {
-                    *ct_tick.lock().unwrap() = pos;
+                // collapse to 0 (see commit_position).
+                {
+                    let mut ct = ct_tick.lock().unwrap();
+                    *ct = commit_position(*ct, pos, dur, live, ended);
                 }
                 if playing {
                     *tl_tick.lock().unwrap() += 1.0;
@@ -440,18 +517,14 @@ impl SessionManager {
             };
 
             let mut interval = tokio::time::interval(Duration::from_secs(1));
-            let mut ticks: u32 = 0;
-            // Most recent (pos, dur) not yet persisted; flushed when the loop ends so
-            // a throttled write is never lost on book-switch/stop. A stop is not a
-            // finish, so the loop-end flush always writes finished = false.
-            let mut pending: Option<(f64, f64)> = None;
-            // Set once the completed book is recorded so the finished row isn't
-            // rewritten every tick while the player sits in Ended.
-            let mut finished_recorded = false;
+            // Throttle/latch state for persist_decision. Its pending pair is flushed
+            // when the loop ends so a throttled write is never lost on book-switch/
+            // stop. A stop is not a finish, so the flush always writes finished = false.
+            let mut pstate = PersistState::default();
             loop {
                 interval.tick().await;
                 if !active_tick.load(Ordering::Relaxed) {
-                    if let Some((pos, dur)) = pending.take() { persist(pos, dur, false); }
+                    if let Some((pos, dur)) = pstate.pending.take() { persist(pos, dur, false); }
                     break;
                 }
                 let (pos, dur, playing, live, ended) = {
@@ -463,13 +536,11 @@ impl SessionManager {
                         None    => (0.0, 0.0, false, false, false),
                     }
                 };
-                // Same end-of-media / pre-buffer guard as the online tick: commit the
-                // exact duration on a true end, the live position while steadily
-                // playing, and hold the last good value through transient states.
-                if ended && dur > 0.0 {
-                    *ct_tick.lock().unwrap() = dur;
-                } else if live {
-                    *ct_tick.lock().unwrap() = pos;
+                // Same end-of-media / pre-buffer guard as the online tick (see
+                // commit_position).
+                {
+                    let mut ct = ct_tick.lock().unwrap();
+                    *ct = commit_position(*ct, pos, dur, live, ended);
                 }
                 if playing {
                     *tl_tick.lock().unwrap() += 1.0;
@@ -484,27 +555,11 @@ impl SessionManager {
                         "isPlaying":   playing,
                     }),
                 );
-                // Persistence — three cases mirror the position guard above:
-                if ended && dur > 0.0 {
-                    // True book end: record completion exactly once (finished = true).
-                    if !finished_recorded {
-                        persist(dur, dur, true);
-                        finished_recorded = true;
-                        pending = None;
-                    }
-                } else if live {
-                    // A live position after an end means the book was restarted — re-arm.
-                    finished_recorded = false;
-                    // Throttled persistence: remember this tick, write on the boundary.
-                    pending = Some((report, dur));
-                    ticks += 1;
-                    if ticks.is_multiple_of(PERSIST_EVERY) {
-                        persist(report, dur, false);
-                        pending = None;
-                    }
+                // Persistence — the throttle/latch state machine lives in
+                // persist_decision (pure, unit-tested); this loop only does the write.
+                if let Some(rec) = persist_decision(&mut pstate, report, dur, live, ended, PERSIST_EVERY) {
+                    persist(rec.pos, rec.dur, rec.finished);
                 }
-                // Transient (Opening/Buffering) states fall through: hold the last
-                // good value, persist nothing.
             }
         });
 
@@ -554,5 +609,79 @@ impl SessionManager {
         let ct = *self.current_time.lock().unwrap();
         let tl = *self.time_listened.lock().unwrap();
         self.client.close_session(sid, ct, tl).await
+    }
+}
+
+// Unit tests for the pure tick decisions (Test Seams roadmap) — no LibVLC, no
+// tokio runtime: the helpers take plain values and return decisions.
+#[cfg(test)]
+mod tick_tests {
+    use super::{commit_position, persist_decision, resolve_load_time, PersistState};
+
+    #[test]
+    fn load_time_prefers_explicit_start_over_server_time() {
+        // Chapter/bookmark jump: the caller's position wins over the server's
+        // stale currentTime (Testing Suite plan regression #8).
+        assert_eq!(resolve_load_time(Some(120.5), 3000.0), 120.5);
+        // Explicit restart-from-zero is still an override.
+        assert_eq!(resolve_load_time(Some(0.0), 3000.0), 0.0);
+        // Plain resume: fall back to the server's saved position.
+        assert_eq!(resolve_load_time(None, 3000.0), 3000.0);
+    }
+
+    #[test]
+    fn commit_position_guards_transient_zero_and_end_of_media() {
+        // Steady playback commits the live position.
+        assert_eq!(commit_position(100.0, 101.0, 3600.0, true, false), 101.0);
+        // Live zero is a genuine restart, not noise — commit it.
+        assert_eq!(commit_position(100.0, 0.0, 3600.0, true, false), 0.0);
+        // Transient Opening/Buffering (not live): hold the last good value so a
+        // transient 0 never resets UI/server progress.
+        assert_eq!(commit_position(100.0, 0.0, 3600.0, false, false), 100.0);
+        // True book end commits the exact duration (server marks it finished).
+        assert_eq!(commit_position(100.0, 0.0, 3600.0, false, true), 3600.0);
+        // Ended but duration unknown: nothing trustworthy to commit — hold.
+        assert_eq!(commit_position(100.0, 0.0, 0.0, false, true), 100.0);
+    }
+
+    #[test]
+    fn persist_throttles_to_every_nth_live_tick_and_buffers_between() {
+        let mut st = PersistState::default();
+        // Ticks 1-4 buffer into pending, no write.
+        for i in 1..5u32 {
+            let rec = persist_decision(&mut st, i as f64, 3600.0, true, false, 5);
+            assert!(rec.is_none(), "tick {i} must not write");
+            assert_eq!(st.pending, Some((i as f64, 3600.0)));
+        }
+        // Tick 5 writes the latest position and clears the buffer.
+        let rec = persist_decision(&mut st, 5.0, 3600.0, true, false, 5).expect("5th tick writes");
+        assert_eq!((rec.pos, rec.finished), (5.0, false));
+        assert_eq!(st.pending, None);
+        // A transient tick leaves pending untouched — the loop-end flush relies
+        // on it holding the last live position on stop/book-switch.
+        persist_decision(&mut st, 6.0, 3600.0, true, false, 5);
+        assert_eq!(st.pending, Some((6.0, 3600.0)));
+        assert!(persist_decision(&mut st, 6.0, 3600.0, false, false, 5).is_none());
+        assert_eq!(st.pending, Some((6.0, 3600.0)));
+    }
+
+    #[test]
+    fn persist_records_finish_once_and_rearms_on_restart() {
+        let mut st = PersistState::default();
+        // True end: exactly one finished write, even across repeated Ended ticks.
+        let rec = persist_decision(&mut st, 3600.0, 3600.0, false, true, 5).expect("end writes");
+        assert!((rec.finished, rec.pos, rec.dur) == (true, 3600.0, 3600.0));
+        assert!(persist_decision(&mut st, 3600.0, 3600.0, false, true, 5).is_none());
+        assert!(persist_decision(&mut st, 3600.0, 3600.0, false, true, 5).is_none());
+        // A live tick after the end is a restart: the latch re-arms so a
+        // re-listen can record completion again.
+        persist_decision(&mut st, 1.0, 3600.0, true, false, 5);
+        let rec = persist_decision(&mut st, 3600.0, 3600.0, false, true, 5).expect("re-finish writes");
+        assert!(rec.finished);
+        // An end with no known duration records nothing (mirror of the
+        // commit_position hold) — the latch stays armed for the real end.
+        let mut st = PersistState::default();
+        assert!(persist_decision(&mut st, 100.0, 0.0, false, true, 5).is_none());
+        assert!(!st.finished_recorded);
     }
 }
