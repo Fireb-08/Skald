@@ -54,12 +54,23 @@ const NAV: NavSection[] = [
 ];
 
 export default function Settings({ st, onLogout }: SettingsProps) {
-  const [section, setSection] = useState<SectionId>('account');
+  const requestedSection = NAV.some(item => item.id === st.settingsSection)
+    ? st.settingsSection as SectionId
+    : 'account';
+  const [section, setSection] = useState<SectionId>(requestedSection);
   // True when connected to an Audiobookshelf server. Local-only users (no token)
   // never see the ABS-only panes. authToken is seeded synchronously from the
   // skald.hasAuth presence flag, so this is stable across reloads and survives
   // the server being temporarily offline (the keyring token persists).
   const hasAbs = !!st.authToken && !!st.serverUrl;
+
+  // Shell CTAs can target a pane while Settings is already mounted. Keep this
+  // reactive rather than treating the requested pane as initial state only.
+  useEffect(() => {
+    if (NAV.some(item => item.id === st.settingsSection)) {
+      setSection(st.settingsSection as SectionId);
+    }
+  }, [st.settingsSection]);
 
   // If the selected pane's nav entry becomes hidden (admin flag revoked, server
   // disconnected), fall back to Account rather than rendering a blank panel
@@ -117,7 +128,7 @@ export default function Settings({ st, onLogout }: SettingsProps) {
             return (
               <button
                 key={s.id}
-                onClick={() => setSection(s.id)}
+                onClick={() => { setSection(s.id); st.setSettingsSection(s.id); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 12,
                   padding: '9px 12px', borderRadius: 8,

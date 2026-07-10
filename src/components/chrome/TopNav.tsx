@@ -9,14 +9,10 @@ import Icon from '../Icon';
 import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
 import UploadModal from '../UploadModal';
 import { log } from '../../lib/log';
+import { libraryDisplayLabel, librarySourceBadge } from '../../lib/libraryPresentation';
 
 export interface TopNavProps {
   st: OnyxState;
-}
-
-// Display label for a library in the switcher (podcast libraries are prefixed).
-function libraryLabel(l: { name: string; mediaType: string }): string {
-  return l.mediaType === 'podcast' ? `Podcasts: ${l.name}` : l.name;
 }
 
 // Search field-scope options (book libraries).
@@ -104,6 +100,13 @@ export default function TopNav({ st }: TopNavProps) {
     // restores automatically, so we no longer clear it on switch.
   };
 
+  const openLocalLibrarySetup = () => {
+    log.info('library', 'open local library setup from shelf');
+    st.setSettingsSection('library');
+    st.setScreen('settings');
+    setLibMenuOpen(false);
+  };
+
   return (
     <>
     <Glass translucent={st.translucent} style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 18, overflow: 'visible', position: 'relative', zIndex: 40 }}>
@@ -137,8 +140,15 @@ export default function TopNav({ st }: TopNavProps) {
               </span>
               <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0, textAlign: 'left' }}>
                 <span style={{ fontFamily: mono, fontSize: 8, letterSpacing: '0.16em', textTransform: 'uppercase', color: 'var(--onyx-accent)' }}>Library</span>
-                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--onyx-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {activeLib ? libraryLabel(activeLib) : 'No library'}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--onyx-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeLib ? libraryDisplayLabel(activeLib) : 'No library'}
+                  </span>
+                  {activeLib && (
+                    <span style={{ flexShrink: 0, fontFamily: mono, fontSize: 8, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--onyx-accent)' }}>
+                      {librarySourceBadge(activeLib)}
+                    </span>
+                  )}
                 </span>
               </span>
               {canSwitch && (
@@ -180,8 +190,13 @@ export default function TopNav({ st }: TopNavProps) {
                       fontWeight: active ? 600 : 500,
                     }}
                   >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{libraryLabel(l)}</span>
-                    {active && <Icon name="check" size={12} />}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{libraryDisplayLabel(l)}</span>
+                      <span style={{ flexShrink: 0, fontFamily: mono, fontSize: 8, letterSpacing: '0.08em', textTransform: 'uppercase', opacity: hover ? 0.75 : 0.65 }}>
+                        {librarySourceBadge(l)}
+                      </span>
+                    </span>
+                    {active && <span style={{ flexShrink: 0 }}><Icon name="check" size={12} /></span>}
                   </button>
                 );
               })}
@@ -190,6 +205,21 @@ export default function TopNav({ st }: TopNavProps) {
           </div>
         );
       })()}
+        {!st.libraries.some(l => l.source === 'local') && (
+          <button
+            onClick={openLocalLibrarySetup}
+            title="Create a library from audiobooks on this PC"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0,
+              background: 'transparent', color: 'var(--onyx-text-dim)',
+              border: '1px solid var(--onyx-glass-edge)', borderRadius: 10,
+              padding: '8px 13px', cursor: 'pointer',
+            }}
+          >
+            <span style={{ display: 'inline-flex', color: 'var(--onyx-accent)' }}><Icon name="plus" size={14} /></span>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>Add local library</span>
+          </button>
+        )}
         {/* Add books — local *book* libraries only. Pick a folder → match → file.
             Local podcast libraries use the "+ Subscribe" (by RSS) affordance
             instead, so this button is hidden for them. */}
@@ -315,7 +345,7 @@ export default function TopNav({ st }: TopNavProps) {
       </div>
       {/* User avatar — initial derived from logged-in username, not hardcoded */}
       <button
-        onClick={() => st.setScreen('settings')}
+        onClick={() => { st.setSettingsSection('account'); st.setScreen('settings'); }}
         title="Account & settings"
         style={{
           width: 28, height: 28, borderRadius: '50%',

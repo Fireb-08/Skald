@@ -181,6 +181,10 @@ export interface OnyxState {
   // Playback
   screen: string;
   setScreen: (screen: string) => void;
+  // Optional pane requested by shell-level Settings navigation. This lets a
+  // contextual CTA open Libraries directly instead of dropping users on Account.
+  settingsSection: string | null;
+  setSettingsSection: (section: string | null) => void;
   // Podcast detail navigation: the podcast item shown on the 'podcast' screen.
   podcastDetailId: string | null;
   setPodcastDetailId: (id: string | null) => void;
@@ -722,6 +726,7 @@ export function useOnyxState(): OnyxState {
 
   // ── Playback ─────────────────────────────────────────────────────────────────
   const [screen, setScreen] = useState('library');
+  const [settingsSection, setSettingsSection] = useState<string | null>(null);
   const [currentBookId, setCurrentBookId] = useState('');
   // Podcast detail navigation + currently-playing episode (cluster E).
   const [podcastDetailId, setPodcastDetailId] = useState<string | null>(null);
@@ -1451,6 +1456,7 @@ export function useOnyxState(): OnyxState {
     serverSettings, setServerSettings,
     tasks, setTasks,
     screen, setScreen,
+    settingsSection, setSettingsSection,
     podcastDetailId, setPodcastDetailId,
     currentEpisodeId, setCurrentEpisodeId,
     currentEpisode, setCurrentEpisode,
