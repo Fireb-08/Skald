@@ -42,6 +42,10 @@ src-tauri/bin/
 # Personal notes / Obsidian vault
 Vault/
 
+# Review documents kept at the repo root (the vault holds the working copies).
+# Anchored to the root (critical lesson 13 — unanchored rules match anywhere).
+/code review-GPT/
+
 # Memory profiling artifacts
 Mrmory/
 
