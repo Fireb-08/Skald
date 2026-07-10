@@ -1,16 +1,12 @@
 // Step 5 — How to add books. Teaches the two import routes once, at the moment it
-// matters: (a) drop files into the managed Staging folder → Skald auto-files them
-// under Author/Series/Title; (b) the "Add books" button → pick files/folders
-// directly (ingestLocalPaths). A small CSS-only scene animates the staging route.
-// An optional inline "Add books now" runs the manual route immediately.
+// matters: the shared Add books dialog exposes files, folders, and the watched
+// Staging folder from the same entry point used by the main shell and Settings.
 // (First-Launch Onboarding, Phase 3.)
 import { useState } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
 import type { Library } from '../../api/abs';
-import { ingestLocalPaths } from '../../api/abs';
-import { log } from '../../lib/log';
 import { GoldButton, SERIF, MONO, SANS } from './frame';
+import LocalImportDialog from '../LocalImportDialog';
 
 export interface AddBooksStepProps {
   st: OnyxState;
@@ -66,33 +62,7 @@ function RouteCard({ badge, title, children }: { badge: string; title: string; c
 }
 
 export default function AddBooksStep({ st, library, onContinue }: AddBooksStepProps) {
-  const [busy, setBusy] = useState(false);
-
-  async function addNow() {
-    if (!library) return;
-    const picked = await open({
-      directory: false, multiple: true, title: 'Choose audiobook files to add',
-      filters: [{ name: 'Audio', extensions: ['m4b', 'm4a', 'mp3', 'flac', 'ogg', 'opus', 'aac', 'wav'] }],
-    });
-    const sources = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    if (sources.length === 0) return;
-    try {
-      setBusy(true);
-      const outcomes = await ingestLocalPaths(library.id, sources);
-      const filed = outcomes.filter(o => o.outcome === 'filed').length;
-      const quarantined = outcomes.filter(o => o.outcome === 'quarantined').length;
-      log.info('app', 'onboarding add-books', { count: sources.length, filed, quarantined });
-      await st.refreshLibrary();
-      const parts = [`${filed} added`];
-      if (quarantined) parts.push(`${quarantined} need attention`);
-      st.setToast({ message: `Imported — ${parts.join(', ')}`, type: filed ? 'success' : 'info' });
-    } catch (e) {
-      log.error('app', 'onboarding add-books failed', { err: String(e) });
-      st.setToast({ message: 'Could not import those files', type: 'error' });
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [importOpen, setImportOpen] = useState(false);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -105,8 +75,8 @@ export default function AddBooksStep({ st, library, onContinue }: AddBooksStepPr
           chapters and files it under Author / Series / Title automatically.
         </RouteCard>
         <RouteCard badge="Manual" title="Add books button">
-          Use <span style={{ color: 'rgba(235,231,223,0.85)' }}>Add books…</span> (here, and in Settings → Libraries
-          → On this PC) to pick audiobook files directly. Same filing, on demand.
+          Use <span style={{ color: 'rgba(235,231,223,0.85)' }}>Add books</span> here, in the library bar, or in
+          Settings to choose files, scan a folder, or open Staging from one place.
         </RouteCard>
       </div>
 
@@ -115,15 +85,14 @@ export default function AddBooksStep({ st, library, onContinue }: AddBooksStepPr
         {library ? (
           <button
             type="button"
-            onClick={addNow}
-            disabled={busy}
+            onClick={() => setImportOpen(true)}
             style={{
               padding: '10px 18px', borderRadius: 999, fontFamily: MONO, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase',
               background: 'transparent', border: '1px solid rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.4)',
-              color: 'var(--onyx-accent)', cursor: busy ? 'wait' : 'pointer',
+              color: 'var(--onyx-accent)', cursor: 'pointer',
             }}
           >
-            {busy ? 'Importing…' : 'Add books now'}
+            Add books
           </button>
         ) : (
           <span style={{ fontFamily: SANS, fontSize: 12, color: 'rgba(235,231,223,0.4)' }}>
@@ -131,6 +100,9 @@ export default function AddBooksStep({ st, library, onContinue }: AddBooksStepPr
           </span>
         )}
       </div>
+      {importOpen && library && (
+        <LocalImportDialog st={st} library={library} onClose={() => setImportOpen(false)} />
+      )}
     </div>
   );
 }

@@ -1,12 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
 import type { SearchScope } from '../../lib/shelfFilters';
-import { scanFolder } from '../../api/abs';
-import type { ScannedItem } from '../../api/abs';
 import Glass from './Glass';
 import Icon from '../Icon';
-import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
+import LocalImportDialog from '../LocalImportDialog';
 import UploadModal from '../UploadModal';
 import { log } from '../../lib/log';
 import { libraryDisplayLabel, librarySourceBadge } from '../../lib/libraryPresentation';
@@ -40,34 +37,11 @@ export default function TopNav({ st }: TopNavProps) {
   // ── Add books (local libraries) ─────────────────────────────────────────────
   // Pick a folder, scan it into book units, then walk each through the Match modal;
   // applying a match files the book into Author/Series/Title and catalogs it.
-  const [addQueue, setAddQueue] = useState<ScannedItem[]>([]);
-  const [addIndex, setAddIndex] = useState(0);
-  const [addLib, setAddLib] = useState('');
+  const [localImportOpen, setLocalImportOpen] = useState(false);
 
   // ── Upload (ABS libraries) ──────────────────────────────────────────────────
   // The server-side counterpart of Add books: pick files → POST /api/upload.
   const [uploadOpen, setUploadOpen] = useState(false);
-
-  const addBooks = async () => {
-    const lib = st.activeLibrary;
-    if (!lib || lib.source !== 'local') return;
-    const picked = await open({ directory: true, multiple: false, title: 'Choose a folder of audiobooks to add' });
-    const src = typeof picked === 'string' ? picked : null;
-    if (!src) return; // cancelled
-    try {
-      const scanned = await scanFolder(src, lib.id);
-      if (scanned.length === 0) {
-        st.setToast({ message: 'No audiobooks found in that folder', type: 'info' });
-        return;
-      }
-      setAddLib(lib.id);
-      setAddIndex(0);
-      setAddQueue(scanned);
-    } catch (e) {
-      log.error('library', 'add-books folder scan failed', { err: String(e) });
-      st.setToast({ message: 'Could not read the selected folder', type: 'error' });
-    }
-  };
 
   useEffect(() => {
     if (!libMenuOpen) return;
@@ -220,12 +194,11 @@ export default function TopNav({ st }: TopNavProps) {
             <span style={{ fontSize: 12.5, fontWeight: 600 }}>Add local library</span>
           </button>
         )}
-        {/* Add books — local *book* libraries only. Pick a folder → match → file.
-            Local podcast libraries use the "+ Subscribe" (by RSS) affordance
-            instead, so this button is hidden for them. */}
+        {/* Local book libraries share the same Files / Folder / Staging import
+            dialog as onboarding and Settings. Podcasts use + Subscribe instead. */}
         {st.activeLibrary?.source === 'local' && st.activeLibrary?.mediaType !== 'podcast' && (
           <button
-            onClick={() => void addBooks()}
+            onClick={() => setLocalImportOpen(true)}
             title="Add books to this library"
             style={{
               display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0,
@@ -357,35 +330,8 @@ export default function TopNav({ st }: TopNavProps) {
       >{((st.user?.username || st.localDisplayName)?.[0] ?? '?').toUpperCase()}</button>
     </Glass>
 
-    {/* Add-books flow — match each scanned book, then file it into the tree.
-        Reuses the unified Match modal with the local quarantine adapter, whose
-        submit (file_and_insert) moves the book into Author/Series/Title. */}
-    {addIndex < addQueue.length && (
-      <MatchModal
-        key={addQueue[addIndex].sourcePath}
-        item={addQueue[addIndex].item}
-        adapter={makeLocalQuarantineAdapter(addLib, addQueue[addIndex])}
-        queue={{ index: addIndex, total: addQueue.length }}
-        onClose={() => { setAddQueue([]); setAddIndex(0); }}
-        onComplete={() => {
-          // The adapter already filed + catalogued the book. Advance through the
-          // queue WITHOUT reloading the library between books — setActiveLibrary
-          // flips libraryLoading, which unmounts this component (and the queue).
-          // Reload once at the end, when the batch is done and the modal closes.
-          const next = addIndex + 1;
-          if (next >= addQueue.length) {
-            const count = addQueue.length;
-            setAddQueue([]);
-            setAddIndex(0);
-            st.setToast({ message: `Added ${count} book${count > 1 ? 's' : ''} to your library`, type: 'success' });
-            if (st.currentLibraryId === addLib) st.setActiveLibrary(addLib).catch(e => log.error('library', 'reload after add-books failed', { err: String(e) }));
-            else st.refreshLibrary().catch(e => log.error('library', 'refresh after add-books failed', { err: String(e) }));
-          } else {
-            setAddIndex(next);
-          }
-        }}
-        onRefresh={() => {}}
-      />
+    {localImportOpen && st.activeLibrary?.source === 'local' && (
+      <LocalImportDialog st={st} library={st.activeLibrary} onClose={() => setLocalImportOpen(false)} />
     )}
 
     {/* Upload flow — server-side item creation via POST /api/upload. */}

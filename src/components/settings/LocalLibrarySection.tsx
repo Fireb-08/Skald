@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
 import type { Library, ScannedItem } from '../../api/abs';
-import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, getUnidentifiedItems, revealPath, ingestLocalPaths } from '../../api/abs';
+import { createLocalLibrary, deleteLocalLibrary, scanLocalLibrary, getUnidentifiedItems, revealPath } from '../../api/abs';
 import { log } from '../../lib/log';
 import Icon from '../Icon';
 import { SectionHead, Panel, MONO, DIM_GOLD, TextInput } from './shared';
 import MatchModal, { makeLocalQuarantineAdapter } from '../MatchModal';
+import LocalImportDialog from '../LocalImportDialog';
 
 // A glass chip showing a folder path; clicking opens it in the OS file explorer.
 // Used for the library root and staging paths so they align and are actionable.
@@ -52,8 +53,8 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
   // match-modal target.
   const [unidentified, setUnidentified] = useState<Record<string, ScannedItem[]>>({});
   const [matchTarget, setMatchTarget] = useState<{ libId: string; item: ScannedItem } | null>(null);
-  // The library currently importing via "Add books…", so its button shows a spinner.
-  const [adding, setAdding] = useState<string | null>(null);
+  // Library targeted by the shared Files / Folder / Staging import dialog.
+  const [importLibrary, setImportLibrary] = useState<Library | null>(null);
   // Inline "create library" form state.
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -107,36 +108,6 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
       st.setToast({ message: 'Could not create library', type: 'error' });
     } finally {
       setBusy(null);
-    }
-  }
-
-  // Manual import route (Onboarding roadmap, Phase 5 / gap #2) — the permanent
-  // "Add books…" button. Mirrors what onboarding step 5 teaches: pick files or
-  // folders and ingest them straight into the managed Author/Series/Title tree.
-  async function addBooks(lib: Library) {
-    const picked = await open({
-      directory: false, multiple: true, title: `Add books to "${lib.name}"`,
-      filters: [{ name: 'Audio', extensions: ['m4b', 'm4a', 'mp3', 'flac', 'ogg', 'opus', 'aac', 'wav'] }],
-    });
-    const sources = Array.isArray(picked) ? picked : picked ? [picked] : [];
-    if (sources.length === 0) return;
-    try {
-      setAdding(lib.id);
-      log.info('library', 'add books to local library', { count: sources.length });
-      const outcomes = await ingestLocalPaths(lib.id, sources);
-      const filed = outcomes.filter(o => o.outcome === 'filed').length;
-      const quarantined = outcomes.filter(o => o.outcome === 'quarantined').length;
-      if (st.currentLibraryId === lib.id) await st.setActiveLibrary(lib.id);
-      else await st.refreshLibrary();
-      void reloadUnidentified();
-      const parts = [`${filed} added`];
-      if (quarantined) parts.push(`${quarantined} need attention`);
-      st.setToast({ message: `Imported into "${lib.name}" — ${parts.join(', ')}`, type: filed ? 'success' : 'info' });
-    } catch (e) {
-      log.error('library', 'add books failed', { err: String(e) });
-      st.setToast({ message: 'Could not import those files', type: 'error' });
-    } finally {
-      setAdding(null);
     }
   }
 
@@ -267,12 +238,11 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
                     )}
                     {lib.mediaType !== 'podcast' && (
                       <button
-                        onClick={() => addBooks(lib)}
-                        disabled={adding === lib.id}
-                        style={btn(adding === lib.id)}
-                        title="Pick audiobook files to import directly into this library. (To add whole book folders, drop them into the Staging folder below.)"
+                        onClick={() => setImportLibrary(lib)}
+                        style={btn()}
+                        title="Add audiobook files, scan a folder, or open Staging."
                       >
-                        {adding === lib.id ? 'Adding…' : 'Add books…'}
+                        Add books
                       </button>
                     )}
                     <button
@@ -342,6 +312,15 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
             setMatchTarget(null);
           }}
           onRefresh={() => {}}
+        />
+      )}
+
+      {importLibrary && (
+        <LocalImportDialog
+          st={st}
+          library={importLibrary}
+          onClose={() => setImportLibrary(null)}
+          onImported={() => void reloadUnidentified()}
         />
       )}
     </div>
