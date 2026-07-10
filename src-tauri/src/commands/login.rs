@@ -134,11 +134,15 @@ pub async fn login_with_api_key(
     // are silently ignored by serde.
     let user: models::User = serde_json::from_value(body_json)
         .map_err(|e| format!("Failed to parse user: {e}"))?;
+    let token = user.token.clone();
+    if token.is_empty() {
+        return Err("API key validated but the server did not return a socket-compatible user token".to_string());
+    }
 
     let server_settings: Option<ServerSettings> = {
         let auth_resp = crate::api::bounded_client()
-        .get(format!("{}/api/me", server_url.trim_end_matches('/')))
-            .header("Authorization", format!("Bearer {api_key}"))
+            .post(format!("{}/api/authorize", server_url.trim_end_matches('/')))
+            .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
         match auth_resp {
@@ -150,7 +154,7 @@ pub async fn login_with_api_key(
         }
     };
 
-    Ok(ApiKeyLoginResult { user, token: api_key, server_settings })
+    Ok(ApiKeyLoginResult { user, token, server_settings })
 }
 
 /// Clears the stored keyring token so the next launch forces a fresh login.
