@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import type { SearchScope } from '../../lib/shelfFilters';
 import Glass from './Glass';
@@ -30,10 +30,14 @@ export default function TopNav({ st }: TopNavProps) {
   const [libMenuOpen, setLibMenuOpen] = useState(false);
   const [hoverLib, setHoverLib] = useState<string | null>(null);
   const libRef = useRef<HTMLDivElement>(null);
+  const libTriggerRef = useRef<HTMLButtonElement>(null);
+  const libOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   // Custom search field-scope dropdown (same Onyx treatment as the switcher).
   const [scopeOpen, setScopeOpen] = useState(false);
   const [hoverScope, setHoverScope] = useState<SearchScope | null>(null);
   const scopeRef = useRef<HTMLDivElement>(null);
+  const scopeTriggerRef = useRef<HTMLButtonElement>(null);
+  const scopeOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   // ── Add books (local libraries) ─────────────────────────────────────────────
   // Pick a folder, scan it into book units, then walk each through the Match modal;
@@ -61,6 +65,33 @@ export default function TopNav({ st }: TopNavProps) {
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [scopeOpen]);
+
+  // Custom popouts follow one listbox contract so keyboard behavior does not
+  // depend on which TopNav selector a listener happens to open.
+  const focusOption = (refs: Array<HTMLButtonElement | null>, index: number) => {
+    refs[index]?.focus();
+  };
+
+  const handleListboxKey = (
+    event: ReactKeyboardEvent,
+    refs: Array<HTMLButtonElement | null>,
+    close: () => void,
+    trigger: HTMLButtonElement | null,
+  ) => {
+    const current = refs.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+      trigger?.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (event.key === 'Home') focusOption(refs, 0);
+    else if (event.key === 'End') focusOption(refs, refs.length - 1);
+    else if (event.key === 'ArrowDown') focusOption(refs, current < 0 ? 0 : (current + 1) % refs.length);
+    else focusOption(refs, current <= 0 ? refs.length - 1 : current - 1);
+  };
 
   // Switch the active library and reset the shelf view context so the new
   // library starts clean (no stale search/filter/tab/focus from the old one).
@@ -98,12 +129,30 @@ export default function TopNav({ st }: TopNavProps) {
         return (
           <div ref={libRef} style={{ position: 'relative' }}>
             <button
+              ref={libTriggerRef}
               onClick={() => {
                 // Away from the shelf → return to it; already there → toggle the
                 // switcher (when there's more than one library to switch to).
                 if (st.screen !== 'library') { st.setScreen('library'); return; }
                 if (canSwitch) setLibMenuOpen(o => !o);
               }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && libMenuOpen) {
+                  event.preventDefault();
+                  setLibMenuOpen(false);
+                  return;
+                }
+                if (!canSwitch || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+                event.preventDefault();
+                setLibMenuOpen(true);
+                requestAnimationFrame(() => {
+                  const activeIndex = libraryChoices.findIndex(l => l.id === st.currentLibraryId);
+                  focusOption(libOptionRefs.current, activeIndex >= 0 ? activeIndex : 0);
+                });
+              }}
+              aria-haspopup={canSwitch ? 'listbox' : undefined}
+              aria-expanded={canSwitch ? libMenuOpen : undefined}
+              aria-controls={canSwitch ? 'onyx-library-listbox' : undefined}
               title={canSwitch ? 'Switch library' : 'Your library'}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -135,7 +184,12 @@ export default function TopNav({ st }: TopNavProps) {
               )}
             </button>
             {libMenuOpen && (
-            <div style={{
+            <div
+              id="onyx-library-listbox"
+              role="listbox"
+              aria-label="Choose library"
+              onKeyDown={(event) => handleListboxKey(event, libOptionRefs.current, () => setLibMenuOpen(false), libTriggerRef.current)}
+              style={{
               position: 'absolute', top: '100%', left: 0, marginTop: 6, zIndex: 100, minWidth: 220,
               // Frosted dark fill (panel tone, mostly opaque) behind the blur —
               // `--onyx-glass` alone is near-clear and hurts text readability over
@@ -146,8 +200,9 @@ export default function TopNav({ st }: TopNavProps) {
               border: '1px solid var(--onyx-accent-edge)', borderRadius: 10,
               boxShadow: '0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
               padding: 5, overflow: 'hidden',
-            }}>
-              {libraryChoices.map(l => {
+              }}
+            >
+              {libraryChoices.map((l, index) => {
                 const active = l.id === st.currentLibraryId;
                 const hover = hoverLib === l.id;
                 // Hover = solid accent fill ("about to pick"); current = accent
@@ -155,6 +210,9 @@ export default function TopNav({ st }: TopNavProps) {
                 return (
                   <button
                     key={l.id}
+                    ref={(node) => { libOptionRefs.current[index] = node; }}
+                    role="option"
+                    aria-selected={active}
                     onClick={() => { switchLibrary(l.id); setLibMenuOpen(false); }}
                     onMouseEnter={() => setHoverLib(l.id)}
                     onMouseLeave={() => setHoverLib(prev => (prev === l.id ? null : prev))}
@@ -262,7 +320,26 @@ export default function TopNav({ st }: TopNavProps) {
         {!isPodcast && (
           <div ref={scopeRef} style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)' }}>
             <button
+              ref={scopeTriggerRef}
               onClick={() => setScopeOpen(o => !o)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && scopeOpen) {
+                  event.preventDefault();
+                  setScopeOpen(false);
+                  return;
+                }
+                if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+                event.preventDefault();
+                setScopeOpen(true);
+                requestAnimationFrame(() => {
+                  const activeIndex = SCOPES.findIndex(s => s.value === st.searchScope);
+                  focusOption(scopeOptionRefs.current, activeIndex >= 0 ? activeIndex : 0);
+                });
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={scopeOpen}
+              aria-controls="onyx-search-scope-listbox"
+              aria-label="Search field scope"
               title="Search field scope"
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
@@ -277,7 +354,12 @@ export default function TopNav({ st }: TopNavProps) {
               </span>
             </button>
             {scopeOpen && (
-              <div style={{
+              <div
+                id="onyx-search-scope-listbox"
+                role="listbox"
+                aria-label="Search field scope"
+                onKeyDown={(event) => handleListboxKey(event, scopeOptionRefs.current, () => setScopeOpen(false), scopeTriggerRef.current)}
+                style={{
                 position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 100, minWidth: 130,
                 // Same frosted panel surface as the library switcher menu above:
                 // tinted translucent fill behind the blur, gold accent edge, deep
@@ -288,8 +370,9 @@ export default function TopNav({ st }: TopNavProps) {
                 border: '1px solid var(--onyx-accent-edge)', borderRadius: 10,
                 boxShadow: '0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
                 padding: 5, overflow: 'hidden',
-              }}>
-                {SCOPES.map(s => {
+                }}
+              >
+                {SCOPES.map((s, index) => {
                   const active = s.value === st.searchScope;
                   const hover = hoverScope === s.value;
                   // Hover = solid accent fill; current = accent text + check —
@@ -297,6 +380,9 @@ export default function TopNav({ st }: TopNavProps) {
                   return (
                     <button
                       key={s.value}
+                      ref={(node) => { scopeOptionRefs.current[index] = node; }}
+                      role="option"
+                      aria-selected={active}
                       onClick={() => { st.setSearchScope(s.value); setScopeOpen(false); }}
                       onMouseEnter={() => setHoverScope(s.value)}
                       onMouseLeave={() => setHoverScope(prev => (prev === s.value ? null : prev))}
