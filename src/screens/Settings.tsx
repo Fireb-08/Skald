@@ -104,6 +104,8 @@ export default function Settings({ st, onLogout }: SettingsProps) {
   async function handleSignOut() {
     try { await logout(); } catch { /* keyring failure is non-fatal */ }
     localStorage.removeItem('skald.hasAuth');
+    // Keep the non-secret address as a returning-user convenience. Credentials,
+    // identity, session state, and the live connection are still fully cleared.
     localStorage.removeItem('skald.serverUrl');
     localStorage.removeItem('skald.userId');
     localStorage.removeItem('skald.username');

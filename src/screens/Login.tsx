@@ -19,8 +19,11 @@ export interface LoginProps {
 
 export default function Login({ st }: LoginProps) {
   // ── Form state (local only — never touches global state until submit succeeds) ──
-  const [scheme, setScheme] = useState<'http' | 'https'>('http');     // protocol selector
-  const [host, setHost]     = useState('');         // No prefilled server — user must enter their own server address
+  const lastServer = (() => {
+    try { return new URL(localStorage.getItem('skald.lastServerUrl') ?? ''); } catch { return null; }
+  })();
+  const [scheme, setScheme] = useState<'http' | 'https'>(() => lastServer?.protocol === 'https:' ? 'https' : 'http');
+  const [host, setHost]     = useState(() => lastServer?.host ?? '');
   const [user, setUser]     = useState('');         // No prefilled username
   const [pass, setPass]     = useState('');         // No prefilled password
   const [schemeOpen, setSchemeOpen] = useState(false);                  // dropdown open state
@@ -64,6 +67,7 @@ export default function Login({ st }: LoginProps) {
         // socket auth middleware validates; the API key was only used once
         // to obtain it.
         await saveToken(result.token);
+        localStorage.setItem('skald.lastServerUrl', serverUrl);
         st.setAuthToken(result.token);
         st.setServerUrl(serverUrl);
         st.setUserId(result.user.id);
@@ -94,6 +98,7 @@ export default function Login({ st }: LoginProps) {
       if (serverSettings) st.setServerSettings(serverSettings);
       // Persist the token to the OS keyring via the Rust save_token command
       await saveToken(loggedInUser.token);
+      localStorage.setItem('skald.lastServerUrl', serverUrl);
       // Write all auth/server state into global OnyxState so App.tsx gate opens
       st.setAuthToken(loggedInUser.token);
       st.setServerUrl(serverUrl);

@@ -16,8 +16,11 @@ export interface AbsConnectStepProps {
 }
 
 export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps) {
-  const [scheme, setScheme] = useState<'http' | 'https'>('http');
-  const [host, setHost]     = useState('');
+  const lastServer = (() => {
+    try { return new URL(localStorage.getItem('skald.lastServerUrl') ?? ''); } catch { return null; }
+  })();
+  const [scheme, setScheme] = useState<'http' | 'https'>(() => lastServer?.protocol === 'https:' ? 'https' : 'http');
+  const [host, setHost]     = useState(() => lastServer?.host ?? '');
   const [user, setUser]     = useState('');
   const [pass, setPass]     = useState('');
   const [schemeOpen, setSchemeOpen] = useState(false);
@@ -49,6 +52,7 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
       try {
         const result = await loginWithApiKey(serverUrl, apiKey.trim());
         await saveToken(result.token);
+        localStorage.setItem('skald.lastServerUrl', serverUrl);
         st.setAuthToken(result.token);
         st.setServerUrl(serverUrl);
         st.setUserId(result.user.id);
@@ -71,6 +75,7 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
       const { user: loggedInUser, serverSettings } = await login(serverUrl, user.trim(), pass);
       if (serverSettings) st.setServerSettings(serverSettings);
       await saveToken(loggedInUser.token);
+      localStorage.setItem('skald.lastServerUrl', serverUrl);
       st.setAuthToken(loggedInUser.token);
       st.setServerUrl(serverUrl);
       st.setUserId(loggedInUser.id);
