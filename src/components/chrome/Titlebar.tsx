@@ -11,6 +11,7 @@ export interface TitlebarProps {
   // Displays a persistent amber OFFLINE pill so the user always knows they are
   // browsing cached data rather than a live server connection.
   isOffline?: boolean;
+  lastRefresh?: number | null;
   // True when the configured ABS server URL is plain http: (review L6). LAN
   // HTTP is a legitimate self-hosted setup, so this only surfaces the missing
   // transport encryption — it never blocks the connection.
@@ -31,7 +32,7 @@ const HANDLERS: Record<string, () => void> = {
   close: () => { void getCurrentWindow().close(); },
 };
 
-export default function Titlebar({ subtitle, isDark, minimal, isOffline, isUnencrypted }: TitlebarProps) {
+export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -82,7 +83,7 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, isUnenc
             background: 'rgba(212,131,74,0.08)',
             lineHeight: 1,
           }}>
-            offline
+            offline{lastRefresh ? ` · refreshed ${new Date(lastRefresh).toLocaleString()}` : ''}
           </div>
         )}
         {/* Transport-encryption indicator (review L6) — same amber family as

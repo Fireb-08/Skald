@@ -9,6 +9,7 @@ import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
 import { useLiveSync } from './useLiveSync';
 import { prependActivity } from '../lib/activity';
+import { readLastRefresh, writeLastRefresh } from '../lib/offlineFreshness';
 
 export type { ServerSettings };
 
@@ -207,6 +208,7 @@ export interface OnyxState {
   // True when the library was loaded from the disk cache because the server was unreachable.
   // Used by the titlebar to display a persistent OFFLINE indicator.
   isOffline: boolean;
+  lastLibraryRefresh: number | null;
   // Non-null when the last All Libraries load lost at least one source library.
   // The combined shelf shows a partial-coverage notice while this is set.
   allLibrariesPartial: AllLibrariesPartial | null;
@@ -584,7 +586,9 @@ export function useOnyxState(): OnyxState {
           .then(progress => setMediaProgress(prev => mergeProgress(prev, progress.flat())))
           .catch(e => log.error('library', 'combined local progress load failed', { err: String(e) }));
       } else if (lib?.source !== 'local') {
-        saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
+        saveLibraryCache(items)
+          .then(() => setLastLibraryRefresh(writeLastRefresh(serverUrl, id)))
+          .catch(e => log.error('library', 'cache save failed', { err: String(e) }));
       } else {
         // Fold this local library's catalog progress into mediaProgress so cover
         // overlays and Pick-it-up reflect local playback.
@@ -604,6 +608,7 @@ export function useOnyxState(): OnyxState {
   // True when the library loaded from the disk cache (server unreachable).
   // Reset to false on every successful server fetch.
   const [isOffline, setIsOffline] = useState(false);
+  const [lastLibraryRefresh, setLastLibraryRefresh] = useState<number | null>(null);
   // Non-null when the last All Libraries load lost at least one source. Drives
   // the "Showing N of M libraries" notice on the combined shelf (review H1);
   // cleared on a fully-successful combined load, a library switch, or dismissal.
@@ -725,6 +730,7 @@ export function useOnyxState(): OnyxState {
           if (cached.length > 0 && !cancelled) {
             setLibraryRaw(cached as LibraryItem[]);
             setIsOffline(true);
+            setLastLibraryRefresh(readLastRefresh(serverUrl, currentLibraryId));
             if (authToken && screen !== 'login') {
               setToast({ message: 'Server unreachable — showing cached library', type: 'info' });
             }
@@ -767,7 +773,9 @@ export function useOnyxState(): OnyxState {
             .then(progress => { if (!cancelled) setMediaProgress(prev => mergeProgress(prev, progress.flat())); })
             .catch(e => log.error('library', 'combined local progress load failed', { err: String(e) }));
         } else if (activeLib.source !== 'local') {
-          saveLibraryCache(items).catch(e => log.error('library', 'cache save failed', { err: String(e) }));
+          saveLibraryCache(items)
+            .then(() => setLastLibraryRefresh(writeLastRefresh(serverUrl, activeLib.id)))
+            .catch(e => log.error('library', 'cache save failed', { err: String(e) }));
         } else {
           getLocalLibraryProgress(activeLib.id)
             .then(lp => { if (!cancelled) setMediaProgress(prev => mergeProgress(prev, lp)); })
@@ -1386,7 +1394,7 @@ export function useOnyxState(): OnyxState {
     localMode, setLocalMode,
     localDisplayName, setLocalDisplayName,
     onboarded, setOnboarded,
-    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, allLibrariesPartial, dismissAllLibrariesPartial, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
+    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, lastLibraryRefresh, allLibrariesPartial, dismissAllLibrariesPartial, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
     serverSettings, setServerSettings,
