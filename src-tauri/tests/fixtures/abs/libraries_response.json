@@ -1,0 +1,40 @@
+{
+  "libraries": [
+    {
+      "id": "lib_books",
+      "name": "Audiobooks",
+      "folders": [
+        { "id": "fol_1", "fullPath": "/audiobooks", "libraryId": "lib_books", "addedAt": 1650000000000 }
+      ],
+      "displayOrder": 1,
+      "icon": "audiobookshelf",
+      "mediaType": "book",
+      "provider": "audible",
+      "settings": {
+        "coverAspectRatio": 1,
+        "disableWatcher": false,
+        "skipMatchingMediaWithAsin": false,
+        "skipMatchingMediaWithIsbn": false,
+        "autoScanCronExpression": null,
+        "audiobooksOnly": false,
+        "hideSingleBookSeries": false,
+        "onlyShowLaterBooksInContinueSeries": false,
+        "metadataPrecedence": ["folderStructure", "audioMetatags", "nfoFile", "txtFiles", "opfFile", "absMetadata"],
+        "markAsFinishedPercentComplete": null,
+        "markAsFinishedTimeRemaining": 10,
+        "podcastSearchRegion": "us",
+        "epubsAllowScriptedContent": false
+      },
+      "lastScan": 1719000000000,
+      "lastScanVersion": "2.12.3",
+      "createdAt": 1650000000000,
+      "lastUpdate": 1719000000000
+    },
+    {
+      "id": "lib_pods",
+      "name": "Podcasts",
+      "folders": [{ "fullPath": "/podcasts" }],
+      "mediaType": "podcast"
+    }
+  ]
+}

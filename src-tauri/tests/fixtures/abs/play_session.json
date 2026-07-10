@@ -1,0 +1,38 @@
+{
+  "id": "play_sess1",
+  "userId": "usr_1",
+  "libraryId": "lib_books",
+  "libraryItemId": "li_abc123",
+  "episodeId": null,
+  "mediaType": "book",
+  "displayTitle": "The Red Knight",
+  "displayAuthor": "Miles Cameron",
+  "coverPath": "/metadata/items/li_abc123/cover.jpg",
+  "duration": 63290.25,
+  "playMethod": 0,
+  "mediaPlayer": "unknown",
+  "startedAt": 1719920000000,
+  "updatedAt": 1719920000000,
+  "timeListening": 0,
+  "startTime": 26581.9,
+  "currentTime": 26581.9,
+  "audioTracks": [
+    {
+      "index": 1,
+      "startOffset": 0,
+      "duration": 63290.25,
+      "title": "The Red Knight.m4b",
+      "contentUrl": "/api/items/li_abc123/file/9462852",
+      "mimeType": "audio/mp4",
+      "metadata": {
+        "filename": "The Red Knight.m4b",
+        "ext": ".m4b",
+        "path": "/audiobooks/Miles Cameron/The Red Knight/The Red Knight.m4b",
+        "relPath": "The Red Knight.m4b",
+        "size": 912345678
+      }
+    }
+  ],
+  "videoTrack": null,
+  "libraryItem": null
+}

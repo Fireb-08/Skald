@@ -1,0 +1,59 @@
+{
+  "id": "usr_1",
+  "oldUserId": null,
+  "username": "sam",
+  "email": "sam@example.com",
+  "type": "user",
+  "token": "eyJhbGciOiJIUzI1NiJ9.fixture.token",
+  "mediaProgress": [
+    {
+      "id": "prog_book",
+      "userId": "usr_1",
+      "libraryItemId": "li_abc123",
+      "episodeId": null,
+      "mediaItemType": "book",
+      "duration": 63290.25,
+      "progress": 0.42,
+      "currentTime": 26581.9,
+      "isFinished": false,
+      "hideFromContinueListening": false,
+      "lastUpdate": 1719900000000,
+      "startedAt": 1719000000000,
+      "finishedAt": null
+    },
+    {
+      "id": "prog_episode",
+      "userId": "usr_1",
+      "libraryItemId": "li_pod1",
+      "episodeId": "ep_1",
+      "mediaItemType": "podcastEpisode",
+      "duration": 16000.2,
+      "progress": 1,
+      "currentTime": 16000.2,
+      "isFinished": true,
+      "hideFromContinueListening": false,
+      "lastUpdate": 1719910000000,
+      "startedAt": 1719100000000,
+      "finishedAt": 1719910000000
+    }
+  ],
+  "seriesHideFromContinueListening": [],
+  "bookmarks": [
+    { "libraryItemId": "li_abc123", "title": "Cairn imagery again", "time": 2297, "createdAt": 1719800000000 }
+  ],
+  "isActive": true,
+  "isLocked": false,
+  "lastSeen": 1719920000000,
+  "createdAt": 1650000000000,
+  "permissions": {
+    "download": true,
+    "update": false,
+    "delete": false,
+    "upload": true,
+    "accessAllLibraries": true,
+    "accessAllTags": true,
+    "accessExplicitContent": false
+  },
+  "librariesAccessible": [],
+  "itemTagsAccessible": []
+}

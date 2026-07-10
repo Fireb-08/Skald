@@ -1,0 +1,38 @@
+{
+  "id": "li_min1",
+  "ino": "555",
+  "libraryId": "lib_books",
+  "folderId": "fol_1",
+  "path": "/audiobooks/Michael R. Fletcher/Ghosts of Tomorrow",
+  "relPath": "Michael R. Fletcher/Ghosts of Tomorrow",
+  "isFile": false,
+  "addedAt": 1653500000000,
+  "updatedAt": 1653500000000,
+  "isMissing": false,
+  "isInvalid": false,
+  "media": {
+    "metadata": {
+      "title": "Ghosts of Tomorrow",
+      "titleIgnorePrefix": "Ghosts of Tomorrow",
+      "subtitle": null,
+      "authorName": "Michael R. Fletcher",
+      "authorNameLF": "Fletcher, Michael R.",
+      "narratorName": "Alex Knox",
+      "seriesName": "",
+      "genres": ["Sci-Fi"],
+      "publishedYear": "2017",
+      "explicit": false,
+      "language": null
+    },
+    "coverPath": "/metadata/items/li_min1/cover.jpg",
+    "tags": [],
+    "numTracks": 1,
+    "numAudioFiles": 1,
+    "numChapters": 32,
+    "duration": 41000.1,
+    "size": 512000000,
+    "ebookFormat": null
+  },
+  "numFiles": 2,
+  "size": 512000123
+}

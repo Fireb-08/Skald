@@ -1,0 +1,93 @@
+{
+  "id": "li_abc123",
+  "ino": "9462851",
+  "oldLibraryItemId": null,
+  "libraryId": "lib_books",
+  "folderId": "fol_1",
+  "path": "/audiobooks/Miles Cameron/The Red Knight",
+  "relPath": "Miles Cameron/The Red Knight",
+  "isFile": false,
+  "mtimeMs": 1653500000000,
+  "ctimeMs": 1653500000000,
+  "birthtimeMs": 1653500000000,
+  "addedAt": 1653500000000,
+  "updatedAt": 1653500000000,
+  "isMissing": false,
+  "isInvalid": false,
+  "mediaType": "book",
+  "media": {
+    "id": "book_1",
+    "libraryItemId": "li_abc123",
+    "metadata": {
+      "title": "The Red Knight",
+      "titleIgnorePrefix": "Red Knight, The",
+      "subtitle": null,
+      "authors": [{ "id": "aut_1", "name": "Miles Cameron" }],
+      "narrators": ["Matthew Wolf"],
+      "series": [{ "id": "ser_1", "name": "The Traitor Son Cycle", "sequence": "1" }],
+      "genres": ["Fantasy"],
+      "publishedYear": "2012",
+      "publishedDate": null,
+      "publisher": "Orbit",
+      "description": "A company of mercenaries takes a contract to defend an abbey.",
+      "isbn": null,
+      "asin": "B00A2DPPYE",
+      "language": "English",
+      "explicit": false
+    },
+    "coverPath": "/metadata/items/li_abc123/cover.jpg",
+    "tags": ["epic"],
+    "audioFiles": [
+      {
+        "index": 1,
+        "ino": "9462852",
+        "metadata": {
+          "filename": "The Red Knight.m4b",
+          "ext": ".m4b",
+          "path": "/audiobooks/Miles Cameron/The Red Knight/The Red Knight.m4b",
+          "relPath": "The Red Knight.m4b",
+          "size": 912345678,
+          "mtimeMs": 1653500000000,
+          "ctimeMs": 1653500000000,
+          "birthtimeMs": 1653500000000
+        },
+        "addedAt": 1653500000000,
+        "updatedAt": 1653500000000,
+        "trackNumFromMeta": 1,
+        "duration": 63290.25,
+        "bitRate": 128000,
+        "codec": "aac",
+        "timeBase": "1/1000",
+        "channels": 2,
+        "channelLayout": "stereo",
+        "chapters": [],
+        "mimeType": "audio/mp4"
+      }
+    ],
+    "chapters": [
+      { "id": 0, "start": 0, "end": 2810.5, "title": "A Letter from the South" },
+      { "id": 1, "start": 2810.5, "end": 5824.7, "title": "The Inn at Harndon" }
+    ],
+    "duration": 63290.25,
+    "size": 912345678,
+    "tracks": []
+  },
+  "libraryFiles": [
+    {
+      "ino": "9462852",
+      "metadata": {
+        "filename": "The Red Knight.m4b",
+        "ext": ".m4b",
+        "path": "/audiobooks/Miles Cameron/The Red Knight/The Red Knight.m4b",
+        "relPath": "The Red Knight.m4b",
+        "size": 912345678,
+        "mtimeMs": 1653500000000,
+        "ctimeMs": 1653500000000,
+        "birthtimeMs": 1653500000000
+      },
+      "fileType": "audio",
+      "addedAt": 1653500000000,
+      "updatedAt": 1653500000000
+    }
+  ]
+}

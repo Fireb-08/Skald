@@ -1,0 +1,81 @@
+{
+  "id": "li_pod1",
+  "ino": "777",
+  "libraryId": "lib_pods",
+  "folderId": "fol_2",
+  "path": "/podcasts/Hardcore History",
+  "relPath": "Hardcore History",
+  "isFile": false,
+  "addedAt": 1653500000000,
+  "updatedAt": 1653500000000,
+  "isMissing": false,
+  "isInvalid": false,
+  "mediaType": "podcast",
+  "media": {
+    "id": "pod_1",
+    "libraryItemId": "li_pod1",
+    "metadata": {
+      "title": "Hardcore History",
+      "author": "Dan Carlin",
+      "description": "In-depth long-form history.",
+      "releaseDate": null,
+      "genres": ["History"],
+      "feedUrl": "https://feeds.feedburner.com/dancarlin/history",
+      "imageUrl": "https://example.com/hh.jpg",
+      "itunesId": 173001861,
+      "language": "en",
+      "explicit": true,
+      "type": "episodic"
+    },
+    "coverPath": "/metadata/items/li_pod1/cover.jpg",
+    "tags": [],
+    "episodes": [
+      {
+        "libraryItemId": "li_pod1",
+        "podcastId": "pod_1",
+        "id": "ep_1",
+        "index": 1,
+        "season": "",
+        "episode": "66",
+        "episodeType": "full",
+        "title": "Supernova in the East I",
+        "subtitle": "The Asia-Pacific War.",
+        "description": "<p>The Asia-Pacific War of 1937-1945.</p>",
+        "pubDate": "Mon, 06 Jul 2020 00:00:00 +0000",
+        "publishedAt": 1594000000000,
+        "addedAt": 1653500000000,
+        "updatedAt": 1653500000000,
+        "audioFile": {
+          "index": 1,
+          "ino": "778",
+          "metadata": {
+            "filename": "supernova-1.mp3",
+            "ext": ".mp3",
+            "path": "/podcasts/Hardcore History/supernova-1.mp3",
+            "relPath": "supernova-1.mp3",
+            "size": 128000000
+          },
+          "duration": 16000.2,
+          "bitRate": 64000,
+          "codec": "mp3",
+          "mimeType": "audio/mpeg"
+        },
+        "audioTrack": {
+          "index": 1,
+          "startOffset": 0,
+          "duration": 16000.2,
+          "title": "supernova-1.mp3",
+          "contentUrl": "/api/items/li_pod1/file/778"
+        },
+        "duration": 16000.2,
+        "size": 128000000
+      }
+    ],
+    "autoDownloadEpisodes": false,
+    "autoDownloadSchedule": "0 * * * *",
+    "lastEpisodeCheck": 1653500000000,
+    "maxEpisodesToKeep": 0,
+    "maxNewEpisodesToDownload": 3
+  },
+  "libraryFiles": []
+}
