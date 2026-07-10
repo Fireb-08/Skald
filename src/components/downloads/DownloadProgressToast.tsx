@@ -6,7 +6,7 @@
 // cancel button remains clickable.
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { cancelDownload } from '../../api/abs';
+import { cancelDownload, downloadItem } from '../../api/abs';
 import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -41,6 +41,7 @@ interface DownloadFailedPayload {
 }
 
 export interface DownloadProgressToastProps {
+  serverUrl: string;
   // Called when a download completes so the caller can show a success toast.
   onComplete: (title: string) => void;
   // Called when the user cancels a download so the caller can show an info toast.
@@ -57,9 +58,10 @@ function fmtBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export default function DownloadProgressToast({ onComplete, onCancel, onFailed }: DownloadProgressToastProps) {
+export default function DownloadProgressToast({ serverUrl, onComplete, onCancel, onFailed }: DownloadProgressToastProps) {
   // Map of itemId → current progress info; each entry renders as its own card.
   const [downloads, setDownloads] = useState<Map<string, ProgressEntry>>(new Map());
+  const [failed, setFailed] = useState<Map<string, DownloadFailedPayload>>(new Map());
 
   useEffect(() => {
     let unlistenProgress:   (() => void) | undefined;
@@ -75,6 +77,7 @@ export default function DownloadProgressToast({ onComplete, onCancel, onFailed }
         next.set(itemId, { title, bytesDownloaded, totalBytes });
         return next;
       });
+      setFailed(prev => { const next = new Map(prev); next.delete(itemId); return next; });
     }).then(fn => { unlistenProgress = fn; });
 
     // Remove the completed entry and fire the success callback.
@@ -107,6 +110,7 @@ export default function DownloadProgressToast({ onComplete, onCancel, onFailed }
         next.delete(itemId);
         return next;
       });
+      setFailed(prev => { const next = new Map(prev); next.set(event.payload.itemId, event.payload); return next; });
       onFailed(title, error);
     }).then(fn => { unlistenFailed = fn; });
 
@@ -122,7 +126,7 @@ export default function DownloadProgressToast({ onComplete, onCancel, onFailed }
   }, []);
 
   // Nothing to render while no downloads are in flight.
-  if (downloads.size === 0) return null;
+  if (downloads.size === 0 && failed.size === 0) return null;
 
   return (
     // Stack above the regular toast (bottom: 24) so they don't overlap.
@@ -245,6 +249,16 @@ export default function DownloadProgressToast({ onComplete, onCancel, onFailed }
           </div>
         );
       })}
+      {Array.from(failed.values()).map(entry => (
+        <div key={entry.itemId} style={{ minWidth: 260, maxWidth: 420, background: 'var(--onyx-panel2)', border: '1px solid rgba(220,100,100,0.45)', borderRadius: 8, padding: '11px 14px', pointerEvents: 'auto' }}>
+          <div style={{ fontSize: 13, color: 'var(--onyx-text)', marginBottom: 7 }}>Download failed: “{entry.title}”</div>
+          <button onClick={() => {
+            setFailed(prev => { const next = new Map(prev); next.delete(entry.itemId); return next; });
+            downloadItem(serverUrl, entry.itemId, `${entry.title}.zip`, entry.title, '')
+              .catch(e => log.error('downloads', 'retry download command failed', { itemId: entry.itemId, err: String(e) }));
+          }} style={{ padding: '5px 10px', borderRadius: 5, border: '1px solid var(--onyx-accent-edge)', background: 'var(--onyx-accent-dim)', color: 'var(--onyx-accent)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>RETRY</button>
+        </div>
+      ))}
     </div>
   );
 }

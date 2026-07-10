@@ -284,6 +284,7 @@ export default function App() {
           onCancel/onFailed are wired here alongside onComplete so all download outcome
           toasts originate from the same place and use the same st.setToast mechanism. */}
       <DownloadProgressToast
+        serverUrl={st.serverUrl}
         onComplete={(title) => st.setToast({ message: `Downloaded "${title}"`, type: 'success' })}
         onCancel={(title) => st.setToast({ message: `Download cancelled — "${title}"`, type: 'info' })}
         onFailed={(title, _error) => st.setToast({ message: `Download failed — "${title}"`, type: 'error' })}
