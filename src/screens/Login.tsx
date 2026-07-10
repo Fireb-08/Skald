@@ -6,6 +6,8 @@ import type { OnyxState } from '../state/onyx';
 import { login, saveToken, loginWithApiKey } from '../api/abs';
 import Titlebar from '../components/chrome/Titlebar';
 import lyreIcon from '../assets/lyre.png';
+import { errorMessage } from '../lib/presentError';
+import { log } from '../lib/log';
 
 // Typography constants matching the Saga design tokens
 const SERIF = '"Source Serif 4", "Source Serif Pro", Georgia, serif';
@@ -76,11 +78,8 @@ export default function Login({ st }: LoginProps) {
         if (result.serverSettings) st.setServerSettings(result.serverSettings);
         st.setScreen('library');
       } catch (err) {
-        setError(
-          typeof err === 'string'
-            ? err
-            : (err as Error)?.message ?? 'Could not connect. Check your address and API key.',
-        );
+        log.warn('auth', 'api key sign-in failed', { err: String(err) });
+        setError(errorMessage(err, { operation: 'authenticate', credential: 'api-key' }));
         setPending(false);
       }
       return;
@@ -108,12 +107,8 @@ export default function Login({ st }: LoginProps) {
       // Navigate into the library — the auth gate in App.tsx will also flip
       st.setScreen('library');
     } catch (err) {
-      // Show the server error message if available; fall back to a friendly string
-      setError(
-        typeof err === 'string'
-          ? err
-          : (err as Error)?.message ?? 'Could not connect. Check your address and credentials.',
-      );
+      log.warn('auth', 'password sign-in failed', { err: String(err) });
+      setError(errorMessage(err, { operation: 'authenticate', credential: 'password' }));
       setPending(false);
     }
   };
@@ -375,7 +370,7 @@ export default function Login({ st }: LoginProps) {
                   style={{ ...underline, flex: 1 }}
                   value={host}
                   onChange={e => setHost(e.target.value)}
-
+                  placeholder="library.example.com or 192.168.1.20:13378"
                   spellCheck={false}
                 />
               </div>
@@ -441,7 +436,7 @@ export default function Login({ st }: LoginProps) {
                 />
                 {/* Helper text pointing the user to where keys are generated */}
                 <div style={{ fontFamily: SANS, fontSize: 11, color: 'rgba(235,231,223,0.35)', marginTop: 8 }}>
-                  Generate a key in Settings → Users → API Keys on your server.
+                  Generate a key in the Audiobookshelf WebUI under Settings → Users → API Keys.
                 </div>
               </label>
             )}

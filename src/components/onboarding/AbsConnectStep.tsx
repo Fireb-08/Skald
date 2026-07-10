@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import { login, saveToken, loginWithApiKey } from '../../api/abs';
 import { log } from '../../lib/log';
+import { errorMessage } from '../../lib/presentError';
 import { GoldButton, SERIF, MONO, SANS } from './frame';
 
 export interface AbsConnectStepProps {
@@ -62,7 +63,8 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
         log.info('app', 'onboarding abs connected', { method: 'apikey' });
         onConnected();
       } catch (err) {
-        setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'Could not connect. Check your address and API key.');
+        log.warn('auth', 'onboarding api key sign-in failed', { err: String(err) });
+        setError(errorMessage(err, { operation: 'authenticate', credential: 'api-key' }));
         setPending(false);
       }
       return;
@@ -84,7 +86,8 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
       log.info('app', 'onboarding abs connected', { method: 'password' });
       onConnected();
     } catch (err) {
-      setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'Could not connect. Check your address and credentials.');
+      log.warn('auth', 'onboarding password sign-in failed', { err: String(err) });
+      setError(errorMessage(err, { operation: 'authenticate', credential: 'password' }));
       setPending(false);
     }
   };
@@ -156,7 +159,7 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
                 </div>
               )}
             </div>
-            <input className="saga-input" style={{ ...underline, flex: 1 }} value={host} onChange={e => setHost(e.target.value)} placeholder="library.example.com" spellCheck={false} />
+            <input className="saga-input" style={{ ...underline, flex: 1 }} value={host} onChange={e => setHost(e.target.value)} placeholder="library.example.com or 192.168.1.20:13378" spellCheck={false} />
           </div>
         </label>
 
@@ -175,7 +178,7 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
           <label style={{ display: 'block' }}>
             <div style={{ fontFamily: SERIF, fontStyle: 'italic', fontSize: 13, color: 'rgba(235,231,223,0.62)', marginBottom: 7 }}>Your API key</div>
             <textarea className="saga-input" rows={3} style={{ ...underline, fontFamily: MONO, fontSize: 11, letterSpacing: '0.03em', resize: 'none', lineHeight: 1.6, paddingTop: 4 }} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="Paste your API key here" spellCheck={false} autoComplete="off" />
-            <div style={{ fontFamily: SANS, fontSize: 11, color: 'rgba(235,231,223,0.35)', marginTop: 8 }}>Generate a key in Settings → Users → API Keys on your server.</div>
+            <div style={{ fontFamily: SANS, fontSize: 11, color: 'rgba(235,231,223,0.35)', marginTop: 8 }}>Generate a key in the Audiobookshelf WebUI under Settings → Users → API Keys.</div>
           </label>
         )}
       </div>
