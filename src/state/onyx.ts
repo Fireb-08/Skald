@@ -8,6 +8,7 @@ import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
 import { useLiveSync } from './useLiveSync';
+import { prependActivity } from '../lib/activity';
 
 export type { ServerSettings };
 
@@ -317,6 +318,9 @@ export interface OnyxState {
   setCombineStats: (on: boolean) => void;
   toast: { message: string; type: 'success' | 'error' | 'info' } | null;
   setToast: (t: { message: string; type: 'success' | 'error' | 'info' } | null) => void;
+  activity: ActivityEntry[];
+  recordActivity: (entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => void;
+  clearActivity: () => void;
   confirmDialog: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null;
   setConfirmDialog: (d: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null) => void;
   removeLibraryItem: (id: string) => void;
@@ -341,6 +345,16 @@ export interface OnyxState {
   // is open. Seeded from GET /api/tasks when the monitor mounts.
   tasks: Task[];
   setTasks: (t: Task[]) => void;
+}
+
+export type ActivityCategory = 'downloads' | 'sync' | 'library' | 'podcasts' | 'app';
+
+export interface ActivityEntry {
+  id: string;
+  timestamp: number;
+  category: ActivityCategory;
+  outcome: 'success' | 'error' | 'info';
+  message: string;
 }
 
 // ─── Theme resolution ─────────────────────────────────────────────────────────
@@ -1045,6 +1059,14 @@ export function useOnyxState(): OnyxState {
   }, []);
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const activitySequence = useRef(0);
+  const recordActivity = useCallback((entry: Omit<ActivityEntry, 'id' | 'timestamp'>) => {
+    const timestamp = Date.now();
+    const id = `${timestamp}-${activitySequence.current++}`;
+    setActivity(current => prependActivity(current, { ...entry, id, timestamp }));
+  }, []);
+  const clearActivity = useCallback(() => setActivity([]), []);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
   const [enableOpenLibrary, setEnableOpenLibraryRaw] = useState(() => {
@@ -1405,6 +1427,7 @@ export function useOnyxState(): OnyxState {
     enableOpenLibrary, setEnableOpenLibrary,
     combineStats, setCombineStats,
     toast, setToast,
+    activity, recordActivity, clearActivity,
     confirmDialog, setConfirmDialog,
   };
 }
