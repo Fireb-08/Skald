@@ -26,6 +26,31 @@ extern "C" {
     fn libvlc_audio_equalizer_get_band_count() -> u32;
     fn libvlc_audio_equalizer_get_band_frequency(index: u32) -> f32;
     fn libvlc_media_player_set_equalizer(mp: *mut c_void, p_eq: *mut c_void) -> i32;
+    // void libvlc_log_set(libvlc_instance_t*, libvlc_log_cb, void*) — the
+    // callback signature ends in a va_list, passed here as an opaque pointer
+    // (never dereferenced, so the mismatch is safe by construction).
+    fn libvlc_log_set(
+        p_instance: *mut c_void,
+        cb: extern "C" fn(*mut c_void, i32, *const c_void, *const c_char, *mut c_void),
+        data: *mut c_void,
+    );
+}
+
+/// Swallow LibVLC's internal log stream. Its default logger prints straight to
+/// stderr, spamming the dev terminal on every player init/play with "option X
+/// does not exist" errors for video modules the bundled audio-only build omits
+/// (vmem/marquee/logo/adjust) plus per-play input jitter — none of it
+/// actionable for an audio player. Real playback failures still surface as
+/// Result errors on load()/play() (logged at the command boundary), and release
+/// builds have no console, so nothing diagnostic is lost. The va_list argument
+/// is deliberately never read.
+extern "C" fn vlc_log_drop(
+    _data: *mut c_void,
+    _level: i32,
+    _ctx: *const c_void,
+    _fmt: *const c_char,
+    _args: *mut c_void,
+) {
 }
 
 // Mirror of libvlc_audio_output_device_t (linked list node).
@@ -84,6 +109,11 @@ impl AudioPlayer {
     pub fn new() -> Result<Self, String> {
         let instance = Instance::new()
             .ok_or_else(|| "Failed to initialize LibVLC instance".to_string())?;
+        // Route LibVLC's log stream into the no-op callback immediately — see
+        // vlc_log_drop for why the default stderr logger is pure noise here.
+        unsafe {
+            libvlc_log_set(instance.raw() as *mut c_void, vlc_log_drop, std::ptr::null_mut());
+        }
         let media_player = MediaPlayer::new(&instance)
             .ok_or_else(|| "Failed to create LibVLC media player".to_string())?;
         let eq_handle = unsafe { libvlc_audio_equalizer_new() };

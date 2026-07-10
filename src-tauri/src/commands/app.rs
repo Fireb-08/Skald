@@ -9,6 +9,14 @@ pub struct ShortcutBinding {
     pub shortcut: String,
 }
 
+// register_shortcuts can be invoked twice near-simultaneously (React StrictMode
+// double-mounts useGlobalShortcuts in dev) and sync commands run on a thread
+// pool, so two calls interleave their unregister_all/register pairs — the loser
+// hits "HotKey already registered" and can leave the action map half-built.
+// Serializing the whole unregister→register swap makes the command idempotent
+// for any caller timing.
+static REGISTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[tauri::command]
 pub fn register_shortcuts(
     bindings: Vec<ShortcutBinding>,
@@ -16,6 +24,9 @@ pub fn register_shortcuts(
     action_map: tauri::State<'_, ShortcutActionMap>,
 ) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    // Poison-tolerant: a panic in a previous call must not wedge shortcuts.
+    let _serialized = REGISTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     app.global_shortcut()
         .unregister_all()
