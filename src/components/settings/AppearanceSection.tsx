@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, type CSSProperties } from 'react';
 import type { OnyxState } from '../../state/onyx';
 import { SectionHead, Row, Toggle, Panel, Seg, SegGroup, eyebrowStyle } from './shared';
+import { COVER_SIZES } from '../shelf/LibraryShelf';
 
 export interface AppearanceSectionProps { st: OnyxState; }
 
@@ -75,6 +76,14 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
                 />
               );
             })}
+            <input
+              type="color"
+              value={/^#[0-9a-f]{6}$/i.test(currentHex) ? currentHex : SWATCHES[0]}
+              onChange={e => st.setAccentColor(e.target.value)}
+              aria-label="Choose custom accent color"
+              title="Custom accent color"
+              style={{ width: 28, height: 28, padding: 0, border: '1px solid var(--onyx-glass-edge)', borderRadius: 14, background: 'transparent', cursor: 'pointer' }}
+            />
           </div>
         </Row>
 
@@ -106,7 +115,7 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
         <Row label="Cover size">
           <SegGroup>
             {SIZES.map(v => (
-              <Seg key={v} active={v === st.coverSize} onClick={() => st.setCoverSize(v)}>{v}</Seg>
+              <Seg key={v} active={v === st.coverSize} onClick={() => st.setCoverSize(v)}>{v} · {COVER_SIZES[v]} px</Seg>
             ))}
           </SegGroup>
         </Row>
