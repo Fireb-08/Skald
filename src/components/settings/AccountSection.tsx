@@ -1010,6 +1010,20 @@ export default function AccountSection({ st, onSignOut }: AccountSectionProps) {
             letterSpacing: '0.06em',
           }}>
             {hasAbs ? (st.serverUrl || 'Not connected') : 'Local library'}
+            {/* Transport-encryption note (review L6) — mirrors the titlebar pill.
+                Plain HTTP stays allowed (common on trusted LANs); this only makes
+                the missing encryption visible where the address is shown. */}
+            {hasAbs && st.serverUrl.startsWith('http://') && (
+              <span
+                title="Traffic to this server (including media tokens) is not encrypted. Fine on a trusted home network; use an https:// address to encrypt."
+                style={{
+                  marginLeft: 8, padding: '1px 5px', borderRadius: 4,
+                  color: '#d4834a', border: '1px solid rgba(212,131,74,0.4)',
+                  background: 'rgba(212,131,74,0.08)', textTransform: 'uppercase',
+                  letterSpacing: '0.08em', fontSize: 9,
+                }}
+              >not encrypted</span>
+            )}
           </div>
         </div>
       </div>

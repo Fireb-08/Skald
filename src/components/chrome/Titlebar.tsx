@@ -11,6 +11,10 @@ export interface TitlebarProps {
   // Displays a persistent amber OFFLINE pill so the user always knows they are
   // browsing cached data rather than a live server connection.
   isOffline?: boolean;
+  // True when the configured ABS server URL is plain http: (review L6). LAN
+  // HTTP is a legitimate self-hosted setup, so this only surfaces the missing
+  // transport encryption — it never blocks the connection.
+  isUnencrypted?: boolean;
 }
 
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
@@ -27,7 +31,7 @@ const HANDLERS: Record<string, () => void> = {
   close: () => { void getCurrentWindow().close(); },
 };
 
-export default function Titlebar({ subtitle, isDark, minimal, isOffline }: TitlebarProps) {
+export default function Titlebar({ subtitle, isDark, minimal, isOffline, isUnencrypted }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -79,6 +83,28 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline }: Title
             lineHeight: 1,
           }}>
             offline
+          </div>
+        )}
+        {/* Transport-encryption indicator (review L6) — same amber family as
+            OFFLINE. Plain-HTTP ABS servers are fine on a trusted LAN, but the
+            traffic (including media tokens in URLs) is readable on the network;
+            the pill keeps that visible without forbidding the setup. */}
+        {isUnencrypted && (
+          <div
+            title="Connected over plain HTTP — traffic to your server (including media tokens) is not encrypted. Fine on a trusted home network; use an https:// address to encrypt."
+            style={{
+              fontFamily: mono,
+              fontSize: 9,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase' as const,
+              color: '#d4834a',
+              border: '1px solid rgba(212,131,74,0.4)',
+              borderRadius: 4,
+              padding: '2px 6px',
+              background: 'rgba(212,131,74,0.08)',
+              lineHeight: 1,
+            }}>
+            not encrypted
           </div>
         )}
       </div>

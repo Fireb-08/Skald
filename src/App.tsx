@@ -247,8 +247,9 @@ export default function App() {
     }}>
       {/* Ambient wash gradient and titlebar chrome */}
       <OnyxWash isDark={isDark} />
-      {/* isOffline is true when the library loaded from disk cache (server unreachable) */}
-      <Titlebar isDark={isDark} isOffline={st.isOffline} />
+      {/* isOffline is true when the library loaded from disk cache (server unreachable);
+          isUnencrypted flags a plain-http ABS connection (review L6 — visible, never blocked) */}
+      <Titlebar isDark={isDark} isOffline={st.isOffline} isUnencrypted={!!st.authToken && st.serverUrl.startsWith('http://')} />
 
       {/* Screen content area — sits below the 44px titlebar */}
       <div style={{
