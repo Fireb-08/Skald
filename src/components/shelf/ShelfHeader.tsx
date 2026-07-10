@@ -223,6 +223,14 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
           <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             {subtitleText}
           </div>
+          {/* Scope caption (review L1): Collections/Playlists are deliberately
+              absent on the combined shelf — say so up front, so the reduced
+              action set reads as a boundary rather than a missing feature. */}
+          {isAllLibraries && (
+            <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
+              Search and play across sources · organize books from their source library
+            </div>
+          )}
           {/* Context filter pill — own row beneath the shelf title, left-aligned */}
           {isLibrary && st.contextFilter && (
             <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 14 /* Extra bottom padding clears the TopNav tab underline indicator which protrudes below the nav bar */ }}>

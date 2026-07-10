@@ -199,6 +199,33 @@ export function buildItemContextMenu(
   ];
   if (organize.length > 0) sections.push({ label: 'Organize', items: organize });
 
+  // ── SOURCE (combined shelf only) ───────────────────────────────────────────
+  // All Libraries deliberately exposes search/play only (review L1) — organize
+  // and manage actions live in the item's source library. This jump makes that
+  // boundary actionable instead of leaving Collections/Playlists mysteriously
+  // absent. Mirrors TopNav's switch-reset, then focuses the book so it stays
+  // front-and-center after landing in the source library.
+  if (isCombinedShelf) {
+    const sourceLib = st.libraries.find(l => l.id === item.libraryId);
+    if (sourceLib) {
+      sections.push({
+        label: 'Source',
+        items: [{
+          label: `Open in ${sourceLib.name}`,
+          icon: 'grid',
+          onClick: () => {
+            log.info('library', 'open source library from combined shelf', { itemId: item.id, libraryId: sourceLib.id });
+            st.setActiveLibrary(sourceLib.id).catch(e => log.error('library', 'source library switch failed', { id: sourceLib.id, err: String(e) }));
+            st.setSearch('');
+            st.setContextFilter(null);
+            st.setShelfTab('library');
+            st.setFocusedBookId(item.id);
+          },
+        }],
+      });
+    }
+  }
+
   // ── MANAGE ─────────────────────────────────────────────────────────────────
   // Local-library items carry a localPath. Their manage tools differ from ABS:
   // Match and Edit Metadata are wired (both write the catalog + re-file on disk);
