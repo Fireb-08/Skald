@@ -242,8 +242,11 @@ export default function Player({ st }: PlayerProps) {
         const me = await getMe(st.serverUrl);
         st.setBookmarks(me.bookmarks);
       }
+      // The bookmark list may be off-screen, so make a successful save explicit.
+      st.setToast({ message: 'Bookmark saved', type: 'success' });
     } catch (err) {
       log.error('playback', 'bookmark create failed', { err: String(err) });
+      st.setToast({ message: 'Could not save bookmark — please try again', type: 'error' });
     }
   };
 
@@ -1150,10 +1153,12 @@ export default function Player({ st }: PlayerProps) {
                       )}
 
                       {/* Open Library */}
-                      {olWorkKey !== undefined && (
+                      {st.enableOpenLibrary && (
                         <>
                           <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--onyx-text-mute)', marginTop: 16, marginBottom: 4, paddingBottom: 4 }}>Open Library</div>
-                          {olWorkKey === null ? (
+                          {olWorkKey === undefined ? (
+                            <div aria-live="polite" style={{ padding: '8px 0', fontSize: 12, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>Loading Open Library details…</div>
+                          ) : olWorkKey === null ? (
                             <div style={{ padding: '8px 0', fontSize: 12, color: 'var(--onyx-text-mute)', fontStyle: 'italic' }}>No data found</div>
                           ) : (
                             <>
