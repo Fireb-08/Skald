@@ -12,10 +12,18 @@ import { log } from '../../lib/log';
 
 // Connection state for the live indicator dot.
 // 'off'          — toggle is disabled or socket has never connected this session.
+// 'connecting'   — the user just enabled the toggle; transport is up (or opening)
+//                  but ABS has not yet confirmed auth with "init".
 // 'connected'    — socket-authenticated received; ABS is dispatching events.
 // 'reconnecting' — socket-disconnected fired unexpectedly; the library is
 //                  rebuilding the transport (normal after a network blip or sleep/wake).
-type ConnectionStatus = 'off' | 'connected' | 'reconnecting';
+type ConnectionStatus = 'off' | 'connecting' | 'connected' | 'reconnecting';
+
+// How long an enable waits for the server's auth confirmation (socket-authenticated)
+// before concluding live sync isn't actually working and reverting the toggle.
+// connect_socket resolving only proves the transport opened and the auth event was
+// *sent* — a bad token or misbehaving server never answers with "init".
+const CONNECT_CONFIRM_TIMEOUT_MS = 10_000;
 
 export interface SyncSectionProps {
   // OnyxState supplies serverUrl, authToken (for connect) and setToast (for errors).
@@ -45,6 +53,38 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
   const errorCountRef     = useRef(0);
   const firstErrorTimeRef = useRef<number | null>(null);
 
+  // Non-null while an enable is awaiting auth confirmation. Holds the timeout
+  // that reverts the toggle if socket-authenticated never arrives — the "toggle
+  // stuck on with live sync dead" failure mode (e.g. a stale/wrong stored token,
+  // where the transport connects fine but ABS never answers the auth emit).
+  const pendingConfirmRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancels the pending-enable timeout (auth confirmed, user toggled off, unmount).
+  function clearPendingConfirm() {
+    if (pendingConfirmRef.current !== null) {
+      clearTimeout(pendingConfirmRef.current);
+      pendingConfirmRef.current = null;
+    }
+  }
+
+  // Reverts a failed enable: toggle back to off, socket torn down, user notified.
+  // Called from the confirmation timeout and from socket-error while pending.
+  // References only refs and stable setters, so it is safe inside the
+  // mount-once listeners below.
+  function revertFailedEnable(reason: string) {
+    clearPendingConfirm();
+    log.warn('sync', 'live sync enable failed — reverting toggle', { reason });
+    liveSyncIntentRef.current = false;
+    setLiveSync(false);
+    setConnectionStatus('off');
+    // Best-effort teardown of the half-open socket; may already be closed.
+    disconnectSocket().catch(() => {});
+    st.setToast({
+      message: 'Live sync could not connect. Check your server and try again.',
+      type: 'error',
+    });
+  }
+
   // ── Socket lifecycle listeners ──────────────────────────────────────────────
   // Subscribe to Tauri events forwarded from the Rust socket layer.
   // Set up once on mount; all closures reference only refs and stable React
@@ -57,8 +97,10 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
 
     // socket-authenticated — ABS confirmed auth ("init" event); socket is live.
     // This is the definitive signal that events are flowing. Also clears the
-    // error counter so a successful reconnect resets the degradation window.
+    // error counter so a successful reconnect resets the degradation window,
+    // and settles any pending-enable confirmation so the toggle stays on.
     listen('socket-authenticated', () => {
+      clearPendingConfirm();
       errorCountRef.current     = 0;
       firstErrorTimeRef.current = null;
       setConnectionStatus('connected');
@@ -86,6 +128,15 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
     // window; after three, auto-disable live sync so the user is notified rather
     // than silently receiving stale data from an unresponsive socket.
     listen<string>('socket-error', () => {
+      // A transport failure while the enable is still awaiting confirmation
+      // means the connection the user just asked for isn't coming up — revert
+      // the toggle right away instead of leaving it on and waiting out the
+      // three-strike window (that logic is for drops on established sockets).
+      if (pendingConfirmRef.current !== null) {
+        revertFailedEnable('socket-error during connect');
+        return;
+      }
+
       const now = Date.now();
       // Start a fresh window if this is the first error or the previous one expired.
       if (firstErrorTimeRef.current === null || now - firstErrorTimeRef.current > 60_000) {
@@ -113,12 +164,15 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
     }).then(fn => { unlistenError = fn; });
 
     // Tear down all four listeners when the component unmounts so they do not
-    // accumulate across Settings screen open/close cycles.
+    // accumulate across Settings screen open/close cycles. Also drop any
+    // pending-enable timeout — its revert closure would otherwise fire setState
+    // against the unmounted component.
     return () => {
       unlistenAuthenticated?.();
       unlistenReconnected?.();
       unlistenDisconnected?.();
       unlistenError?.();
+      clearPendingConfirm();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -131,15 +185,27 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
     liveSyncIntentRef.current = next;
     setLiveSync(next);
 
-    // Set the indicator to 'off' immediately when the user disables the toggle.
-    // Without this, the socket-disconnected event that fires during teardown
-    // would race with this setter and could briefly show 'Reconnecting…'.
-    if (!next) setConnectionStatus('off');
+    // A new toggle action supersedes any enable still awaiting confirmation.
+    clearPendingConfirm();
+
+    // Show 'Connecting…' while an enable awaits confirmation; set the indicator
+    // to 'off' immediately when disabling. Without the latter, the
+    // socket-disconnected event that fires during teardown would race with
+    // this setter and could briefly show 'Reconnecting…'.
+    setConnectionStatus(next ? 'connecting' : 'off');
 
     try {
       if (next) {
-        // Enabling — open the Socket.IO connection and authenticate.
+        // Enabling — open the Socket.IO connection and send the auth event.
+        // Resolving here only means the transport is up and auth was *sent*;
+        // the toggle is not confirmed until socket-authenticated arrives.
         await connectSocket(st.serverUrl);
+        // Arm the confirmation window. socket-authenticated clears it; if it
+        // fires first, live sync never actually came up — revert the toggle.
+        pendingConfirmRef.current = setTimeout(() => {
+          pendingConfirmRef.current = null;
+          revertFailedEnable(`no auth confirmation within ${CONNECT_CONFIRM_TIMEOUT_MS}ms`);
+        }, CONNECT_CONFIRM_TIMEOUT_MS);
       } else {
         // Disabling — tear down cleanly; safe to call with no active connection.
         await disconnectSocket();
@@ -157,20 +223,23 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
   // ── Indicator style values ──────────────────────────────────────────────────
   // Resolved once per render — avoids nested ternaries in JSX.
 
-  // Dot fill colour: green / amber / translucent grey.
+  // Dot fill colour: green / amber (both transitional states) / translucent grey.
   const dotColor = connectionStatus === 'connected'    ? '#4caf50'
                  : connectionStatus === 'reconnecting' ? '#f59e0b'
+                 : connectionStatus === 'connecting'   ? '#f59e0b'
                  :                                       'rgba(255,255,255,0.28)';
 
   // Label text colour matches the dot for a cohesive signal.
   const labelColor = connectionStatus === 'connected'    ? '#4caf50'
                    : connectionStatus === 'reconnecting' ? '#f59e0b'
+                   : connectionStatus === 'connecting'   ? '#f59e0b'
                    :                                       'var(--onyx-text-mute)';
 
   // Human-readable status string. Ellipsis rendered as Unicode to avoid a
   // trailing '...' that would misalign with the mono font.
   const labelText = connectionStatus === 'connected'    ? 'Connected'
                   : connectionStatus === 'reconnecting' ? 'Reconnecting…'
+                  : connectionStatus === 'connecting'   ? 'Connecting…'
                   :                                       'Off';
 
   // ── Live sync toggle row ── (shared by the standalone and embedded layouts)
