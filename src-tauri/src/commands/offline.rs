@@ -381,6 +381,22 @@ pub async fn download_item(
     // 0 signals an unknown length — frontend shows an indeterminate progress bar.
     let total_bytes = response.content_length().unwrap_or(0);
 
+    // Warn before touching the output path when the server supplied a known
+    // length that cannot fit on the target volume. Unknown-length streams still
+    // proceed, because their final size cannot be estimated safely.
+    if total_bytes > 0 {
+        let available = fs2::available_space(&dl_dir)
+            .map_err(|e| format!("Failed to inspect download disk space: {e}"))?;
+        if total_bytes > available {
+            cancel_registry.lock().await.remove(&item_id);
+            let msg = format!("Insufficient disk space: need {total_bytes} bytes, only {available} bytes available");
+            let _ = app_handle.emit("download-failed", serde_json::json!({
+                "itemId": item_id, "title": title, "error": msg,
+            }));
+            return Err(msg);
+        }
+    }
+
     // Signal the start immediately so the progress toast appears before the first chunk.
     let _ = app_handle.emit("download-progress", serde_json::json!({
         "itemId": item_id,

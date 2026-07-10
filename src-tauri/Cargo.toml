@@ -29,6 +29,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream", "multi
 tokio = { version = "1", features = ["full"] }
 keyring = { version = "3", features = ["windows-native"] }
 directories = "5"
+fs2 = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 vlc-rs = "0.3"
 tauri-plugin-global-shortcut = "2.3.2"
@@ -79,4 +80,3 @@ quick-xml = "0.36"
 # Temp dirs for persistence tests (downloads registry, offline queue) — tests
 # must never touch the user's real Skald data (Testing Suite plan).
 tempfile = "3"
-
