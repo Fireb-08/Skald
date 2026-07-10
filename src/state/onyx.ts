@@ -6,7 +6,7 @@ import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListening
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
-import { ALL_LIBRARIES_ID, allLibrariesShelf, bookLibraries } from '../lib/allLibraries';
+import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
 
 export type { ServerSettings };
 
@@ -78,10 +78,11 @@ async function loadItemsForLibrary(lib: Library, serverUrl: string): Promise<Lib
 }
 
 // The combined shelf is deliberately client-side: load each real book library
-// through its established source router and preserve partial success.
-async function loadAllLibraryItems(libraries: Library[], serverUrl: string): Promise<LibraryItem[]> {
-  const sources = bookLibraries(libraries);
-  const results = await Promise.all(sources.map(async library => {
+// through its established source router and preserve partial success. The
+// partial-success bookkeeping lives in loadAllLibrarySources so it stays
+// unit-testable; this wrapper adds the source routing and logging.
+async function loadAllLibraryItems(libraries: Library[], serverUrl: string): Promise<AllLibrariesLoadResult> {
+  const result = await loadAllLibrarySources(libraries, async library => {
     try {
       return await loadItemsForLibrary(library, serverUrl);
     } catch (e) {
@@ -90,16 +91,25 @@ async function loadAllLibraryItems(libraries: Library[], serverUrl: string): Pro
         source: library.source ?? 'abs',
         err: String(e),
       });
-      return [] as LibraryItem[];
+      throw e; // rethrow so loadAllLibrarySources records the failed source
     }
-  }));
-  const items = results.flat();
-  log.info('library', 'all libraries load complete', {
-    libraries: sources.length,
-    items: items.length,
-    localItems: items.filter(item => !!item.localPath).length,
   });
-  return items;
+  log.info('library', 'all libraries load complete', {
+    libraries: result.totalSources,
+    failedSources: result.failedSources.map(l => l.name),
+    items: result.items.length,
+    localItems: result.items.filter(item => !!item.localPath).length,
+  });
+  return result;
+}
+
+// Partial-coverage marker for the combined shelf (review H1): set when at least
+// one source failed during an All Libraries load so the UI can say "Showing N
+// of M libraries" instead of presenting a partial composite as complete.
+export interface AllLibrariesPartial {
+  failedNames: string[];
+  loaded: number;
+  total: number;
 }
 
 // ─── Static mock data (chapters, bookmarks, devices) ─────────────────────────
@@ -195,6 +205,11 @@ export interface OnyxState {
   // True when the library was loaded from the disk cache because the server was unreachable.
   // Used by the titlebar to display a persistent OFFLINE indicator.
   isOffline: boolean;
+  // Non-null when the last All Libraries load lost at least one source library.
+  // The combined shelf shows a partial-coverage notice while this is set.
+  allLibrariesPartial: AllLibrariesPartial | null;
+  // Hide the partial-coverage notice until the next partial combined load.
+  dismissAllLibrariesPartial: () => void;
   updateLibraryItem: (item: LibraryItem) => void;
   refreshLibrary: () => Promise<void>;
   mediaProgress: MediaProgress[];
@@ -516,7 +531,7 @@ export function useOnyxState(): OnyxState {
       if (!target) return;
       setCurrentLibraryId(target.id);
       const items = target.id === ALL_LIBRARIES_ID
-        ? await loadAllLibraryItems(libs, serverUrl)
+        ? applyAllLibrariesResult(await loadAllLibraryItems(libs, serverUrl))
         : await loadItemsForLibrary(target, serverUrl);
       setLibraryRaw(patchLibraryItems(items));
       // A successful refresh means the server is reachable — clear the OFFLINE
@@ -534,12 +549,15 @@ export function useOnyxState(): OnyxState {
     localStorage.setItem('skald.activeLibraryId', id);
     setCurrentLibraryId(id);
     setLibraryLoadingRaw(true);
+    // Leaving the combined shelf (or reloading it) invalidates any previous
+    // partial-coverage notice; a partial combined load below re-sets it.
+    setAllLibrariesPartial(null);
     try {
       // Route by source: local libraries read the catalog; ABS libraries fetch
       // over HTTP. Look the library up in the already-loaded list.
       const lib = id === ALL_LIBRARIES_ID ? allLibrariesShelf(libraries) : libraries.find(l => l.id === id);
       const items = id === ALL_LIBRARIES_ID
-        ? await loadAllLibraryItems(libraries, serverUrl)
+        ? applyAllLibrariesResult(await loadAllLibraryItems(libraries, serverUrl))
         : lib ? await loadItemsForLibrary(lib, serverUrl) : [];
       setLibraryRaw(patchLibraryItems(items));
       setIsOffline(false);
@@ -571,6 +589,21 @@ export function useOnyxState(): OnyxState {
   // True when the library loaded from the disk cache (server unreachable).
   // Reset to false on every successful server fetch.
   const [isOffline, setIsOffline] = useState(false);
+  // Non-null when the last All Libraries load lost at least one source. Drives
+  // the "Showing N of M libraries" notice on the combined shelf (review H1);
+  // cleared on a fully-successful combined load, a library switch, or dismissal.
+  const [allLibrariesPartial, setAllLibrariesPartial] = useState<AllLibrariesPartial | null>(null);
+  const dismissAllLibrariesPartial = useCallback(() => setAllLibrariesPartial(null), []);
+  // Record the coverage of a combined load and unwrap its items. Setting state
+  // here (rather than in loadAllLibraryItems) keeps the loader a plain function.
+  const applyAllLibrariesResult = useCallback((result: AllLibrariesLoadResult): LibraryItem[] => {
+    setAllLibrariesPartial(result.failedSources.length ? {
+      failedNames: result.failedSources.map(l => l.name),
+      loaded: result.totalSources - result.failedSources.length,
+      total: result.totalSources,
+    } : null);
+    return result.items;
+  }, []);
   // Mirror for once-mounted socket listeners that need the current value without
   // re-subscribing (avoids a stale closure when deciding whether to resync).
   const isOfflineRef = useRef(isOffline);
@@ -691,7 +724,7 @@ export function useOnyxState(): OnyxState {
       setCurrentLibraryId(activeLib.id);
       try {
         const items = activeLib.id === ALL_LIBRARIES_ID
-          ? await loadAllLibraryItems(allLibs, serverUrl)
+          ? applyAllLibrariesResult(await loadAllLibraryItems(allLibs, serverUrl))
           : await loadItemsForLibrary(activeLib, serverUrl);
         if (cancelled) return;
         setLibraryRaw(patchLibraryItems(items));
@@ -1505,7 +1538,7 @@ export function useOnyxState(): OnyxState {
     localMode, setLocalMode,
     localDisplayName, setLocalDisplayName,
     onboarded, setOnboarded,
-    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
+    library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, allLibrariesPartial, dismissAllLibrariesPartial, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
     isLocalPlayback, setIsLocalPlayback,
     serverSettings, setServerSettings,

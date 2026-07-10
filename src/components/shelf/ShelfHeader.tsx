@@ -288,6 +288,42 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
 
       </div>
 
+      {/* Partial-coverage notice (review H1) — the combined shelf must never
+          present a partial composite as complete. Amber matches the titlebar
+          OFFLINE pill family. Retry re-runs the combined load; dismiss hides
+          the notice until the next partial load. */}
+      {isAllLibraries && st.allLibrariesPartial && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginTop: 10,
+          padding: '6px 6px 6px 12px', borderRadius: 8, width: 'fit-content',
+          border: '1px solid rgba(212,131,74,0.4)', background: 'rgba(212,131,74,0.08)',
+          fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+          color: '#d4834a',
+        }}>
+          <span>
+            Showing {st.allLibrariesPartial.loaded} of {st.allLibrariesPartial.total} libraries
+            {' — '}{st.allLibrariesPartial.failedNames.join(', ')} unavailable
+          </span>
+          <button
+            onClick={() => { void st.setActiveLibrary(st.currentLibraryId); }}
+            style={{
+              padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+              background: 'rgba(212,131,74,0.14)', border: '1px solid rgba(212,131,74,0.4)',
+              color: '#d4834a', fontFamily: MONO, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}
+          >Retry</button>
+          <button
+            onClick={() => st.dismissAllLibrariesPartial()}
+            aria-label="Dismiss"
+            style={{
+              padding: '3px 8px', borderRadius: 999, cursor: 'pointer',
+              background: 'transparent', border: '1px solid transparent',
+              color: '#d4834a', fontSize: 13, lineHeight: 1,
+            }}
+          >×</button>
+        </div>
+      )}
+
       {/* Second row — shown below 900px */}
       {!pillsInline && (
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 10 }}>
