@@ -108,7 +108,7 @@ pub async fn login_with_api_key(
 ) -> Result<ApiKeyLoginResult, String> {
     let client = crate::api::bounded_client();
     let response = client
-        .post(format!("{}/api/authorize", server_url.trim_end_matches('/')))
+        .get(format!("{}/api/me", server_url.trim_end_matches('/')))
         .header("Authorization", format!("Bearer {}", api_key))
         .send()
         .await
@@ -130,22 +130,27 @@ pub async fn login_with_api_key(
 
     // Extract the user session JWT from the token field — socket auth needs
     // this JWT, not the raw API key the user entered.
-    let token = body_json["accessToken"]
-        .as_str()
-        .filter(|t| !t.is_empty())
-        .or_else(|| body_json["user"]["token"].as_str().filter(|t| !t.is_empty()))
-        .ok_or_else(|| "API key authorization succeeded but no session token was returned".to_string())?
-        .to_string();
-
     // Deserialize User fields — extra fields (mediaProgress, bookmarks, etc.)
     // are silently ignored by serde.
-    let user: models::User = serde_json::from_value(body_json["user"].clone())
+    let user: models::User = serde_json::from_value(body_json)
         .map_err(|e| format!("Failed to parse user: {e}"))?;
 
-    let server_settings = body_json.get("serverSettings")
-        .and_then(|ss| serde_json::from_value::<ServerSettings>(ss.clone()).ok());
+    let server_settings: Option<ServerSettings> = {
+        let auth_resp = crate::api::bounded_client()
+        .get(format!("{}/api/me", server_url.trim_end_matches('/')))
+            .header("Authorization", format!("Bearer {api_key}"))
+            .send()
+            .await;
+        match auth_resp {
+            Ok(r) if r.status().is_success() => {
+                let auth_json: serde_json::Value = r.json().await.unwrap_or(serde_json::Value::Null);
+                auth_json.get("serverSettings").and_then(|ss| serde_json::from_value::<ServerSettings>(ss.clone()).ok())
+            }
+            _ => None,
+        }
+    };
 
-    Ok(ApiKeyLoginResult { user, token, server_settings })
+    Ok(ApiKeyLoginResult { user, token: api_key, server_settings })
 }
 
 /// Clears the stored keyring token so the next launch forces a fresh login.
