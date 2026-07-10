@@ -35,20 +35,13 @@ import MiniPlayer from '../components/player/MiniPlayer';
 // without touching session state.
 import { playBook, playEpisode, togglePlayback, resumePlayback } from '../api/playbook';
 import { skipSeconds } from '../lib/playbackPrefs';
+// Presentational leaves split out per the God-File Decomposition roadmap
+// (review L3/L7) — pure moves, same behavior.
+import { railRow } from '../components/player/RailRow';
+import { SLEEP_OPTIONS, parseSleepDefault, type SleepMode } from '../components/player/sleep';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
-
-type SleepMode = null | number | 'chapter';
-
-const SLEEP_OPTIONS: { id: SleepMode; label: string }[] = [
-  { id: null,      label: 'Off'            },
-  { id: 5,         label: '5 minutes'      },
-  { id: 15,        label: '15 minutes'     },
-  { id: 30,        label: '30 minutes'     },
-  { id: 60,        label: '1 hour'         },
-  { id: 'chapter', label: 'End of chapter' },
-];
 
 const transportBtn = (): CSSProperties => ({
   width: 44, height: 44, borderRadius: 10,
@@ -418,13 +411,6 @@ export default function Player({ st }: PlayerProps) {
     return () => { cancelled = true; };
   }, [st.currentBookId, st.enableOpenLibrary]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function parseSleepDefault(raw: string): SleepMode {
-    if (raw === '15m') return 15;
-    if (raw === '30m') return 30;
-    if (raw === '1h') return 60;
-    if (raw === 'End of chapter') return 'chapter';
-    return null;
-  }
   const [sleepMode, setSleepMode] = useState<SleepMode>(parseSleepDefault(sleepDefault));
   const [sleepRemain, setSleepRemain] = useState(0);
   const [sleepOpen, setSleepOpen] = useState(false);
@@ -717,23 +703,6 @@ export default function Player({ st }: PlayerProps) {
   // Saved bookmarks belong to the focused book (displayChapters); local stop
   // points were recorded against the playing book (chapters).
   const chapterAtPos = (pos: number, chs: typeof displayChapters) => (chs.length ? chapterAt(chs, pos).chapter : null);
-  // One row of the timeline rail: a connecting line + dot, then time/label/meta.
-  const railRow = (opts: { keyId: string; time: string; label: string; italic: boolean; meta?: string; accent: boolean; isLast: boolean; onClick: () => void }) => (
-    <button key={opts.keyId} onClick={opts.onClick} style={{ display: 'flex', gap: 14, width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit', padding: 0 }}>
-      {/* Rail: vertical connector (omitted on the last row) + the dot */}
-      <div style={{ position: 'relative', width: 14, flexShrink: 0, alignSelf: 'stretch', display: 'flex', justifyContent: 'center' }}>
-        {!opts.isLast && <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)', top: 14, bottom: -2, width: 1, background: 'var(--onyx-line)' }} />}
-        <div style={{ position: 'absolute', top: 4, width: 9, height: 9, borderRadius: '50%', background: opts.accent ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', boxShadow: opts.accent ? '0 0 8px var(--onyx-accent)' : 'none' }} />
-      </div>
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0, paddingBottom: 18 }}>
-        <div style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, color: 'var(--onyx-accent)' }}>{opts.time}</div>
-        <div style={{ fontFamily: SERIF, fontStyle: opts.italic ? 'italic' : 'normal', fontSize: 14, color: 'var(--onyx-text)', lineHeight: 1.3, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis' }}>{opts.label}</div>
-        {opts.meta && <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em', marginTop: 5 }}>{opts.meta}</div>}
-      </div>
-    </button>
-  );
-
   return (
     <div ref={containerRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '12px 32px 24px', minHeight: 0, width: '100%', maxWidth: '100%', overflow: 'hidden', position: 'relative' }}>
 
