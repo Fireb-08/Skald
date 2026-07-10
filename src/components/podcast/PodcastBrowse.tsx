@@ -64,6 +64,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   const [downloadedMap, setDownloadedMap] = useState<Map<string, RecentEpisode>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [genre, setGenre] = useState<string | null>(null);
+  const [episodeSort, setEpisodeSort] = useState<'newest' | 'oldest' | 'title'>(() => (localStorage.getItem('onyx.podcast.episodeSort') as 'newest' | 'oldest' | 'title') ?? 'newest');
   const [genreOpen, setGenreOpen] = useState(false);
   // Right-click context menu + the modals its actions open.
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: LibraryItem } | null>(null);
@@ -205,7 +206,9 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
         const it = st.library.find(i => i.id === ep.libraryItemId);
         return it ? podcastGenres(it).includes(genre) : false;
       })
-      .sort((a, b) => episodeTime(b.ep) - episodeTime(a.ep))
+      .sort((a, b) => episodeSort === 'title'
+        ? (a.ep.title ?? '').localeCompare(b.ep.title ?? '')
+        : episodeSort === 'oldest' ? episodeTime(a.ep) - episodeTime(b.ep) : episodeTime(b.ep) - episodeTime(a.ep))
       .slice(0, 60);
   })();
 
@@ -373,6 +376,11 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
             open podcast →
           </button>
         )}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+          {(['newest', 'oldest', 'title'] as const).map(sort => (
+            <button key={sort} onClick={() => { setEpisodeSort(sort); localStorage.setItem('onyx.podcast.episodeSort', sort); }} style={{ padding: '4px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: episodeSort === sort ? 'var(--onyx-accent-dim)' : 'transparent', color: episodeSort === sort ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)', cursor: 'pointer', fontFamily: MONO, fontSize: 9, textTransform: 'uppercase' }}>{sort}</button>
+          ))}
+        </div>
       </div>
 
       {/* Episode feed */}
