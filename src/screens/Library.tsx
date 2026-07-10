@@ -17,6 +17,7 @@ import { PublishersView } from '../components/shelf/tabs';
 import PodcastBrowse from '../components/podcast/PodcastBrowse';
 import MiniPlayer from '../components/player/MiniPlayer';
 import { prefetchReviews } from '../api/reviewCache';
+import { shelfTabForSource } from '../lib/shelfTabs';
 
 export interface LibraryProps {
   st: OnyxState;
@@ -24,6 +25,8 @@ export interface LibraryProps {
 
 export default function Library({ st }: LibraryProps) {
   const isPodcast = st.activeLibrary?.mediaType === 'podcast';
+  const isLocalLibrary = st.activeLibrary?.source === 'local';
+  const visibleShelfTab = shelfTabForSource(st.shelfTab, isLocalLibrary);
 
   useEffect(() => {
     // Open Library review enrichment is book-specific — skip it for podcasts.
@@ -95,14 +98,14 @@ export default function Library({ st }: LibraryProps) {
         <ShelfHeader st={st} />
 
         {/* Shelf body — routed by shelfTab */}
-        {st.shelfTab === 'library' && <LibraryShelf st={st} />}
-        {st.shelfTab === 'series'      && <SeriesView      st={st} inline />}
-        {st.shelfTab === 'authors'     && <AuthorsView     st={st} inline />}
-        {st.shelfTab === 'narrators'   && <NarratorsView   st={st} inline />}
-        {st.shelfTab === 'genres'      && <GenresView      st={st} inline />}
-        {st.shelfTab === 'publishers'  && <PublishersView  st={st} inline />}
-        {st.shelfTab === 'collections' && <CollectionsView st={st} inline />}
-        {st.shelfTab === 'playlists'   && <PlaylistsView   st={st} inline />}
+        {visibleShelfTab === 'library'     && <LibraryShelf    st={st} />}
+        {visibleShelfTab === 'series'      && <SeriesView      st={st} inline />}
+        {visibleShelfTab === 'authors'     && <AuthorsView     st={st} inline />}
+        {visibleShelfTab === 'narrators'   && <NarratorsView   st={st} inline />}
+        {visibleShelfTab === 'genres'      && <GenresView      st={st} inline />}
+        {visibleShelfTab === 'publishers'  && <PublishersView  st={st} inline />}
+        {visibleShelfTab === 'collections' && <CollectionsView st={st} inline />}
+        {visibleShelfTab === 'playlists'   && <PlaylistsView   st={st} inline />}
       </div>
     </div>
   );

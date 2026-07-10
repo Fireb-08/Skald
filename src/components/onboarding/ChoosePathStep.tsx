@@ -46,7 +46,7 @@ function Glyph({ kind }: { kind: OnboardingPath }) {
 const CARDS: { id: OnboardingPath; title: string; blurb: string }[] = [
   { id: 'abs',   title: 'Audiobookshelf',  blurb: 'Connect to your ABS server to stream, sync progress, and download for offline listening.' },
   { id: 'local', title: 'Local libraries', blurb: 'Build libraries from audiobooks already on this PC. No server, no account — Skald reads the files directly.' },
-  { id: 'both',  title: 'Both',            blurb: 'A server for the main collection, plus local libraries for anything else. Skald merges them in one shelf.' },
+  { id: 'both',  title: 'Both',            blurb: 'A server for the main collection, plus local libraries for anything else. Skald keeps them side by side in one library switcher.' },
 ];
 
 export default function ChoosePathStep({ value, onChoose }: ChoosePathStepProps) {
