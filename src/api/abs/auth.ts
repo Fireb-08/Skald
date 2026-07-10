@@ -38,7 +38,7 @@ export function getMe(serverUrl: string): Promise<MeResponse> {
 // These four functions call the Rust admin commands. They are only invoked
 // from AccountSection when the logged-in user is admin or root.
 
-/** Result of an API key login — user profile plus the session JWT from /api/me.
+/** Result of an API key login — user profile plus the session JWT from /api/authorize.
  *  The JWT (token) is used for HTTP and socket auth; the raw API key is not stored. */
 export interface ApiKeyLoginResult {
   user: User;
@@ -46,7 +46,7 @@ export interface ApiKeyLoginResult {
   serverSettings: ServerSettings | null;
 }
 
-/** Validates an API key via GET /api/me and returns the user profile + session JWT.
+/** Exchanges an API key through POST /api/authorize for a session JWT.
  *  Callers should store result.token (the JWT), not the raw API key. */
 export function loginWithApiKey(serverUrl: string, apiKey: string): Promise<ApiKeyLoginResult> {
   return invoke('login_with_api_key', { serverUrl, apiKey });
