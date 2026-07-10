@@ -465,21 +465,29 @@ export default function Player({ st }: PlayerProps) {
   const activeChapterIdx = isFocusedDifferent ? focusedChIdx : chaptersLocked ? -1 : chIdx;
   const chapterListRef = useRef<HTMLDivElement>(null);
   const activeChapterRef = useRef<HTMLButtonElement>(null);
+  const [chapterListDiverged, setChapterListDiverged] = useState(false);
+  const chapterListManualRef = useRef(false);
+  const centerActiveChapter = (behavior: ScrollBehavior = 'smooth') => {
+    const container = chapterListRef.current;
+    const el = activeChapterRef.current;
+    if (!container || !el) return;
+    const cRect = container.getBoundingClientRect();
+    const eRect = el.getBoundingClientRect();
+    const offsetWithin = eRect.top - cRect.top + container.scrollTop;
+    const target = offsetWithin - container.clientHeight / 2 + el.clientHeight / 2;
+    container.scrollTo({ top: Math.max(0, target), behavior });
+  };
   // Keep the active chapter centred in its scroll container as progress advances
   // (and when the panel first becomes visible). Scrolls only the list container,
   // never the window — re-runs only when the chapter index changes, not per tick.
   useEffect(() => {
     const chaptersVisible = !panesStacked || activePane === 'chapters';
     if (!chaptersVisible || activeChapterIdx < 0) return;
-    const container = chapterListRef.current;
-    const el = activeChapterRef.current;
-    if (!container || !el) return;
-    const cRect = container.getBoundingClientRect();
-    const eRect = el.getBoundingClientRect();
-    // El top relative to the container's scrollable content, then centre it.
-    const offsetWithin = eRect.top - cRect.top + container.scrollTop;
-    const target = offsetWithin - container.clientHeight / 2 + el.clientHeight / 2;
-    container.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    if (chapterListManualRef.current) {
+      setChapterListDiverged(true);
+      return;
+    }
+    centerActiveChapter();
   }, [activeChapterIdx, activePane, panesStacked]);
 
   const waveformRef = useRef<HTMLDivElement>(null);
@@ -1222,7 +1230,10 @@ export default function Player({ st }: PlayerProps) {
                   Press play to begin
                 </div>
               )}
-              <div ref={chapterListRef} style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
+              {chapterListDiverged && (
+                <button onClick={() => { chapterListManualRef.current = false; setChapterListDiverged(false); centerActiveChapter(); }} style={{ alignSelf: 'flex-start', marginBottom: 8, padding: '5px 9px', borderRadius: 6, border: '1px solid var(--onyx-accent-edge)', background: 'var(--onyx-accent-dim)', color: 'var(--onyx-accent)', cursor: 'pointer', fontFamily: MONO, fontSize: 9.5 }}>Return to current chapter</button>
+              )}
+              <div ref={chapterListRef} onWheel={() => { chapterListManualRef.current = true; }} onPointerDown={() => { chapterListManualRef.current = true; }} style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {displayChapters.map((c, i) => {
                   // Use focusedChIdx for focused non-playing book, -1 (no highlight)
                   // when not yet started, or live chIdx during active playback.
