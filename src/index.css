@@ -106,6 +106,15 @@ input:focus-visible {
   border-color: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.5) !important;
 }
 
+/* Item menus are visually restrained until a tile/row is explored, but
+   keyboard focus reveals them just as reliably as pointer hover. */
+.onyx-item-actions { opacity: 0; transition: opacity 0.15s; }
+.onyx-row:hover > .onyx-item-actions,
+.onyx-row:focus-within > .onyx-item-actions,
+.onyx-item-wrap:hover > .onyx-item-actions,
+.onyx-item-wrap:focus-within > .onyx-item-actions,
+.onyx-item-actions:focus-visible { opacity: 1; }
+
 ::selection {
   background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35);
 }

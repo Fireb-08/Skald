@@ -136,11 +136,12 @@ function ItemSourceBadge({ item }: { item: LibraryItem }) {
   );
 }
 
-function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
+function ShelfList({ books, st, openBook, onContextMenu, onActionMenu, scrollRef }: {
   books: LibraryItem[];
   st: OnyxState;
   openBook: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, item: LibraryItem) => void;
+  onActionMenu: (trigger: HTMLElement, item: LibraryItem) => void;
   // The shared scroll container, provided by the parent. The virtualizer must
   // observe the real scrolling element rather than a wrapper of its own.
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -235,6 +236,15 @@ function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
                 cursor: 'pointer',
               }}
             >
+              <button
+                type="button"
+                className="onyx-item-actions"
+                aria-label={`Actions for ${bookTitle(b)}`}
+                aria-haspopup="menu"
+                title={`Actions for ${bookTitle(b)}`}
+                onClick={(event) => { event.stopPropagation(); onActionMenu(event.currentTarget, b); }}
+                style={{ position: 'absolute', top: '50%', right: 8, transform: 'translateY(-50%)', zIndex: 4, width: 28, height: 28, borderRadius: 6, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel2)', color: 'var(--onyx-text)', cursor: 'pointer', fontFamily: MONO, lineHeight: 1 }}
+              >•••</button>
               {/* Cover */}
               <div style={{ position: 'relative', display: 'inline-block', justifySelf: 'start' }}>
                 <Cover item={b} size={40} serverUrl={st.serverUrl} />
@@ -304,13 +314,14 @@ function ShelfList({ books, st, openBook, onContextMenu, scrollRef }: {
   );
 }
 
-function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scrollRef }: {
+function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onActionMenu, scrollRef }: {
   books: LibraryItem[];
   st: OnyxState;
   coverW: number;
   selectedId: string | null;
   openBook: (id: string) => void;
   onContextMenu: (e: React.MouseEvent, item: LibraryItem) => void;
+  onActionMenu: (trigger: HTMLElement, item: LibraryItem) => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
   // Virtualization needs an explicit column count up front. CSS `auto-fill`
@@ -386,7 +397,8 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
               // Cached once per tile — used for both badge presence and server-deleted variant.
               const dlRecord = st.downloads.find(d => d.itemId === b.id);
               return (
-                <button key={b.id} onClick={() => openBook(b.id)} onContextMenu={e => onContextMenu(e, b)} className="onyx-tile" style={{ position: 'relative', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }}>
+                <div key={b.id} className="onyx-item-wrap" style={{ position: 'relative', minWidth: 0 }}>
+                <button onClick={() => openBook(b.id)} onContextMenu={e => onContextMenu(e, b)} className="onyx-tile" style={{ width: '100%', position: 'relative', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }}>
                   <div style={{
                     position: 'relative',
                     display: 'inline-block',
@@ -430,6 +442,16 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, scr
                     {st.activeLibrary?.source === 'all' && <ItemSourceBadge item={b} />}
                   </div>
                 </button>
+                <button
+                  type="button"
+                  className="onyx-item-actions"
+                  aria-label={`Actions for ${bookTitle(b)}`}
+                  aria-haspopup="menu"
+                  title={`Actions for ${bookTitle(b)}`}
+                  onClick={(event) => onActionMenu(event.currentTarget, b)}
+                  style={{ position: 'absolute', top: 6, right: 6, zIndex: 4, width: 28, height: 28, borderRadius: 6, border: '1px solid var(--onyx-glass-edge)', background: 'rgba(12,12,15,0.9)', color: 'var(--onyx-text)', cursor: 'pointer', fontFamily: MONO, lineHeight: 1 }}
+                >•••</button>
+                </div>
               );
             })}
           </div>
@@ -603,6 +625,13 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     }, 150);
   };
 
+  const onActionMenu = (trigger: HTMLElement, item: LibraryItem) => {
+    const rect = trigger.getBoundingClientRect();
+    setSelectedId(item.id);
+    st.setFocusedBookId(item.id);
+    setContextMenu({ x: rect.right, y: rect.bottom + 4, item });
+  };
+
   const openBook = (id: string) => {
     if (selectedId === id) {
       st.setScreen('player');
@@ -639,9 +668,9 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
             Loading series…
           </div>
         ) : st.libraryView === 'list' ? (
-          <ShelfList key={shelfKey} books={shelfBooks} st={st} openBook={openBook} onContextMenu={onContextMenu} scrollRef={scrollRef} />
+          <ShelfList key={shelfKey} books={shelfBooks} st={st} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
         ) : (
-          <ShelfGrid key={shelfKey} books={shelfBooks} st={st} coverW={coverW} selectedId={selectedId} openBook={openBook} onContextMenu={onContextMenu} scrollRef={scrollRef} />
+          <ShelfGrid key={shelfKey} books={shelfBooks} st={st} coverW={coverW} selectedId={selectedId} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
         )}
       </div>
       {contextMenu && (
