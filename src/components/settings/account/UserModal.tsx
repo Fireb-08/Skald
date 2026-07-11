@@ -4,6 +4,9 @@
 import { useState } from 'react';
 import { SERIF, MONO, Pill } from '../shared';
 import type { AdminUser, UserPermissions } from '../../../api/abs';
+import { useModalFocus } from '../../../hooks/useModalFocus';
+import { errorMessage } from '../../../lib/presentError';
+import { log } from '../../../lib/log';
 
 interface UserModalProps {
   /** "Add User" or "Edit User" — shown as the modal title. */
@@ -79,6 +82,7 @@ export default function UserModal({
   );
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalFocus<HTMLFormElement>(onCancel, !pending);
 
   // Email + the account-enable flag (both add and edit).
   const [email, setEmail] = useState(editUser?.email ?? '');
@@ -131,7 +135,8 @@ export default function UserModal({
       };
       await onSubmit(username.trim(), password, userType, email.trim(), enable, permissions);
     } catch (err) {
-      setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'An error occurred.');
+      log.warn('auth', 'user account mutation failed', { isEdit, err: String(err) });
+      setError(errorMessage(err, { operation: 'save' }));
       setPending(false);
     }
   };
@@ -186,6 +191,10 @@ export default function UserModal({
     >
       {/* Glass panel — same visual spec as ConfirmDialog */}
       <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="user-modal-title"
         onSubmit={handleSubmit}
         style={{
           width: 560,
@@ -205,7 +214,7 @@ export default function UserModal({
         }}
       >
         {/* Modal title */}
-        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)' }}>
+        <div id="user-modal-title" style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)' }}>
           {title}
         </div>
 
