@@ -103,6 +103,7 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
         <button
           onClick={returnToNowPlaying}
+          aria-label={`Return to now playing: ${title}`}
           title="Return to now playing"
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', flexShrink: 0, lineHeight: 0 }}
         >
@@ -125,7 +126,26 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
 
       {/* Progress ticks — flat, equal-height bars (audiobooks aren't music, so a
           real waveform adds noise); click to seek; playhead line at the position. */}
-      <div onClick={onSeek} style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer' }} title="Seek">
+      <div
+        onClick={onSeek}
+        onKeyDown={event => {
+          if (st.bookSecs <= 0) return;
+          const step = 10;
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') { event.preventDefault(); seekAudio(Math.max(0, st.position - step)).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
+          else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') { event.preventDefault(); seekAudio(Math.min(st.bookSecs, st.position + step)).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
+          else if (event.key === 'Home') { event.preventDefault(); seekAudio(0).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
+          else if (event.key === 'End') { event.preventDefault(); seekAudio(st.bookSecs).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
+        }}
+        role="slider"
+        tabIndex={0}
+        aria-label={`Seek in ${title}`}
+        aria-valuemin={0}
+        aria-valuemax={Math.max(0, st.bookSecs)}
+        aria-valuenow={Math.max(0, Math.min(st.position, st.bookSecs))}
+        aria-valuetext={`${fmtTime(st.position)} of ${fmtTime(st.bookSecs)}`}
+        style={{ position: 'relative', height: 22, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer' }}
+        title="Seek"
+      >
         {Array.from({ length: BARS }).map((_, i) => (
           <div key={i} style={{
             flex: 1, minWidth: 0, height: '100%', borderRadius: 1,
@@ -144,6 +164,7 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
         </div>
         <button
           onClick={() => togglePlayback(st)} // togglePlayback syncs st.playing immediately
+          aria-label={playing ? 'Pause' : 'Play'}
           style={{
             width: 40, height: 40, borderRadius: 20, flexShrink: 0,
             background: 'var(--onyx-accent)', border: 'none',
