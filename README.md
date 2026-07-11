@@ -10,9 +10,27 @@ Built with **Tauri 2 + React 19 + TypeScript + Rust**, with audio handled native
 
 ---
 
-## What's New in Version 1.0.3
+## What's New
 
-The 1.0.3 release focuses on rounding out the local-only listening experience and improving the Microsoft Store package. 
+A summary of every release since 1.0. For the full commit-level changelog, see [`CHANGELOG.md`](CHANGELOG.md).
+
+### Version 1.2.0
+
+The biggest release since 1.0, with work spread across multiple libraries, accessibility, and reliability.
+
+- **Combined "All Libraries" shelf:** Your server libraries and local on-disk libraries now merge into one browsable view, with client-side Series / Authors / Narrators / Collections / Playlists tabs, a unified local-import workflow, and a clear retry notice when a partial load fails.
+- **Accessibility:** Broad keyboard support across the app, a fully keyboard-accessible mini player, consistent focus trapping and restoration for every modal, and screen-reader announcements for toast outcomes.
+- **Playback:** Manual chapter browsing is respected, more actions give visible feedback, and background sync/tick failures are now surfaced instead of dying silently.
+- **Downloads & activity:** Richer download history, retry for failed downloads, a disk-capacity preflight, inline podcast download progress, and offline-library freshness indicators.
+- **Podcasts & audio:** Per-episode right-click menu (play / finish / add-to-playlist / delete), episode sorting, and saveable custom equalizer profiles.
+- **Sign-in & settings:** Friendlier authentication errors, settings navigation search, custom accent colors, preserved shelf search and scroll position, retained server address after logout, and a warning for unencrypted (HTTP) server connections.
+- **Under the hood:** An automated test suite (Phase 1), all diagnostics moved to structured logging, a clippy lint gate, large module splits for maintainability, and security-review fixes.
+
+### Version 1.1.0
+
+- **Server Upload:** Full parity with the Audiobookshelf web Upload page. Streamed multipart uploads with live progress and cancel, for users with the `upload` permission.
+
+### Version 1.0.3
 
 - **Local Chapter Write-Back:** You can now edit chapters for single-file local audiobooks directly in the metadata editor.
 - **Local-Only Polish:** We hid server-specific settings panes for users running without a server, fixed the greeting pane loading hang, and added an editable local display name.
@@ -28,7 +46,7 @@ The 1.0.3 release focuses on rounding out the local-only listening experience an
 - **Offline Mode:** Download books for offline playback. Your progress is saved locally and flushes back to the server the next time you connect.
 - **Local Libraries (No Server):** Scan folders on your disk to build a catalog organized by Author, Series, and Title. The app matches metadata against Google Books, iTunes, or Open Library. You can play these files with catalog-backed progress, resume, and bookmarks. A background watcher auto-imports new files dropped in your staging folder.
 - **Local Podcasts (No Server):** Subscribe to feeds via RSS or OPML. You can browse and download episodes, track your progress per episode, and use the auto-download scheduler.
-- **Admin Tools:** Manage your library, server settings, notifications (Apprise), backups, and scheduled tasks. Admins also get access to a server log viewer, user management, an item metadata and chapter editor, cover management, custom metadata providers, and per-item public share links or RSS feeds.
+- **Admin Tools:** Manage your library, server settings, notifications (Apprise), backups, and scheduled tasks. Admins also get access to a server log viewer, user management, an item metadata and chapter editor, cover management, custom metadata providers, per-item public share links or RSS feeds, per-user access-control editing, and streamed server uploads with progress and cancel.
 - **Personalisation:** Choose your theme, accent color, and UI scale. You can also customize your keyboard shortcuts and enrich your library with Open Library reviews.
 
 ---
