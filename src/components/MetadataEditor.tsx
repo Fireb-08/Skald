@@ -6,6 +6,8 @@ import { bookAuthor, bookNarrator } from '../state/onyx';
 import { updateMedia, updateChapters, fetchItem, applyLocalMetadata, scanFolder, setLocalChapters } from '../api/abs';
 import type { LocalMetadataFields } from '../api/abs';
 import { log } from '../lib/log';
+import { useModalFocus } from '../hooks/useModalFocus';
+import { errorMessage } from '../lib/presentError';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -148,6 +150,7 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !saving);
 
   // Details form fields.
   const [title, setTitle] = useState('');
@@ -261,7 +264,7 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
         setDuration(full.media.duration ?? 0);
         setLoading(false);
       })
-      .catch(e => { if (!cancelled) { setError(String(e)); setLoading(false); } });
+      .catch(e => { if (!cancelled) { log.warn('metadata', 'metadata editor load failed', { itemId: item.id, err: String(e) }); setError(errorMessage(e, { operation: 'refresh' })); setLoading(false); } });
     return () => { cancelled = true; };
   }, [serverUrl, item.id]);
 
@@ -319,7 +322,8 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
       onRefresh();
       onClose();
     } catch (e) {
-      setError(String(e));
+      log.warn('metadata', 'metadata details save failed', { itemId: item.id, err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
     } finally {
       setSaving(false);
     }
@@ -355,7 +359,8 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
       onRefresh();
       onClose();
     } catch (e) {
-      setError(String(e));
+      log.warn('metadata', 'metadata chapters save failed', { itemId: item.id, err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
     } finally {
       setSaving(false);
     }
@@ -370,7 +375,7 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
       }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="metadata-editor-title" style={{
         width: '100%', maxWidth: 720, maxHeight: '90vh',
         background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)',
         borderRadius: 16,
@@ -380,7 +385,7 @@ export default function MetadataEditor({ item, serverUrl, onClose, onComplete, o
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '22px 22px 0 24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Edit Metadata</div>
+            <div id="metadata-editor-title" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Edit Metadata</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {item.media.metadata.title ?? item.id}
             </div>
