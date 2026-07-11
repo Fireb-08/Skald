@@ -13,6 +13,7 @@ import {
 import type { MetadataResult, LocalMetadataFields, ScannedItem } from '../api/abs';
 import { bustCover } from '../lib/coverBust';
 import { log } from '../lib/log';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -597,6 +598,7 @@ export default function MatchModal({ item, serverUrl, adapter: adapterProp, onCl
   const [selected, setSelected]       = useState<SearchResult | null>(null);
   const [screen, setScreen]           = useState<'search' | 'review'>('search');
   const [submitting, setSubmitting]   = useState(false);
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !submitting);
   const [currentCoverUrl, setCurrentCoverUrl] = useState<string | null>(null);
 
   // Fetch the current item's cover via the adapter (server get_cover or local
@@ -791,7 +793,7 @@ export default function MatchModal({ item, serverUrl, adapter: adapterProp, onCl
           </span>
         </div>
       )}
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={screen === 'search' ? 'Match book' : 'Review match'} style={{
         width: '100%', maxWidth: 720, maxHeight: '90vh',
         background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)',
         borderRadius: 14, boxShadow: '0 32px 80px rgba(0,0,0,0.7)',

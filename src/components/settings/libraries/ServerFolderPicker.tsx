@@ -5,6 +5,9 @@ import { MONO, SERIF } from '../shared';
 import { browseServerFilesystem } from '../../../api/abs';
 import type { FsEntry } from '../../../api/abs';
 import { SmallBtn } from './widgets';
+import { useModalFocus } from '../../../hooks/useModalFocus';
+import { errorMessage } from '../../../lib/presentError';
+import { log } from '../../../lib/log';
 
 export interface ServerFolderPickerProps {
   serverUrl: string;
@@ -19,6 +22,7 @@ export default function ServerFolderPicker({ serverUrl, initial, onSelect, onCan
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalFocus<HTMLDivElement>(onCancel, !loading);
 
   // Fetch whenever the path changes.
   useEffect(() => { void navigate(currentPath); }, [currentPath]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -32,7 +36,8 @@ export default function ServerFolderPicker({ serverUrl, initial, onSelect, onCan
       setCurrentPath(path);
       setEntries(result.directories.slice().sort((a, b) => a.dirname.localeCompare(b.dirname)));
     } catch (e) {
-      setError(typeof e === 'string' ? e : (e as Error)?.message ?? 'Failed to read directory.');
+      log.warn('library', 'server folder browse failed', { err: String(e) });
+      setError(errorMessage(e, { operation: 'refresh' }));
     } finally {
       setLoading(false);
     }
@@ -69,7 +74,7 @@ export default function ServerFolderPicker({ serverUrl, initial, onSelect, onCan
       }}
       onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="server-folder-title" style={{
         width: 540, maxWidth: '92vw', maxHeight: '78vh',
         display: 'flex', flexDirection: 'column',
         background: 'var(--onyx-panel2)',
@@ -86,7 +91,7 @@ export default function ServerFolderPicker({ serverUrl, initial, onSelect, onCan
           borderBottom: '1px solid var(--onyx-line)',
           flexShrink: 0,
         }}>
-          <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 10 }}>
+          <div id="server-folder-title" style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 10 }}>
             Select Server Folder
           </div>
 

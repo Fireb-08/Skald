@@ -3,6 +3,9 @@ import type { CSSProperties } from 'react';
 import ReactDOM from 'react-dom';
 import { fetchItem } from '../../api/abs';
 import type { LibraryFile } from '../../api/abs';
+import { useModalFocus } from '../../hooks/useModalFocus';
+import { errorMessage } from '../../lib/presentError';
+import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -70,11 +73,12 @@ export default function FilesModal({ bookId, serverUrl, onClose }: FilesModalPro
   const [files, setFiles] = useState<LibraryFile[] | null>(null);
   const [error, setError] = useState('');
   const [fullPath, setFullPath] = useState(false);
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose);
 
   useEffect(() => {
     fetchItem(serverUrl, bookId)
       .then(item => setFiles(item.libraryFiles ?? []))
-      .catch(e => setError(String(e)));
+      .catch(e => { log.warn('library', 'library files load failed', { bookId, err: String(e) }); setError(errorMessage(e, { operation: 'refresh' })); });
   }, [serverUrl, bookId]);
 
   const modal = (
@@ -86,7 +90,7 @@ export default function FilesModal({ bookId, serverUrl, onClose }: FilesModalPro
       }}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="library-files-title" style={{
         width: 620,
         maxWidth: '90vw',
         background: 'var(--onyx-panel2)',
@@ -99,7 +103,7 @@ export default function FilesModal({ bookId, serverUrl, onClose }: FilesModalPro
       }}>
         {/* Header */}
         <div style={{ padding: '18px 24px 14px', borderBottom: '1px solid var(--onyx-line)', display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>
+          <div id="library-files-title" style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>
             Library Files
           </div>
           {files !== null && (
