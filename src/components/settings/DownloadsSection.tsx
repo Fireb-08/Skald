@@ -92,6 +92,7 @@ export default function DownloadsSection({ st }: Props) {
   const [relocating, setRelocating] = useState<'downloads' | 'cache' | null>(null);
   // Local copy of the registry, kept in sync with Rust on mount and on events.
   const [records, setRecords] = useState<DownloadRecord[]>([]);
+  const [historySort, setHistorySort] = useState<'newest' | 'oldest' | 'largest'>(() => (localStorage.getItem('onyx.downloads.historySort') as 'newest' | 'oldest' | 'largest') ?? 'newest');
   // Record awaiting individual delete confirmation.
   const [pendingDelete, setPendingDelete] = useState<DownloadRecord | null>(null);
   // True when the "clear all" confirmation dialog is open.
@@ -194,6 +195,11 @@ export default function DownloadsSection({ st }: Props) {
 
   // Sum all file sizes for the "used" pill in the header.
   const totalBytes = records.reduce((sum, r) => sum + r.fileSize, 0);
+  const sortedRecords = records.slice().sort((a, b) => historySort === 'oldest'
+    ? a.downloadedAt - b.downloadedAt
+    : historySort === 'largest'
+      ? b.fileSize - a.fileSize
+      : b.downloadedAt - a.downloadedAt);
 
   // Confirm and execute deletion of a single downloaded book.
   const handleConfirmDelete = async () => {
@@ -327,11 +333,18 @@ export default function DownloadsSection({ st }: Props) {
 
       {/* ── Downloaded books ───────────────────────────────────────────────── */}
       <Panel
-        label="Downloaded books"
+        label="Download history"
         action={
-          <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>
-            {records.length} book{records.length === 1 ? '' : 's'}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            {records.length > 1 && (
+              <select aria-label="Sort download history" value={historySort} onChange={event => { const value = event.target.value as typeof historySort; setHistorySort(value); localStorage.setItem('onyx.downloads.historySort', value); }} style={{ padding: '4px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-glass)', color: 'var(--onyx-text-dim)', fontFamily: MONO, fontSize: 9.5 }}>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="largest">Largest</option>
+              </select>
+            )}
+            <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>{records.length} book{records.length === 1 ? '' : 's'}</span>
+          </div>
         }
       >
         {records.length === 0 ? (
@@ -340,13 +353,13 @@ export default function DownloadsSection({ st }: Props) {
           </div>
         ) : (
           <>
-            {records.map((record, i) => {
+            {sortedRecords.map((record, i) => {
               // Full library item for the cover; may be undefined if removed server-side.
               const libraryItem = st.library.find(b => b.id === record.itemId);
               return (
                 <div
                   key={record.itemId}
-                  style={{ display: 'flex', alignItems: 'center', padding: '13px 0', borderBottom: i < records.length - 1 ? '1px solid var(--onyx-line)' : 'none', gap: 14 }}
+                  style={{ display: 'flex', alignItems: 'center', padding: '13px 0', borderBottom: i < sortedRecords.length - 1 ? '1px solid var(--onyx-line)' : 'none', gap: 14 }}
                 >
                   {/* Cover thumbnail */}
                   <div style={{ flexShrink: 0, width: 52, height: 52, borderRadius: 6, overflow: 'hidden', background: 'var(--onyx-glass)' }}>
@@ -369,7 +382,8 @@ export default function DownloadsSection({ st }: Props) {
                     </div>
                     <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <Chip>{fmtSize(record.fileSize)}</Chip>
-                      <Chip>{relativeTime(record.downloadedAt)}</Chip>
+                      <Chip><time dateTime={new Date(record.downloadedAt).toISOString()} title={new Date(record.downloadedAt).toLocaleString()}>{relativeTime(record.downloadedAt)}</time></Chip>
+                      <button onClick={() => revealPath(record.filePath).catch(e => log.error('downloads', 'reveal downloaded file failed', { itemId: record.itemId, err: String(e) }))} title={record.filePath} style={{ padding: '2px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>Open location</button>
                     </div>
                     {/* Server-deleted warning — local copy retained and still playable offline. */}
                     {record.serverDeleted && (
