@@ -5,6 +5,9 @@ import type { LibraryItem } from '../state/onyx';
 import { getCollections, addBookToCollection, removeBookFromCollection, createCollection } from '../api/abs';
 import type { Collection } from '../api/abs';
 import Icon from './Icon';
+import { useModalFocus } from '../hooks/useModalFocus';
+import { errorMessage } from '../lib/presentError';
+import { log } from '../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -30,6 +33,7 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !busyId && !creating);
 
   useEffect(() => {
     getCollections(serverUrl, item.libraryId)
@@ -37,7 +41,7 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
         setCollections(cols);
         setMembers(new Set(cols.filter(c => (c.books ?? []).some(b => b.id === item.id)).map(c => c.id)));
       })
-      .catch(e => setError(String(e)));
+      .catch(e => { log.warn('library', 'collection list failed', { err: String(e) }); setError(errorMessage(e, { operation: 'refresh' })); });
   }, [serverUrl, item.libraryId]);
 
   useEffect(() => {
@@ -60,7 +64,8 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
         setMembers(prev => new Set(prev).add(col.id));
       }
     } catch (e) {
-      setError(String(e));
+      log.warn('library', 'collection membership update failed', { collectionId: col.id, err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
     } finally {
       setBusyId(null);
     }
@@ -74,7 +79,8 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
       await createCollection(serverUrl, item.libraryId, name, item.id);
       onClose();
     } catch (e) {
-      setError(String(e));
+      log.warn('library', 'collection create failed', { err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
       setCreating(false);
     }
   }
@@ -94,7 +100,7 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
       }}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="collection-picker-title" style={{
         width: 360, maxHeight: '70vh',
         background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)',
         borderRadius: 16,
@@ -104,7 +110,7 @@ export default function CollectionPicker({ item, serverUrl, onClose }: Collectio
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Add to Collection</div>
+            <div id="collection-picker-title" style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Add to Collection</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6 }}>Choose a collection for this book</div>
           </div>
           <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>✕</button>

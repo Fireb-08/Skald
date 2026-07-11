@@ -5,6 +5,9 @@ import type { LibraryItem } from '../state/onyx';
 import { getPlaylists, createPlaylist, batchAddToPlaylist } from '../api/abs';
 import type { Playlist, PodcastEpisode } from '../api/abs';
 import Icon from './Icon';
+import { useModalFocus } from '../hooks/useModalFocus';
+import { errorMessage } from '../lib/presentError';
+import { log } from '../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -31,11 +34,12 @@ export default function PlaylistPicker({ item, episode, serverUrl, onClose }: Pl
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !adding && !creating);
 
   useEffect(() => {
     getPlaylists(serverUrl, item.libraryId)
       .then(setPlaylists)
-      .catch(e => setError(String(e)));
+      .catch(e => { log.warn('library', 'playlist list failed', { err: String(e) }); setError(errorMessage(e, { operation: 'refresh' })); });
   }, [serverUrl, item.libraryId]);
 
   useEffect(() => {
@@ -51,7 +55,8 @@ export default function PlaylistPicker({ item, episode, serverUrl, onClose }: Pl
       await batchAddToPlaylist(serverUrl, playlist.id, [entry]);
       onClose();
     } catch (e) {
-      setError(String(e));
+      log.warn('library', 'playlist add failed', { playlistId: playlist.id, err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
       setAdding(null);
     }
   }
@@ -65,7 +70,8 @@ export default function PlaylistPicker({ item, episode, serverUrl, onClose }: Pl
       await createPlaylist(serverUrl, item.libraryId, name, null, [entry]);
       onClose();
     } catch (e) {
-      setError(String(e));
+      log.warn('library', 'playlist create failed', { err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
       setCreating(false);
     }
   }
@@ -85,7 +91,7 @@ export default function PlaylistPicker({ item, episode, serverUrl, onClose }: Pl
       }}
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="playlist-picker-title" style={{
         width: 360, maxHeight: '70vh',
         background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)',
         borderRadius: 16,
@@ -95,7 +101,7 @@ export default function PlaylistPicker({ item, episode, serverUrl, onClose }: Pl
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Add to Playlist</div>
+            <div id="playlist-picker-title" style={{ fontFamily: SERIF, fontSize: 19, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Add to Playlist</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {episode ? `Episode — ${episode.title}` : 'Choose a playlist for this book'}
             </div>
