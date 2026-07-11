@@ -112,6 +112,8 @@ export default function App() {
         }
       } catch (e) {
         log.error('downloads', 'offline progress flush failed', { err: String(e) });
+      } finally {
+        await st.surfaceCorruptPersistenceNotices();
       }
     }).then(fn => { unlistenReconnected = fn; });
 
@@ -132,10 +134,14 @@ export default function App() {
   // entries remain queued and the existing startup/reconnect flush picks them up.
   useEffect(() => {
     if (!st.isLocalPlayback || !st.serverUrl) return;
-    const flush = () => { flushOfflineProgress(st.serverUrl).catch(() => { /* offline — entries stay queued */ }); };
+    const flush = () => {
+      flushOfflineProgress(st.serverUrl)
+        .catch(() => { /* offline — entries stay queued */ })
+        .finally(st.surfaceCorruptPersistenceNotices);
+    };
     const iv = setInterval(flush, 30_000);
     return () => { clearInterval(iv); flush(); };
-  }, [st.isLocalPlayback, st.serverUrl]);
+  }, [st.isLocalPlayback, st.serverUrl, st.surfaceCorruptPersistenceNotices]);
 
   // ── Local staging watcher + auto-distribute (app-wide) ───────────────────
   // Staging is an intake zone: when files land there, scan and MOVE identified

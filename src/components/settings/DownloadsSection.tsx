@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import type { OnyxState } from '../../state/onyx';
 import {
   getDownloadsDir, revealDownloadsDir, getDownloads, removeDownload, cancelDownload,
-  getCacheDir, setDownloadsDir, setCacheDir, revealPath,
+  getCacheDir, setDownloadsDir, setCacheDir, revealPath, revealDownloadLocation,
 } from '../../api/abs';
 import { log } from '../../lib/log';
 import type { DownloadRecord } from '../../api/abs';
@@ -383,7 +383,7 @@ export default function DownloadsSection({ st }: Props) {
                     <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <Chip>{fmtSize(record.fileSize)}</Chip>
                       <Chip><time dateTime={new Date(record.downloadedAt).toISOString()} title={new Date(record.downloadedAt).toLocaleString()}>{relativeTime(record.downloadedAt)}</time></Chip>
-                      <button onClick={() => revealPath(record.filePath).catch(e => log.error('downloads', 'reveal downloaded file failed', { itemId: record.itemId, err: String(e) }))} title={record.filePath} style={{ padding: '2px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>Open location</button>
+                      <button onClick={() => revealDownloadLocation(record.itemId).catch(e => log.error('downloads', 'reveal downloaded file failed', { itemId: record.itemId, err: String(e) }))} title={record.filePath} style={{ padding: '2px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>Open location</button>
                     </div>
                     {/* Server-deleted warning — local copy retained and still playable offline. */}
                     {record.serverDeleted && (

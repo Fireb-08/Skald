@@ -173,6 +173,10 @@ export interface OnyxState {
   // token value, so treat this as a boolean, never send it to the server.
   authToken: string;
   setAuthToken: (token: string) => void;
+  // Runtime-reactive live-sync preference. Keeping this in the shared state
+  // lets socket listeners subscribe/unsubscribe as soon as Settings changes it.
+  liveSyncEnabled: boolean;
+  setLiveSyncEnabled: (enabled: boolean) => void;
   // Auth
   user: User | null;
   setUser: (user: User | null) => void;
@@ -334,6 +338,9 @@ export interface OnyxState {
   // route LibVLC to the local file instead of the HTTP stream.
   downloads: DownloadRecord[];
   setDownloads: Dispatch<SetStateAction<DownloadRecord[]>>;
+  // Drain backend notices after any operation that may read/reset a corrupt
+  // downloads persistence file (especially the offline progress queue).
+  surfaceCorruptPersistenceNotices: () => Promise<void>;
   // Tracks whether the current playback source is a local file rather than
   // a server stream. When true, transport controls bypass session logic.
   isLocalPlayback: boolean;
@@ -427,6 +434,9 @@ export function useOnyxState(): OnyxState {
   const [authToken, setAuthTokenRaw] = useState(
     () => localStorage.getItem('skald.hasAuth') === 'true' ? AUTH_FROM_KEYRING : '',
   );
+  const [liveSyncEnabled, setLiveSyncEnabledRaw] = useState(
+    () => localStorage.getItem('onyx.sync.live') === 'true',
+  );
 
   const setServerUrl = useCallback((v: string) => {
     localStorage.setItem('skald.serverUrl', v); setServerUrlRaw(v);
@@ -439,6 +449,10 @@ export function useOnyxState(): OnyxState {
   }, []);
   const setUserId = useCallback((v: string) => {
     localStorage.setItem('skald.userId', v); setUserIdRaw(v);
+  }, []);
+  const setLiveSyncEnabled = useCallback((enabled: boolean) => {
+    localStorage.setItem('onyx.sync.live', JSON.stringify(enabled));
+    setLiveSyncEnabledRaw(enabled);
   }, []);
   const setAuthToken = useCallback((v: string) => {
     // Persist presence only — the raw token never touches localStorage again
@@ -673,6 +687,24 @@ export function useOnyxState(): OnyxState {
   const [serverSettings, setServerSettings] = useState<ServerSettings | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
 
+  // Backend persistence loaders queue a notice at the moment they preserve and
+  // reset a corrupt file. Drain after every frontend operation that can trigger
+  // one of those loaders; polling only after downloads.json missed corruption
+  // first discovered later by the offline-progress startup/playback paths.
+  const surfaceCorruptPersistenceNotices = useCallback(async () => {
+    try {
+      const notices = await takeCorruptPersistenceNotices();
+      if (notices.length === 0) return;
+      log.warn('downloads', 'corrupt persistence reset surfaced to user', { notices });
+      setToast({
+        message: `Damaged ${notices.join(' and ')} reset — the original was kept as a .corrupt file in the downloads folder.`,
+        type: 'info',
+      });
+    } catch (e) {
+      log.error('downloads', 'corrupt persistence notice poll failed', { err: String(e) });
+    }
+  }, []);
+
   useEffect(() => {
     // Initial load — reads the registry from disk; works before any server connection.
     getDownloads()
@@ -682,14 +714,7 @@ export function useOnyxState(): OnyxState {
         // path (review L2), so poll its notices right after: a damaged file was
         // reset to empty and kept as *.corrupt — say so instead of letting the
         // reset look like ordinary empty data.
-        return takeCorruptPersistenceNotices().then(notices => {
-          if (notices.length === 0) return;
-          log.warn('downloads', 'corrupt persistence reset surfaced to user', { notices });
-          setToast({
-            message: `Damaged ${notices.join(' and ')} reset — the original was kept as a .corrupt file in the downloads folder.`,
-            type: 'info',
-          });
-        });
+        return surfaceCorruptPersistenceNotices();
       })
       .catch(e => log.error('downloads', 'initial registry load failed', { err: String(e) }));
 
@@ -699,12 +724,15 @@ export function useOnyxState(): OnyxState {
     let unlisten: (() => void) | undefined;
     listen('download-complete', () => {
       getDownloads()
-        .then(setDownloads)
+        .then(records => {
+          setDownloads(records);
+          return surfaceCorruptPersistenceNotices();
+        })
         .catch(e => log.error('downloads', 'registry refresh after complete failed', { err: String(e) }));
     }).then(fn => { unlisten = fn; });
 
     return () => { unlisten?.(); };
-  }, []); // runs once on mount; callers use setDownloads for immediate optimistic updates
+  }, [surfaceCorruptPersistenceNotices]);
 
   useEffect(() => {
     // Whether we can talk to an ABS server this launch. Local libraries load
@@ -787,12 +815,14 @@ export function useOnyxState(): OnyxState {
 
       // Flush any queued offline progress once a server is reachable.
       if (canQueryServer) {
-        flushOfflineProgress(serverUrl).catch(e => log.error('sync', 'offline progress startup flush failed', { err: String(e) }));
+        flushOfflineProgress(serverUrl)
+          .catch(e => log.error('sync', 'offline progress startup flush failed', { err: String(e) }))
+          .finally(surfaceCorruptPersistenceNotices);
       }
       if (!cancelled) setLibraryLoadingRaw(false);
     })();
     return () => { cancelled = true; };
-  }, [serverUrl, authToken]);
+  }, [serverUrl, authToken, surfaceCorruptPersistenceNotices]);
 
   // Fetch listeningStats + mediaProgress/bookmarks via /api/me once the library
   // has loaded and we have valid credentials.
@@ -1313,6 +1343,7 @@ export function useOnyxState(): OnyxState {
   useLiveSync({
     serverUrl,
     authToken,
+    liveSyncEnabled,
     currentBookIdRef,
     currentEpisodeIdRef,
     playingRef,
@@ -1327,6 +1358,8 @@ export function useOnyxState(): OnyxState {
     setDownloads,
     setTasks,
     setToast,
+    recordActivity,
+    surfaceCorruptPersistenceNotices,
     setUploadPerm,
     refreshLibrary,
     applyServerProgress,
@@ -1334,6 +1367,10 @@ export function useOnyxState(): OnyxState {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Component-level controls (scrubbers, menus, sliders) own keys they
+      // prevent. Respect that contract even if a handler only prevents the
+      // default browser action and the event still reaches window.
+      if (e.defaultPrevented) return;
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       // Call the LibVLC pause/resume command directly.
       // setPlaying alone only updates the React icon — LibVLC keeps running.
@@ -1385,6 +1422,7 @@ export function useOnyxState(): OnyxState {
     username, setUsername,
     userId, setUserId,
     authToken, setAuthToken,
+    liveSyncEnabled, setLiveSyncEnabled,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
     // Server-side, the canUpload getter is true for admin/root regardless of the
@@ -1396,6 +1434,7 @@ export function useOnyxState(): OnyxState {
     onboarded, setOnboarded,
     library, libraries, activeLibrary, setActiveLibrary, libraryLoading, isOffline, lastLibraryRefresh, allLibrariesPartial, dismissAllLibrariesPartial, updateLibraryItem, removeLibraryItem, refreshLibrary, mediaProgress, setMediaProgress, applyServerProgress, listeningStats, bookmarks, setBookmarks, currentLibraryId,
     downloads, setDownloads,
+    surfaceCorruptPersistenceNotices,
     isLocalPlayback, setIsLocalPlayback,
     serverSettings, setServerSettings,
     tasks, setTasks,

@@ -209,7 +209,20 @@ where
     F: FnMut(&str, usize, usize, Option<&str>),
 {
     let conn = open()?;
-    let root = library_root(&conn, library_id)?;
+    scan_library_with_progress_conn(&conn, library_id, &mut progress)
+}
+
+// Connection-injected reconciliation seam: production still opens the real
+// catalog above, while regression tests prove failure behavior against a temp DB.
+pub(crate) fn scan_library_with_progress_conn<F>(
+    conn: &Connection,
+    library_id: &str,
+    mut progress: F,
+) -> Result<usize, String>
+where
+    F: FnMut(&str, usize, usize, Option<&str>),
+{
+    let root = library_root(conn, library_id)?;
     // The shelf catalog is everything under Audiobooks/ — Staging/Unidentified/
     // Podcasts are siblings and are scanned (or not) separately.
     let books_root = Path::new(&root).join(AUDIOBOOKS_DIR);

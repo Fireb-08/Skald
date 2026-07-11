@@ -185,6 +185,8 @@ pub fn prune_missing(downloads_dir: &Path) -> Vec<DownloadRecord> {
 #[serde(rename_all = "camelCase")]
 pub struct OfflineProgressEntry {
     pub item_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
     pub current_time: f64,
     pub duration: f64,
     pub progress: f64,         // 0.0–1.0 — pre-computed for the flush command
@@ -222,8 +224,8 @@ pub fn save_progress_queue(downloads_dir: &Path, queue: &[OfflineProgressEntry])
     Ok(())
 }
 
-// Add or replace a queue entry for the given item_id — keep only the latest
-// entry per book since only the most recent position matters.
+// Add or replace a queue entry for the same book/episode identity — keep only
+// the latest position because older updates must never overwrite it later.
 pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) -> Result<(), String> {
     // Poison-tolerant: a panic elsewhere must not permanently wedge progress writes.
     let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -232,8 +234,8 @@ pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) 
     std::fs::create_dir_all(downloads_dir)
         .map_err(|e| format!("Create dir failed: {e}"))?;
     let mut queue = load_progress_queue(downloads_dir);
-    // Remove any stale entry for this item before pushing the latest.
-    queue.retain(|e| e.item_id != entry.item_id);
+    // Book progress (episode_id=None) stays distinct from each podcast episode.
+    queue.retain(|e| e.item_id != entry.item_id || e.episode_id != entry.episode_id);
     queue.push(entry);
     save_progress_queue(downloads_dir, &queue)
 }
@@ -243,15 +245,52 @@ pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) 
 // The 1-second offline tick loop upserts a newer entry for the same item between
 // the flush's snapshot read and this remove; matching on recorded_at ensures we
 // delete exactly the entry we sent and leave any newer position for the next flush.
-pub fn remove_progress_entry(downloads_dir: &Path, item_id: &str, recorded_at: i64) -> Result<(), String> {
+pub fn remove_progress_entry(
+    downloads_dir: &Path,
+    item_id: &str,
+    episode_id: Option<&str>,
+    recorded_at: i64,
+) -> Result<(), String> {
     let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut queue = load_progress_queue(downloads_dir);
     let before = queue.len();
-    queue.retain(|e| !(e.item_id == item_id && e.recorded_at == recorded_at));
+    queue.retain(|e| {
+        !(e.item_id == item_id
+            && e.episode_id.as_deref() == episode_id
+            && e.recorded_at == recorded_at)
+    });
     // No match → the entry was already replaced by a newer tick write; leave it
     // queued for the next flush rather than rewriting the file unnecessarily.
     if queue.len() == before { return Ok(()); }
     save_progress_queue(downloads_dir, &queue)
+}
+
+/// Persist a server-bound progress snapshot using the same durable queue as
+/// downloaded playback. This is also the fallback for failed online session
+/// sync/close requests, including podcast episodes.
+pub fn queue_server_progress(
+    downloads_dir: &Path,
+    item_id: &str,
+    episode_id: Option<&str>,
+    current_time: f64,
+    duration: f64,
+) -> Result<(), String> {
+    let is_finished = duration > 0.0 && current_time + 1.0 >= duration;
+    upsert_progress_entry(
+        downloads_dir,
+        OfflineProgressEntry {
+            item_id: item_id.to_string(),
+            episode_id: episode_id.map(str::to_string),
+            current_time,
+            duration,
+            progress: if duration > 0.0 { current_time / duration } else { 0.0 },
+            is_finished,
+            recorded_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64,
+        },
+    )
 }
 
 // ── Local playback stop-point log ─────────────────────────────────────────────
@@ -338,6 +377,7 @@ mod tests {
     fn entry(id: &str, time: f64, recorded_at: i64) -> OfflineProgressEntry {
         OfflineProgressEntry {
             item_id: id.to_string(),
+            episode_id: None,
             current_time: time,
             duration: 3600.0,
             progress: time / 3600.0,
@@ -454,14 +494,30 @@ mod tests {
         // A newer tick supersedes the snapshot the flush is holding…
         upsert_progress_entry(dir.path(), entry("a", 30.0, 9)).unwrap();
         // …so removing with the stale recorded_at must leave the new entry.
-        remove_progress_entry(dir.path(), "a", 1).unwrap();
+        remove_progress_entry(dir.path(), "a", None, 1).unwrap();
         let queue = load_progress_queue(dir.path());
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].current_time, 30.0);
 
         // Matching recorded_at removes exactly the synced entry.
-        remove_progress_entry(dir.path(), "a", 9).unwrap();
+        remove_progress_entry(dir.path(), "a", None, 9).unwrap();
         assert!(load_progress_queue(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn progress_queue_keeps_sibling_episodes_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut first = entry("podcast", 10.0, 1);
+        first.episode_id = Some("episode-a".to_string());
+        let mut second = entry("podcast", 20.0, 2);
+        second.episode_id = Some("episode-b".to_string());
+        upsert_progress_entry(dir.path(), first).unwrap();
+        upsert_progress_entry(dir.path(), second).unwrap();
+
+        let queue = load_progress_queue(dir.path());
+        assert_eq!(queue.len(), 2);
+        remove_progress_entry(dir.path(), "podcast", Some("episode-a"), 1).unwrap();
+        assert_eq!(load_progress_queue(dir.path())[0].episode_id.as_deref(), Some("episode-b"));
     }
 
     #[test]

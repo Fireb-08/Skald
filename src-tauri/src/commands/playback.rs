@@ -57,12 +57,27 @@ pub async fn play_audio(
         for _ in 0..20 {
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             // Each lock/check/drop is synchronous — no guard held across await.
-            let is_playing = player_arc.lock().unwrap()
+            let (is_playing, failed) = player_arc
+                .lock()
+                .unwrap()
                 .as_ref()
-                .map(|p| p.is_playing())
-                .unwrap_or(false);
-            if is_playing { break; }
+                .map(|p| (p.is_playing(), p.playback_error()))
+                .unwrap_or((false, false));
+            if is_playing {
+                return Ok(());
+            }
+            if failed {
+                log::error!(target: "skald::playback", "LibVLC entered the error state while opening media");
+                return Err("LibVLC could not open or decode the selected audio".to_string());
+            }
         }
+        let state_name = player_arc
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|p| p.playback_state_name())
+            .unwrap_or("missing-player");
+        log::warn!(target: "skald::playback", "playback did not reach Playing during startup check; state={state_name}");
     }
     play_result
 }
@@ -226,6 +241,7 @@ pub async fn close_all_open_sessions(server_url: String) -> Result<u32, String> 
 
 #[tauri::command]
 pub async fn close_active_session(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
     let mut mgr = state.lock().await;
@@ -233,7 +249,36 @@ pub async fn close_active_session(
         return Ok(()); // no session open, nothing to do
     }
     let result = mgr.close().await;
-    mgr.session_id = None; // prevent the sync task from retrying a closed session
+    let current_time = *mgr.current_time.lock().unwrap_or_else(|e| e.into_inner());
+    match &result {
+        Ok(()) => {
+            if mgr.mark_sync_restored() {
+                log::info!(target: "skald::sync", "server session close restored progress sync");
+                let _ = app.emit(
+                    "session-sync-restored",
+                    serde_json::json!({ "currentTime": current_time }),
+                );
+            }
+        }
+        Err(error) => {
+            let queued = match mgr.queue_current_server_progress() {
+                Ok(()) => true,
+                Err(queue_error) => {
+                    log::error!(target: "skald::sync", "failed session close fallback persist failed: {queue_error}");
+                    false
+                }
+            };
+            mgr.mark_sync_degraded();
+            log::warn!(target: "skald::sync", "server session close failed queued_locally={queued}: {error}");
+            let _ = app.emit(
+                "session-sync-warning",
+                serde_json::json!({ "currentTime": current_time, "queued": queued }),
+            );
+        }
+    }
+    // Prevent the old session id and fallback identity from leaking into the
+    // next book after the close attempt has been handled locally.
+    mgr.clear_server_identity();
     result
 }
 

@@ -21,6 +21,7 @@ import CollectionPicker from '../CollectionPicker';
 import PlaylistPicker from '../PlaylistPicker';
 import FilesModal from './FilesModal';
 import ShareModal from '../ShareModal';
+import { shelfScrollDecision } from './scrollState';
 // Shared series group key — the same normalization the client-derived Series
 // views (local + combined) use to build their groups, so drill-ins match.
 import { seriesGroupName } from './tabs/SeriesView';
@@ -57,6 +58,12 @@ function useEmptyWindowDiag(
   bookCount: number,
   windowCount: number,
   totalSize: number,
+  // The virtualizer's OWN viewport height at the offending render (getSize()).
+  // Captured during render — unlike the DOM clientHeight below, which is read in
+  // this post-paint effect at a later instant — so the two are not simultaneous.
+  // outerSize === 0 here is the definitive signature of the first-render/unmeasured
+  // rect blank; a positive outerSize with 0 rows would point elsewhere.
+  outerSize: number,
   scrollRef: React.RefObject<HTMLDivElement | null>,
 ) {
   useEffect(() => {
@@ -65,11 +72,12 @@ function useEmptyWindowDiag(
         view,
         books: bookCount,
         totalSize,
+        outerSize,
         scrollTop: scrollRef.current?.scrollTop ?? -1,
         clientHeight: scrollRef.current?.clientHeight ?? -1,
       });
     }
-  }, [view, bookCount, windowCount, totalSize, scrollRef]);
+  }, [view, bookCount, windowCount, totalSize, outerSize, scrollRef]);
 }
 
 type SortDir = 'asc' | 'desc';
@@ -165,14 +173,34 @@ function ShelfList({ books, st, openBook, onContextMenu, onActionMenu, scrollRef
   }, [books, sort]);
 
   // One virtual item per book. Fixed-height rows, so estimateSize is exact.
+  //
+  // initialRect.height carries a POSITIVE FLOOR (|| 800), and this is the crux of
+  // the blank-shelf fix. A freshly-constructed virtualizer computes its visible
+  // range from options.initialRect DURING the first render body — BEFORE its
+  // layout-effect measures the real element — and the virtual-core default rect is
+  // {0,0}. With height 0, outerSize is 0 and calculateRange() returns [] over the
+  // fully-measured list: getVirtualItems() is empty for one frame. Formerly the
+  // child was remounted per pill flip (key={shelfKey}), so that one-frame blank
+  // recurred continuously under rapid flipping and read as a persistent blank
+  // (diagnosed via useEmptyWindowDiag: books 198, totalSize 13464, scrollTop 0,
+  // yet 0 rows — outerSize was 0). `scrollRef.current` is also null during the
+  // first render (the ref attaches at commit), so reading clientHeight there gives
+  // 0 too — hence a hardcoded floor, not just the live read. Any over-estimate is
+  // corrected to the true height by the ResizeObserver on the next frame; the
+  // guarantee is only that a non-empty list can NEVER yield an empty window.
   const virtualizer = useVirtualizer({
     count: sorted.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => LIST_ROW_H,
     overscan: 5,
+    initialRect: { width: scrollRef.current?.clientWidth || 0, height: scrollRef.current?.clientHeight || 800 },
+    initialOffset: scrollRef.current?.scrollTop ?? 0,
   });
 
-  useEmptyWindowDiag('list', sorted.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
+  // getSize() (the virtualizer's own measured viewport) is typed private but exists
+  // at runtime; read via a narrow cast so the diagnostic can log it (see the note in
+  // useEmptyWindowDiag). Read during render, on purpose.
+  useEmptyWindowDiag('list', sorted.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), (virtualizer as unknown as { getSize(): number }).getSize(), scrollRef);
 
   if (sorted.length === 0) {
     return <ShelfEmptyState st={st} />;
@@ -327,18 +355,25 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
   // Virtualization needs an explicit column count up front. CSS `auto-fill`
   // computes that internally and never exposes it, so we measure the scroll
   // container ourselves and reproduce the same packing math.
-  const [columnCount, setColumnCount] = useState(1);
-
-  const measure = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+  const colsFor = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return 1;
     // clientWidth includes the scroll container's horizontal padding; subtract it
     // to get the usable track width, then apply the auto-fill packing formula
     // `floor((W + gap) / (coverW + gap))`.
     const inner = el.clientWidth - GRID_PAD_X * 2;
-    const cols = Math.max(1, Math.floor((inner + GRID_GAP) / (coverW + GRID_GAP)));
-    setColumnCount(cols);
-  }, [coverW, scrollRef]);
+    return Math.max(1, Math.floor((inner + GRID_GAP) / (coverW + GRID_GAP)));
+  }, [coverW]);
+
+  // Seed the column count synchronously from the already-mounted scroll container
+  // on (re)mount. Starting at a hardcoded 1 made a fresh grid lay out as one tall
+  // column until the measure effect ran — a visible flash on every pill flip, and
+  // part of the same remount race that blanked the shelf. On the first-ever mount
+  // scrollRef is null → 1, then measure() corrects it.
+  const [columnCount, setColumnCount] = useState(() => colsFor(scrollRef.current));
+
+  const measure = useCallback(() => {
+    setColumnCount(colsFor(scrollRef.current));
+  }, [colsFor, scrollRef]);
 
   // Recompute on mount, on cover-size change, and whenever the container resizes.
   useEffect(() => {
@@ -369,9 +404,14 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
     // Square cover (coverW tall) plus ~35px of title/author text and the row gap.
     estimateSize: () => coverW + 50,
     overscan: 3,
+    // Positive height floor (|| 800) so an unmeasured/first-render virtualizer can
+    // never compute outerSize 0 and blank a non-empty grid. See the full note in
+    // ShelfList. (Blank-shelf bug, useEmptyWindowDiag.)
+    initialRect: { width: scrollRef.current?.clientWidth || 0, height: scrollRef.current?.clientHeight || 800 },
+    initialOffset: scrollRef.current?.scrollTop ?? 0,
   });
 
-  useEmptyWindowDiag('grid', books.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), scrollRef);
+  useEmptyWindowDiag('grid', books.length, virtualizer.getVirtualItems().length, virtualizer.getTotalSize(), (virtualizer as unknown as { getSize(): number }).getSize(), scrollRef);
 
   if (books.length === 0) {
     return <ShelfEmptyState st={st} />;
@@ -405,8 +445,13 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
                     overflow: 'hidden',
                     borderRadius: 4,
                     transform: b.id === selectedId ? 'translateY(-4px)' : 'none',
-                    filter: b.id === selectedId ? 'drop-shadow(0 12px 24px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35))' : 'none',
-                    transition: 'transform 0.15s, filter 0.15s',
+                    // box-shadow (not filter: drop-shadow) for the selected lift: a
+                    // child `filter` spawns its own compositing layer and forces the
+                    // enclosing backdrop-filter panel to re-sample a narrow sub-rect on
+                    // click — the source of the vertical banding. box-shadow is a plain
+                    // paint with the same visual and no backdrop re-sample.
+                    boxShadow: b.id === selectedId ? '0 12px 24px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)' : 'none',
+                    transition: 'transform 0.15s, box-shadow 0.15s',
                   }}>
                     <Cover item={b} size={coverW} serverUrl={st.serverUrl} />
                     {b.id === selectedId && (
@@ -591,30 +636,43 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     st.contextFilter?.kind ?? '',
     st.contextFilter?.value ?? '',
     st.search,
-    // Advanced filters change the dataset — include them so the grid remounts.
+    // Advanced filters change the dataset — include them so a scroll reset fires.
     JSON.stringify(st.advFilter),
-    // Include bookIds so a playlist reorder forces the virtualizer to remount
-    // with the new sort order rather than serving the stale cached layout.
+    // Include bookIds so a playlist reorder is seen as a new result set.
     (st.contextFilter?.bookIds ?? []).join(','),
     shelfBooks.length,
     shelfBooks[0]?.id ?? '',
     shelfBooks[shelfBooks.length - 1]?.id ?? '',
   ].join('|');
-  // Changing shelfKey remounts the virtualized child (view mode + cover size
-  // included so a view/size switch also forces a fresh virtualizer).
+  // shelfKey is the scroll-reset trigger (view mode + cover size + dataset
+  // identity). It no longer remounts the virtualized child — see the JSX note.
   const shelfKey = `${st.libraryView}|${coverW}|${datasetKey}`;
 
-  // Reset the persistent scroll container whenever the dataset changes. The
-  // scroller deliberately survives the virtualized child's remount, so a
-  // scrollTop inherited from a long pre-search shelf can point past the new
-  // (shorter) content — TanStack then reports an empty visible range and the
-  // shelf renders blank even while the header counts matches. Layout effect so
-  // the reset lands before the freshly mounted virtualizer paints.
+  // Scroll handling for the persistent scroll container (which now survives every
+  // dataset change, since the virtualizer is no longer remounted). Two cases:
+  //  • View identity changed (library / grid|list / filter / context / search):
+  //    restore the remembered scroll position for that view.
+  //  • Same view, different result set (sort / group / hide-finished / advanced
+  //    filter, or an async series fetch landing): scroll to the top so the new
+  //    ordering shows from its start and an inherited scrollTop can't strand the
+  //    viewport mid-list. Layout effect so it lands before paint.
   const scrollStorageKey = `onyx.shelf.scroll.${st.currentLibraryId}.${st.libraryView}.${st.filter}.${st.contextFilter?.kind ?? ''}.${st.contextFilter?.value ?? ''}.${st.search}`;
+  const prevViewScrollKey = useRef<string | null>(null);
+  const pendingScrollRestoreKey = useRef<string | null>(null);
   useLayoutEffect(() => {
-    const top = Number(localStorage.getItem(scrollStorageKey) ?? '0');
-    scrollRef.current?.scrollTo({ top: Number.isFinite(top) ? top : 0 });
-  }, [scrollStorageKey]);
+    const el = scrollRef.current;
+    if (!el) return;
+    const decision = shelfScrollDecision(
+      prevViewScrollKey.current,
+      scrollStorageKey,
+      pendingScrollRestoreKey.current,
+      st.libraryLoading,
+      localStorage.getItem(scrollStorageKey),
+    );
+    prevViewScrollKey.current = scrollStorageKey;
+    pendingScrollRestoreKey.current = decision.pendingRestoreKey;
+    if (decision.top !== null) el.scrollTo({ top: decision.top });
+  }, [shelfKey, scrollStorageKey, st.libraryLoading]);
   useEffect(() => () => {
     if (scrollWriteRef.current) clearTimeout(scrollWriteRef.current);
   }, []);
@@ -656,21 +714,26 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
         onScroll={persistScroll}
         style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: st.libraryView === 'list' ? '12px 14px' : '20px 18px' }}
       >
-        {/* Remount the virtualized child whenever the dataset identity changes
-            (filter, context filter, search, hide-finished). The shared flex:1
-            scroll container never changes its own size on a filter toggle, so the
-            virtualizer's ResizeObserver never re-fires and can latch a stale
-            viewport rect — leaving getVirtualItems() empty while getTotalSize()
-            stays tall (empty body + scrollbar). A fresh virtualizer measures the
-            settled layout; this is the same remount the grid/list toggle relies on. */}
+        {/* The virtualized child is NOT remounted per dataset change (no key). An
+            earlier design keyed it on the dataset to force a "fresh" virtualizer,
+            reasoning that the stable-size scroll container's ResizeObserver would
+            latch a stale rect. That was backwards: a stable container keeps a
+            correct once-measured rect, and the remount is what actually broke it —
+            each fresh virtualizer re-initialises to a 0×0 viewport and depends on
+            an async RO callback to recover; flipping pills fast orphans that
+            callback, leaving getVirtualItems() empty over a valid list (the
+            blank-shelf bug, confirmed via useEmptyWindowDiag). Updating count/data
+            in place keeps the virtualizer's RO-synced rect and never blanks. Scroll
+            is reset imperatively above instead of via the remount. (The grid/list
+            toggle still swaps component TYPE, an intentional one-time remount.) */}
         {seriesLoading ? (
           <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--onyx-text-mute)', fontFamily: SERIF, fontSize: 16, fontStyle: 'italic' }}>
             Loading series…
           </div>
         ) : st.libraryView === 'list' ? (
-          <ShelfList key={shelfKey} books={shelfBooks} st={st} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
+          <ShelfList books={shelfBooks} st={st} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
         ) : (
-          <ShelfGrid key={shelfKey} books={shelfBooks} st={st} coverW={coverW} selectedId={selectedId} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
+          <ShelfGrid books={shelfBooks} st={st} coverW={coverW} selectedId={selectedId} openBook={openBook} onContextMenu={onContextMenu} onActionMenu={onActionMenu} scrollRef={scrollRef} />
         )}
       </div>
       {contextMenu && (

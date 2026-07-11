@@ -397,6 +397,67 @@ mod tests {
         assert!(list_libraries_conn(&conn).unwrap().is_empty());
     }
 
+    fn insert_reconcile_item(conn: &Connection, id: &str, library_id: &str, source_path: &Path) {
+        conn.execute(
+            "INSERT INTO items (id, library_id, source_path, item_json, added_at, updated_at)
+             VALUES (?1, ?2, ?3, '{}', 0, 0)",
+            params![id, library_id, source_path.to_string_lossy()],
+        )
+        .expect("insert reconcile item");
+        set_progress_conn(conn, id, None, 123.0, 3600.0, false).expect("set progress");
+        add_bookmark_conn(conn, id, "Keep me", 120.0).expect("add bookmark");
+    }
+
+    fn item_row_count(conn: &Connection, table: &str, item_id: &str) -> i64 {
+        let id_column = if table == "items" { "id" } else { "item_id" };
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM {table} WHERE {id_column} = ?1"),
+            params![item_id],
+            |row| row.get(0),
+        )
+        .expect("row count")
+    }
+
+    #[test]
+    fn reconcile_missing_audiobooks_root_preserves_item_progress_and_bookmarks() {
+        let (dir, conn) = test_conn();
+        let parent = dir.path().join("libraries");
+        std::fs::create_dir_all(&parent).expect("library parent");
+        let library = create_library_conn(&conn, "External Books", &parent.to_string_lossy(), "book")
+            .expect("create library");
+        let library_id = library["id"].as_str().expect("library id");
+        let root = PathBuf::from(library["folders"][0]["fullPath"].as_str().expect("root"));
+        let books_root = root.join(AUDIOBOOKS_DIR);
+        insert_reconcile_item(&conn, "book1", library_id, &books_root.join("Author").join("Book"));
+
+        // Simulate an unavailable external drive after it was previously scanned.
+        std::fs::remove_dir_all(&books_root).expect("disconnect books root");
+        let result = scan_library_with_progress_conn(&conn, library_id, |_, _, _, _| {});
+        assert!(result.is_err(), "an unavailable root must abort reconciliation");
+        assert_eq!(item_row_count(&conn, "items", "book1"), 1);
+        assert_eq!(item_row_count(&conn, "progress", "book1"), 1);
+        assert_eq!(item_row_count(&conn, "bookmarks", "book1"), 1);
+    }
+
+    #[test]
+    fn complete_reconcile_still_removes_genuinely_deleted_item_state() {
+        let (dir, conn) = test_conn();
+        let parent = dir.path().join("libraries");
+        std::fs::create_dir_all(&parent).expect("library parent");
+        let library = create_library_conn(&conn, "Local Books", &parent.to_string_lossy(), "book")
+            .expect("create library");
+        let library_id = library["id"].as_str().expect("library id");
+        let root = PathBuf::from(library["folders"][0]["fullPath"].as_str().expect("root"));
+        insert_reconcile_item(&conn, "book1", library_id, &root.join(AUDIOBOOKS_DIR).join("Deleted Book"));
+
+        let count = scan_library_with_progress_conn(&conn, library_id, |_, _, _, _| {})
+            .expect("complete empty walk");
+        assert_eq!(count, 0);
+        assert_eq!(item_row_count(&conn, "items", "book1"), 0);
+        assert_eq!(item_row_count(&conn, "progress", "book1"), 0);
+        assert_eq!(item_row_count(&conn, "bookmarks", "book1"), 0);
+    }
+
     #[test]
     fn progress_scopes_by_episode_and_preserves_finished_flag() {
         let (_dir, conn) = test_conn();

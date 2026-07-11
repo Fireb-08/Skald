@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { SectionHead, Row, Toggle, useLocal, MONO } from './shared';
+import { SectionHead, Row, Toggle, MONO } from './shared';
 import type { OnyxState } from '../../state/onyx';
 import { connectSocket, disconnectSocket } from '../../api/abs';
 import { log } from '../../lib/log';
@@ -34,9 +34,10 @@ export interface SyncSectionProps {
 }
 
 export default function SyncSection({ st, embedded = false }: SyncSectionProps) {
-  // Live-sync toggle preference — persisted to 'onyx.sync.live' in localStorage.
-  // Read by App.tsx and AccountSection to restore the connection on startup.
-  const [liveSync, setLiveSync] = useLocal<boolean>('onyx.sync.live', false);
+  // The preference lives in useOnyxState so its socket listeners react to a
+  // runtime toggle instead of reading localStorage only when auth changes.
+  const liveSync = st.liveSyncEnabled;
+  const setLiveSync = st.setLiveSyncEnabled;
 
   // Tracks the user's current *intent* synchronously so the socket-disconnected
   // listener can tell apart an intentional teardown (the user clicked the toggle
@@ -199,18 +200,20 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
         // Enabling — open the Socket.IO connection and send the auth event.
         // Resolving here only means the transport is up and auth was *sent*;
         // the toggle is not confirmed until socket-authenticated arrives.
-        await connectSocket(st.serverUrl);
-        // Arm the confirmation window. socket-authenticated clears it; if it
-        // fires first, live sync never actually came up — revert the toggle.
+        // Arm the timeout *before* invoking Rust: a fast server can emit
+        // socket-authenticated before connectSocket resolves. The listener must
+        // always have a real pending timer to clear in that ordering.
         pendingConfirmRef.current = setTimeout(() => {
           pendingConfirmRef.current = null;
           revertFailedEnable(`no auth confirmation within ${CONNECT_CONFIRM_TIMEOUT_MS}ms`);
         }, CONNECT_CONFIRM_TIMEOUT_MS);
+        await connectSocket(st.serverUrl);
       } else {
         // Disabling — tear down cleanly; safe to call with no active connection.
         await disconnectSocket();
       }
     } catch (e) {
+      clearPendingConfirm();
       // Roll back the toggle on failure so the displayed state matches reality.
       log.warn('sync', 'live-sync toggle failed', { enabling: next, err: String(e) });
       liveSyncIntentRef.current = !next;

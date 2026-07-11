@@ -2,7 +2,8 @@
 // useOnyxState. Moved verbatim out of onyx.ts (God-File Decomposition roadmap,
 // L3/L7): the progress-updated listener (self-echo guard + reconciliation),
 // the three library-item listeners, the reconnect/authenticated resync pair,
-// the background-task stream, and the sync-failed watchdog toast (review H5).
+// the background-task stream, recoverable session-write warnings, and the
+// fatal sync-failed watchdog toast (review H5).
 //
 // The effects read playback/library state exclusively through the refs in
 // LiveSyncDeps — that was already their design inside onyx.ts (so socket
@@ -19,6 +20,9 @@ import { patchLibraryItems } from './bookHelpers';
 export interface LiveSyncDeps {
   serverUrl: string;
   authToken: string;
+  // Shared React state rather than a one-time localStorage read, so toggling
+  // live sync immediately installs or removes every socket-driven listener.
+  liveSyncEnabled: boolean;
   // Live refs — kept current by useOnyxState's every-render sync effect.
   currentBookIdRef: RefObject<string>;
   currentEpisodeIdRef: RefObject<string | null>;
@@ -35,6 +39,8 @@ export interface LiveSyncDeps {
   setDownloads: Dispatch<SetStateAction<DownloadRecord[]>>;
   setTasks: Dispatch<SetStateAction<Task[]>>;
   setToast: (t: { message: string; type: 'success' | 'error' | 'info' } | null) => void;
+  recordActivity: (entry: { category: 'sync'; outcome: 'success' | 'error' | 'info'; message: string }) => void;
+  surfaceCorruptPersistenceNotices: () => Promise<void>;
   setUploadPerm: (v: boolean) => void;
   refreshLibrary: () => Promise<void>;
   applyServerProgress: (serverProgress: MediaProgress[]) => void;
@@ -43,6 +49,7 @@ export interface LiveSyncDeps {
 export function useLiveSync({
   serverUrl,
   authToken,
+  liveSyncEnabled,
   currentBookIdRef,
   currentEpisodeIdRef,
   playingRef,
@@ -57,20 +64,20 @@ export function useLiveSync({
   setDownloads,
   setTasks,
   setToast,
+  recordActivity,
+  surfaceCorruptPersistenceNotices,
   setUploadPerm,
   refreshLibrary,
   applyServerProgress,
 }: LiveSyncDeps): void {
   // Subscribe to progress-updated events forwarded from the Rust socket layer.
-  // Re-arms when serverUrl/authToken change so reconnects after logout/login
-  // pick up the correct context. Gated on onyx.sync.live so the listener is
-  // dormant when live sync is disabled.
+  // Re-arms when auth context or the live preference changes, so a runtime
+  // enable starts reconciliation immediately and a disable tears it down.
   useEffect(() => {
-    // Only subscribe when the socket is expected to be connected.
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
 
     let unlisten: (() => void) | undefined;
+    let disposed = false;
 
     listen<string>('progress-updated', event => {
       try {
@@ -126,28 +133,26 @@ export function useLiveSync({
       } catch (e) {
         log.error('sync', 'live progress parse failed', { err: String(e) });
       }
-    }).then(fn => { unlisten = fn; });
+    }).then(fn => { if (disposed) fn(); else unlisten = fn; });
 
     // Tear down the listener on unmount or when auth context changes so stale
     // subscriptions do not accumulate across login/logout cycles.
-    return () => { unlisten?.(); };
-  // serverUrl and authToken are the meaningful lifecycle triggers — the
-  // localStorage flag is read once at setup time per the Phase A pattern.
+    return () => { disposed = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
+  }, [liveSyncEnabled, serverUrl, authToken]);
 
   // ── Live library sync ──────────────────────────────────────────────────────
   // Subscribe to library item events forwarded from the Rust socket layer.
   // Active only when live sync is enabled. Uses the same setup/teardown
   // lifecycle as the progress listener above.
   useEffect(() => {
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
 
     // Three separate unlisten handles — each listener is torn down individually.
     let unlistenAdded:   (() => void) | undefined;
     let unlistenUpdated: (() => void) | undefined;
     let unlistenRemoved: (() => void) | undefined;
+    let disposed = false;
     const shelfAcceptsLibrary = (libraryId: string) => {
       if (libraryId === currentLibraryIdRef.current) return true;
       return currentLibraryIdRef.current === ALL_LIBRARIES_ID
@@ -164,7 +169,7 @@ export function useLiveSync({
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => [...prev, item]);
       } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenAdded = fn; });
+    }).then(fn => { if (disposed) fn(); else unlistenAdded = fn; });
 
     // item_updated — metadata, cover, or chapters changed; merge the new
     // data over the existing record so the shelf reflects it immediately.
@@ -175,7 +180,7 @@ export function useLiveSync({
         const item = patchLibraryItems([raw])[0];
         setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
       } catch (e) { log.error('sync', 'library-item-updated parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenUpdated = fn; });
+    }).then(fn => { if (disposed) fn(); else unlistenUpdated = fn; });
 
     // item_removed — book deleted from the server; remove it from the shelf and
     // clear any focused/current references so the player doesn't try to play a ghost.
@@ -204,16 +209,17 @@ export function useLiveSync({
           );
         });
       } catch (e) { log.error('sync', 'library-item-removed parse failed', { err: String(e) }); }
-    }).then(fn => { unlistenRemoved = fn; });
+    }).then(fn => { if (disposed) fn(); else unlistenRemoved = fn; });
 
     // Tear down all three listeners together on unmount or auth context change.
     return () => {
+      disposed = true;
       unlistenAdded?.();
       unlistenUpdated?.();
       unlistenRemoved?.();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
+  }, [liveSyncEnabled, serverUrl, authToken]);
 
   // ── Reconnect resync ───────────────────────────────────────────────────────
   // When the socket reconnects after a drop, events that fired during the
@@ -221,11 +227,11 @@ export function useLiveSync({
   // Perform a full refresh of library and media progress so the UI reflects
   // the current server state rather than a potentially stale snapshot.
   useEffect(() => {
-    const syncLive = localStorage.getItem('onyx.sync.live') === 'true';
-    if (!syncLive || !serverUrl || !authToken) return;
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
 
     let unlistenReconnect: (() => void) | undefined;
     let unlistenAuth: (() => void) | undefined;
+    let disposed = false;
 
     const resync = async () => {
       try {
@@ -245,17 +251,17 @@ export function useLiveSync({
 
     // Reconnect after a drop — events fired during the outage were lost, so
     // always resync to reflect current server state.
-    listen('socket-reconnected', () => { void resync(); }).then(fn => { unlistenReconnect = fn; });
+    listen('socket-reconnected', () => { void resync(); }).then(fn => { if (disposed) fn(); else unlistenReconnect = fn; });
 
     // First successful auth — fires when the socket connects (including the first
     // connect after an offline launch, where socket-reconnected does NOT fire).
     // Only resync when we're actually offline so normal online launches don't
     // trigger a redundant full library refetch right after the initial load.
-    listen('socket-authenticated', () => { if (isOfflineRef.current) void resync(); }).then(fn => { unlistenAuth = fn; });
+    listen('socket-authenticated', () => { if (isOfflineRef.current) void resync(); }).then(fn => { if (disposed) fn(); else unlistenAuth = fn; });
 
-    return () => { unlistenReconnect?.(); unlistenAuth?.(); };
+    return () => { disposed = true; unlistenReconnect?.(); unlistenAuth?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
+  }, [liveSyncEnabled, serverUrl, authToken]);
 
   // ── Background-task stream ──────────────────────────────────────────────────
   // Maintain the task list from ABS task_started / task_finished socket events.
@@ -263,9 +269,10 @@ export function useLiveSync({
   // list stays current even when that pane is closed. Requires live sync to be
   // connected; the panel still seeds via GET /api/tasks on mount as a fallback.
   useEffect(() => {
-    if (!serverUrl || !authToken) return;
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
     let unStart: (() => void) | undefined;
     let unFinish: (() => void) | undefined;
+    let disposed = false;
 
     // Upsert a task by id and cap growth: keep all running tasks plus the 25
     // most-recently-finished so the list cannot grow without bound.
@@ -284,12 +291,60 @@ export function useLiveSync({
       try { upsert(JSON.parse(raw) as Task); } catch { /* ignore malformed task payload */ }
     };
 
-    listen<string>('task-started',  e => handle(e.payload)).then(fn => { unStart = fn; });
-    listen<string>('task-finished', e => handle(e.payload)).then(fn => { unFinish = fn; });
+    listen<string>('task-started',  e => handle(e.payload)).then(fn => { if (disposed) fn(); else unStart = fn; });
+    listen<string>('task-finished', e => handle(e.payload)).then(fn => { if (disposed) fn(); else unFinish = fn; });
 
-    return () => { unStart?.(); unFinish?.(); };
+    return () => { disposed = true; unStart?.(); unFinish?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
+  }, [liveSyncEnabled, serverUrl, authToken]);
+
+  // Session progress writes happen in Rust and may fail even while Socket.IO
+  // remains healthy. These local events are therefore always observed and are
+  // deliberately distinct from sync-failed, which means the tracking task
+  // itself died. Failed positions have already been queued locally by Rust;
+  // the UI warns without interrupting playback, then confirms recovery.
+  useEffect(() => {
+    let unlistenWarning: (() => void) | undefined;
+    let unlistenRestored: (() => void) | undefined;
+    let disposed = false;
+
+    listen<{ currentTime: number; queued: boolean }>('session-sync-warning', event => {
+      log.warn('sync', 'session progress sync failed', {
+        currentTime: event.payload.currentTime,
+        queuedLocally: event.payload.queued,
+      });
+      setToast({
+        message: event.payload.queued
+          ? 'Progress sync is temporarily offline — your position was saved locally.'
+          : 'Progress sync failed and your position could not be saved locally.',
+        type: event.payload.queued ? 'info' : 'error',
+      });
+      recordActivity({
+        category: 'sync',
+        outcome: 'error',
+        message: event.payload.queued
+          ? 'Progress sync interrupted — position saved locally'
+          : 'Progress sync interrupted — local fallback failed',
+      });
+      // The fallback write reads the offline queue and may have been the first
+      // operation to discover that its persistence file was corrupt.
+      void surfaceCorruptPersistenceNotices();
+    }).then(fn => { if (disposed) fn(); else unlistenWarning = fn; });
+
+    listen<{ currentTime: number }>('session-sync-restored', event => {
+      log.info('sync', 'session progress sync restored', { currentTime: event.payload.currentTime });
+      setToast({ message: 'Progress sync restored', type: 'success' });
+      recordActivity({ category: 'sync', outcome: 'success', message: 'Progress sync restored' });
+    }).then(fn => { if (disposed) fn(); else unlistenRestored = fn; });
+
+    return () => {
+      disposed = true;
+      unlistenWarning?.();
+      unlistenRestored?.();
+    };
+  // Stable setters/callbacks; local backend events do not depend on socket auth.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A playback tick/sync task panicked in the backend (review H5): progress
   // tracking has stopped for this session. Rare by design — the watcher only
@@ -297,14 +352,15 @@ export function useLiveSync({
   // entry is the whole surface; restarting playback respawns the tasks.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     listen<{ task: string }>('sync-failed', e => {
       log.error('sync', 'playback task died — progress tracking stopped', { task: e.payload.task });
       setToast({
         message: 'Progress tracking stopped unexpectedly — restart playback to resume it.',
         type: 'error',
       });
-    }).then(fn => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then(fn => { if (disposed) fn(); else unlisten = fn; });
+    return () => { disposed = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

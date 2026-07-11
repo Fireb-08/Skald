@@ -477,6 +477,16 @@ export default function Player({ st }: PlayerProps) {
     const target = offsetWithin - container.clientHeight / 2 + el.clientHeight / 2;
     container.scrollTo({ top: Math.max(0, target), behavior });
   };
+  // A genuine user scroll (wheel or touch-drag) pins the list to manual mode and
+  // surfaces the "Return to current chapter" button immediately — the auto-centre
+  // effect only re-runs on chapter change, so without this the button stayed hidden
+  // until the track organically crossed a boundary. onPointerDown was deliberately
+  // dropped as the trigger: it also fired on a plain click to select a chapter,
+  // wrongly locking the list to manual mode for an interaction that isn't a scroll.
+  const markChapterListManual = () => {
+    chapterListManualRef.current = true;
+    setChapterListDiverged(true);
+  };
   // Keep the active chapter centred in its scroll container as progress advances
   // (and when the panel first becomes visible). Scrolls only the list container,
   // never the window — re-runs only when the chapter index changes, not per tick.
@@ -648,6 +658,9 @@ export default function Player({ st }: PlayerProps) {
     if (e.key === 'End') target = end;
     if (target === null) return;
     e.preventDefault();
+    // The window-level playback shortcuts also use arrow keys. This slider
+    // owns the handled key, so keep it from issuing a second global seek.
+    e.stopPropagation();
     seekAudio(target).catch(logErr);
     st.setPosition(target);
   };
@@ -963,11 +976,12 @@ export default function Player({ st }: PlayerProps) {
               {/* Center group — primary transport controls; flex: 1 with centered content
                   ensures play/pause/skip always sit at the geometric center of the row */}
               <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 14 }}>
-                <button onClick={() => seekAudio(Math.max(0, st.position - skipSeconds())).catch(logErr)} title={`Back ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                <button onClick={() => seekAudio(Math.max(0, st.position - skipSeconds())).catch(logErr)} aria-label={`Back ${skipSeconds()} seconds`} title={`Back ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
                   <Icon name="skip-back" size={isCompact ? 14 : 20} />
                 </button>
                 <button
                   onClick={handlePlayPause}
+                  aria-label={st.playing ? 'Pause' : 'Play'}
                   title={st.playing ? 'Pause (space)' : 'Play (space)'}
                   style={{ width: isCompact ? 36 : 64, height: isCompact ? 36 : 64, borderRadius: isCompact ? 18 : 32, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', boxShadow: '0 12px 32px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.4)' }}
                 >
@@ -975,7 +989,7 @@ export default function Player({ st }: PlayerProps) {
                     <Icon name={st.playing ? 'pause' : 'play'} size={isCompact ? 15 : 26} />
                   </span>
                 </button>
-                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipSeconds())).catch(logErr)} title={`Forward ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
+                <button onClick={() => seekAudio(Math.min(st.bookSecs, st.position + skipSeconds())).catch(logErr)} aria-label={`Forward ${skipSeconds()} seconds`} title={`Forward ${skipSeconds()}s`} style={isCompact ? { ...transportBtn(), width: 28, height: 28 } : transportBtn()}>
                   <Icon name="skip-forward" size={isCompact ? 14 : 20} />
                 </button>
               </div>
@@ -986,12 +1000,15 @@ export default function Player({ st }: PlayerProps) {
                   /* In compact mode, device selector moves here to sit left of bookmark/sleep */
                   <DeviceSelector st={st} compact style={{ flex: '0 0 auto', minWidth: 0, maxWidth: 120 }} />
                 )}
-                <button onClick={addBookmark} style={isCompact ? { ...transportBtnSmall(), width: 28, height: 28 } : transportBtnSmall()} title="Bookmark this moment">
+                <button onClick={addBookmark} aria-label="Bookmark this moment" style={isCompact ? { ...transportBtnSmall(), width: 28, height: 28 } : transportBtnSmall()} title="Bookmark this moment">
                   <Icon name="bookmark" size={isCompact ? 11 : 15} />
                 </button>
                 <div ref={sleepRef} style={{ position: 'relative', zIndex: 200 }}>
                   <button
                     onClick={() => setSleepOpen(o => !o)}
+                    aria-label={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
+                    aria-haspopup="menu"
+                    aria-expanded={sleepOpen}
                     title={sleepLabel ? `Sleep timer: ${sleepLabel}` : 'Sleep timer'}
                     style={{
                       ...transportBtnSmall(),
@@ -1233,7 +1250,7 @@ export default function Player({ st }: PlayerProps) {
               {chapterListDiverged && (
                 <button onClick={() => { chapterListManualRef.current = false; setChapterListDiverged(false); centerActiveChapter(); }} style={{ alignSelf: 'flex-start', marginBottom: 8, padding: '5px 9px', borderRadius: 6, border: '1px solid var(--onyx-accent-edge)', background: 'var(--onyx-accent-dim)', color: 'var(--onyx-accent)', cursor: 'pointer', fontFamily: MONO, fontSize: 9.5 }}>Return to current chapter</button>
               )}
-              <div ref={chapterListRef} onWheel={() => { chapterListManualRef.current = true; }} onPointerDown={() => { chapterListManualRef.current = true; }} style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
+              <div ref={chapterListRef} onWheel={markChapterListManual} onTouchMove={markChapterListManual} style={{ flex: 1, overflow: 'auto', marginRight: -8, paddingRight: 8 }}>
                 {displayChapters.map((c, i) => {
                   // Use focusedChIdx for focused non-playing book, -1 (no highlight)
                   // when not yet started, or live chIdx during active playback.

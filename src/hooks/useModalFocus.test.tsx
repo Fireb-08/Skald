@@ -7,6 +7,11 @@ function Fixture({ onClose }: { onClose: () => void }) {
   return <div ref={ref} role="dialog" tabIndex={-1}><button>First</button><button>Last</button></div>;
 }
 
+function NamedFixture({ name, onClose }: { name: string; onClose: () => void }) {
+  const ref = useModalFocus<HTMLDivElement>(onClose);
+  return <div ref={ref} role="dialog" aria-label={name} tabIndex={-1}><button>{name} first</button><button>{name} last</button></div>;
+}
+
 afterEach(cleanup);
 
 describe('useModalFocus', () => {
@@ -23,5 +28,19 @@ describe('useModalFocus', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledOnce();
     unmount();
+  });
+
+  it('gives Tab and Escape only to the topmost nested modal', () => {
+    const closeParent = vi.fn();
+    const closeChild = vi.fn();
+    render(<><NamedFixture name="Parent" onClose={closeParent} /><NamedFixture name="Confirmation" onClose={closeChild} /></>);
+
+    screen.getByRole('button', { name: 'Parent last' }).focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Confirmation first' }));
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(closeChild).toHaveBeenCalledOnce();
+    expect(closeParent).not.toHaveBeenCalled();
   });
 });

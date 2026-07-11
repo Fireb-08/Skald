@@ -87,9 +87,10 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
       width: '100%',
       flexShrink: 0,
       marginTop: 14,
-      background: 'var(--onyx-glass-strong)',
-      backdropFilter: 'blur(40px) saturate(120%)',
-      WebkitBackdropFilter: 'blur(40px) saturate(120%)',
+      // Static frost, no live backdrop-filter (see Glass.tsx for why). A soft
+      // diagonal gradient (lit at the top, deeper at the bottom) reads as glass
+      // rather than a flat tint, matching the Glass panels.
+      background: 'linear-gradient(158deg, rgba(28, 28, 35, 0.74) 0%, rgba(18, 18, 23, 0.84) 100%)',
       border: '1px solid var(--onyx-glass-edge)',
       borderRadius: 14,
       boxShadow: '0 16px 40px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)',
@@ -131,10 +132,17 @@ export default function MiniPlayer({ st, force = false }: MiniPlayerProps) {
         onKeyDown={event => {
           if (st.bookSecs <= 0) return;
           const step = 10;
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') { event.preventDefault(); seekAudio(Math.max(0, st.position - step)).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
-          else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') { event.preventDefault(); seekAudio(Math.min(st.bookSecs, st.position + step)).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
-          else if (event.key === 'Home') { event.preventDefault(); seekAudio(0).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
-          else if (event.key === 'End') { event.preventDefault(); seekAudio(st.bookSecs).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) })); }
+          let target: number | null = null;
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') target = Math.max(0, st.position - step);
+          else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') target = Math.min(st.bookSecs, st.position + step);
+          else if (event.key === 'Home') target = 0;
+          else if (event.key === 'End') target = st.bookSecs;
+          if (target === null) return;
+          event.preventDefault();
+          // Prevent the same arrow from bubbling into useOnyxState's global
+          // transport shortcut and advancing the book a second time.
+          event.stopPropagation();
+          seekAudio(target).catch(e => log.error('playback', 'mini player keyboard seek failed', { err: String(e) }));
         }}
         role="slider"
         tabIndex={0}

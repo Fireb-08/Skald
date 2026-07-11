@@ -24,9 +24,15 @@ describe('MiniPlayer accessibility', () => {
     expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
     const slider = screen.getByRole('slider', { name: 'Seek in Test Book' });
     expect(slider.getAttribute('aria-valuenow')).toBe('30');
+    const bubbledKeydown = vi.fn();
+    window.addEventListener('keydown', bubbledKeydown);
     fireEvent.keyDown(slider, { key: 'ArrowRight' });
     expect(api.seekAudio).toHaveBeenCalledWith(40);
     fireEvent.keyDown(slider, { key: 'End' });
     expect(api.seekAudio).toHaveBeenCalledWith(100);
+    // Slider-owned keys must never reach useOnyxState's window shortcut and
+    // issue a second seek against the same playback position.
+    expect(bubbledKeydown).not.toHaveBeenCalled();
+    window.removeEventListener('keydown', bubbledKeydown);
   });
 });

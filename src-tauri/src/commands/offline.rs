@@ -13,6 +13,65 @@ async fn delete_partial(file: tokio::fs::File, path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum DownloadRevealTarget {
+    Directory(std::path::PathBuf),
+    File(std::path::PathBuf),
+}
+
+// Resolve a registry-owned path rather than accepting an arbitrary file from the
+// renderer. Canonicalising both sides also follows junctions/symlinks before the
+// containment check, so a hand-edited downloads.json cannot use this command to
+// reveal a file outside the configured downloads root.
+fn resolve_download_reveal_target(
+    downloads_dir: &std::path::Path,
+    records: &[downloads::DownloadRecord],
+    item_id: &str,
+) -> Result<DownloadRevealTarget, String> {
+    let record = records.iter()
+        .find(|record| record.item_id == item_id)
+        .ok_or_else(|| "Download record not found".to_string())?;
+    let display_path = std::path::PathBuf::from(&record.file_path);
+    if !display_path.is_absolute() {
+        return Err("Downloaded path is not absolute".to_string());
+    }
+    let root = std::fs::canonicalize(downloads_dir)
+        .map_err(|e| format!("Failed to resolve downloads folder: {e}"))?;
+    let canonical_path = std::fs::canonicalize(&display_path)
+        .map_err(|e| format!("Downloaded path is unavailable: {e}"))?;
+    if !canonical_path.starts_with(&root) {
+        return Err("Refusing to reveal a path outside the downloads folder".to_string());
+    }
+    // Keep the registry's ordinary absolute path for Explorer. Windows
+    // canonicalize() returns a \\?\-prefixed path that is useful for validation
+    // but is not consistently understood by shell command-line parsing.
+    if canonical_path.is_file() {
+        Ok(DownloadRevealTarget::File(display_path))
+    } else if canonical_path.is_dir() {
+        Ok(DownloadRevealTarget::Directory(display_path))
+    } else {
+        Err("Downloaded path is not a regular file or folder".to_string())
+    }
+}
+
+// Sum the declared uncompressed size before extraction begins. This is read from
+// the ZIP central directory, so the caller can reserve room for the extracted
+// files while the downloaded archive is still occupying disk space.
+fn archive_uncompressed_size<R: std::io::Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<u64, String> {
+    let mut total = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)
+            .map_err(|e| format!("Zip entry error: {e}"))?;
+        if !entry.is_dir() {
+            total = total.checked_add(entry.size())
+                .ok_or_else(|| "ZIP uncompressed size is too large".to_string())?;
+        }
+    }
+    Ok(total)
+}
+
 #[tauri::command]
 pub fn get_cache_dir() -> Result<String, String> {
     // Delegates to paths so a user relocation (set_cache_dir) is reflected here.
@@ -36,6 +95,36 @@ pub fn reveal_downloads_dir() -> Result<(), String> {
         .arg(&dir)
         .spawn()
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Reveal a completed download without weakening `reveal_path`'s directory-only
+/// contract. Single-file books are selected in Explorer; multi-file books open
+/// their playback directory. The renderer supplies only an item id, and the
+/// backend resolves and contains the durable registry path under the downloads
+/// root before invoking Explorer.
+#[tauri::command]
+pub fn reveal_download_location(item_id: String) -> Result<(), String> {
+    let dir = downloads::downloads_dir()?;
+    let records = downloads::load_registry(&dir);
+    let target = resolve_download_reveal_target(&dir, &records, &item_id)
+        .map_err(|e| {
+            log::warn!(target: "skald::downloads",
+                "reveal_download_location refused item {item_id}: {e}");
+            e
+        })?;
+
+    let result = match target {
+        DownloadRevealTarget::File(path) => std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .spawn(),
+        DownloadRevealTarget::Directory(path) => std::process::Command::new("explorer")
+            .arg(path)
+            .spawn(),
+    };
+    result.map_err(|e| format!("Failed to open download location: {e}"))?;
+    log::info!(target: "skald::downloads",
+        "reveal_download_location opened item {item_id}");
     Ok(())
 }
 
@@ -180,17 +269,15 @@ pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
     let queue = downloads::load_progress_queue(&dl_dir);
     if queue.is_empty() { return Ok(0); }
     // Snapshot the server's current progress once for last-write-wins conflict
-    // resolution. The offline queue is book-only (no episode id), so map book-level
-    // (episodeId == null) records by library item id. If the snapshot can't be
+    // resolution, keyed by the same (item, episode) identity as the queue. If the snapshot can't be
     // fetched (still offline / transient error), proceed without the guard — a
     // best-effort flush is better than stranding progress, and the guard only
     // prevents *regressions*, never forward progress.
-    let server_last_update: std::collections::HashMap<String, i64> = match client.get_me().await {
+    let server_last_update: std::collections::HashMap<(String, Option<String>), i64> = match client.get_me().await {
         Ok(me) => me
             .media_progress
             .into_iter()
-            .filter(|p| p.episode_id.is_none())
-            .map(|p| (p.library_item_id, p.last_update))
+            .map(|p| ((p.library_item_id, p.episode_id), p.last_update))
             .collect(),
         Err(_) => std::collections::HashMap::new(),
     };
@@ -203,20 +290,28 @@ pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
         // newer update — e.g. the user listened on another device while this one was
         // offline. Without this, a stale local position would clobber the newer
         // server one on reconnect.
-        if let Some(&server_lu) = server_last_update.get(&entry.item_id) {
+        if let Some(&server_lu) = server_last_update.get(&(entry.item_id.clone(), entry.episode_id.clone())) {
             if server_lu >= entry.recorded_at {
-                let _ = downloads::remove_progress_entry(&dl_dir, &entry.item_id, entry.recorded_at);
+                let _ = downloads::remove_progress_entry(
+                    &dl_dir,
+                    &entry.item_id,
+                    entry.episode_id.as_deref(),
+                    entry.recorded_at,
+                );
                 continue;
             }
         }
-        // Offline downloads are book-only (the queue carries no episode id), so
-        // episode_id is None here — see OfflineProgressEntry in downloads.rs.
-        match client.update_progress(&entry.item_id, None, entry.current_time, entry.duration, entry.is_finished).await {
+        match client.update_progress(&entry.item_id, entry.episode_id.as_deref(), entry.current_time, entry.duration, entry.is_finished).await {
             Ok(()) => {
                 // Remove only after a confirmed server write — and only the exact
                 // entry we sent (matched on recorded_at), so a newer position the
                 // tick loop queued mid-flush isn't dropped.
-                let _ = downloads::remove_progress_entry(&dl_dir, &entry.item_id, entry.recorded_at);
+                let _ = downloads::remove_progress_entry(
+                    &dl_dir,
+                    &entry.item_id,
+                    entry.episode_id.as_deref(),
+                    entry.recorded_at,
+                );
                 flushed += 1;
             }
             Err(_) => {
@@ -245,8 +340,9 @@ pub fn mark_server_deleted(item_id: String) -> Result<(), String> {
 pub fn get_offline_progress(item_id: String) -> Result<Option<downloads::OfflineProgressEntry>, String> {
     let dl_dir = downloads::downloads_dir()?;
     let queue = downloads::load_progress_queue(&dl_dir);
-    // upsert_progress_entry keeps at most one entry per item_id, so find() is sufficient.
-    Ok(queue.into_iter().find(|e| e.item_id == item_id))
+    // Downloaded-book resume reads only the book-level entry; failed online
+    // podcast syncs remain distinct in the same queue until reconnect flush.
+    Ok(queue.into_iter().find(|e| e.item_id == item_id && e.episode_id.is_none()))
 }
 
 // Saves chapter data for a specific item to a per-item JSON cache file.
@@ -381,15 +477,28 @@ pub async fn download_item(
     // 0 signals an unknown length — frontend shows an indeterminate progress bar.
     let total_bytes = response.content_length().unwrap_or(0);
 
-    // Warn before touching the output path when the server supplied a known
-    // length that cannot fit on the target volume. Unknown-length streams still
-    // proceed, because their final size cannot be estimated safely.
+    // Check that the incoming ZIP itself fits before touching the output path.
+    // A second preflight after download reads the ZIP's uncompressed total and
+    // ensures extraction also fits while this archive remains on disk.
     if total_bytes > 0 {
-        let available = fs2::available_space(&dl_dir)
-            .map_err(|e| format!("Failed to inspect download disk space: {e}"))?;
+        let available = match fs2::available_space(&dl_dir) {
+            Ok(available) => available,
+            Err(e) => {
+                cancel_registry.lock().await.remove(&item_id);
+                let msg = format!("Failed to inspect download disk space: {e}");
+                log::error!(target: "skald::downloads",
+                    "download preflight failed for item {item_id}: {msg}");
+                let _ = app_handle.emit("download-failed", serde_json::json!({
+                    "itemId": item_id, "title": title, "error": msg,
+                }));
+                return Err(msg);
+            }
+        };
         if total_bytes > available {
             cancel_registry.lock().await.remove(&item_id);
             let msg = format!("Insufficient disk space: need {total_bytes} bytes, only {available} bytes available");
+            log::warn!(target: "skald::downloads",
+                "download ZIP preflight rejected item {item_id}: need={total_bytes} available={available}");
             let _ = app_handle.emit("download-failed", serde_json::json!({
                 "itemId": item_id, "title": title, "error": msg,
             }));
@@ -531,20 +640,44 @@ pub async fn download_item(
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
         .collect();
     if safe_item_dir.is_empty() {
+        let _ = std::fs::remove_file(&file_path);
         cancel_registry.lock().await.remove(&item_id);
-        return Err("Download failed: empty item id".to_string());
+        let msg = "Download failed: empty item id".to_string();
+        let _ = app_handle.emit("download-failed", serde_json::json!({
+            "itemId": item_id, "title": title, "error": msg,
+        }));
+        return Err(msg);
     }
     let extract_dir = dl_dir.join(&safe_item_dir);
-    std::fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("Failed to create extract dir: {e}"))?;
 
     // Run extraction inside a closure so all failure branches share one cleanup
     // block rather than duplicating the remove_dir_all / remove_file calls.
+    // Preflight errors happen before extraction_started is set, preserving any
+    // pre-existing completed directory while still deleting this failed ZIP.
+    let extract_dir_preexisting = extract_dir.exists();
+    let mut extraction_started = false;
     let zip_result: Result<(), String> = (|| {
         let zip_file = std::fs::File::open(&file_path)
             .map_err(|e| format!("Failed to open zip: {e}"))?;
         let mut archive = zip::ZipArchive::new(zip_file)
             .map_err(|e| format!("Failed to read zip: {e}"))?;
+
+        // available_space is measured after the ZIP has been written, so the
+        // uncompressed total is precisely the additional peak space required.
+        let uncompressed_bytes = archive_uncompressed_size(&mut archive)?;
+        let available = fs2::available_space(&dl_dir)
+            .map_err(|e| format!("Failed to inspect extraction disk space: {e}"))?;
+        if uncompressed_bytes > available {
+            return Err(format!(
+                "Insufficient disk space for extraction: need {uncompressed_bytes} additional bytes while the {bytes_downloaded}-byte archive is retained, only {available} bytes available"
+            ));
+        }
+        log::info!(target: "skald::downloads",
+            "download extraction preflight passed for item {item_id}: archive={bytes_downloaded} extracted={uncompressed_bytes} available={available}");
+
+        std::fs::create_dir_all(&extract_dir)
+            .map_err(|e| format!("Failed to create extract dir: {e}"))?;
+        extraction_started = true;
 
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)
@@ -567,9 +700,13 @@ pub async fn download_item(
     // On extraction failure: clean up whatever was partially written, remove the
     // ZIP, evict the registry token, and surface the error to the frontend.
     if let Err(e) = zip_result {
-        let _ = std::fs::remove_dir_all(&extract_dir); // partial extracted files
+        if extraction_started || !extract_dir_preexisting {
+            let _ = std::fs::remove_dir_all(&extract_dir); // partial extracted files
+        }
         let _ = std::fs::remove_file(&file_path);      // the ZIP itself
         cancel_registry.lock().await.remove(&item_id);
+        log::warn!(target: "skald::downloads",
+            "download extraction failed for item {item_id}: {e}");
         let _ = app_handle.emit("download-failed", serde_json::json!({
             "itemId": item_id,
             "title": title,
@@ -647,6 +784,8 @@ pub async fn download_item(
         "itemId": item_id,
         "title": title,
     }));
+    log::info!(target: "skald::downloads",
+        "download completed for item {item_id}: extracted_bytes={file_size}");
 
     Ok(playback_path)
 }
@@ -773,4 +912,73 @@ pub fn remove_download(item_id: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn record(item_id: &str, path: &std::path::Path) -> downloads::DownloadRecord {
+        downloads::DownloadRecord {
+            item_id: item_id.to_string(),
+            title: "Test book".to_string(),
+            author: "Test author".to_string(),
+            file_path: path.to_string_lossy().into_owned(),
+            file_size: 0,
+            downloaded_at: 0,
+            server_deleted: false,
+        }
+    }
+
+    #[test]
+    fn reveal_target_handles_single_and_multi_file_downloads() {
+        let temp = tempfile::tempdir().unwrap();
+        let single_dir = temp.path().join("single");
+        std::fs::create_dir_all(&single_dir).unwrap();
+        let single_file = single_dir.join("book.m4b");
+        std::fs::write(&single_file, b"audio").unwrap();
+        let multi_dir = temp.path().join("multi");
+        std::fs::create_dir_all(&multi_dir).unwrap();
+        let records = vec![record("single", &single_file), record("multi", &multi_dir)];
+
+        let single = resolve_download_reveal_target(temp.path(), &records, "single").unwrap();
+        let multi = resolve_download_reveal_target(temp.path(), &records, "multi").unwrap();
+
+        assert_eq!(single, DownloadRevealTarget::File(single_file));
+        assert_eq!(multi, DownloadRevealTarget::Directory(multi_dir));
+    }
+
+    #[test]
+    fn reveal_target_rejects_registry_paths_outside_downloads_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("outside.m4b");
+        std::fs::write(&outside_file, b"audio").unwrap();
+        let records = vec![record("outside", &outside_file)];
+
+        let error = resolve_download_reveal_target(root.path(), &records, "outside").unwrap_err();
+
+        assert!(error.contains("outside the downloads folder"));
+    }
+
+    #[test]
+    fn archive_size_counts_regular_files_before_extraction() {
+        let temp = tempfile::tempdir().unwrap();
+        let zip_path = temp.path().join("book.zip");
+        {
+            let file = std::fs::File::create(&zip_path).unwrap();
+            let mut writer = zip::ZipWriter::new(file);
+            writer.add_directory("tracks/", zip::write::SimpleFileOptions::default()).unwrap();
+            writer.start_file("tracks/01.mp3", zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(b"abc").unwrap();
+            writer.start_file("cover.jpg", zip::write::SimpleFileOptions::default()).unwrap();
+            writer.write_all(b"12345").unwrap();
+            writer.finish().unwrap();
+        }
+        let file = std::fs::File::open(zip_path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+
+        assert_eq!(archive_uncompressed_size(&mut archive).unwrap(), 8);
+    }
 }

@@ -73,6 +73,16 @@ describe('TopNav selector accessibility', () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it('switches libraries without erasing the source library search', () => {
+    const st = state();
+    render(<TopNav st={st} />);
+    fireEvent.click(screen.getByTitle('Switch library'));
+    fireEvent.click(screen.getByRole('option', { name: /Two/ }));
+
+    expect(st.setActiveLibrary).toHaveBeenCalledWith('two');
+    expect(st.setSearch).not.toHaveBeenCalled();
+  });
+
   it('marks the search-scope selection and supports Home and End', () => {
     render(<TopNav st={state()} />);
     const trigger = screen.getByRole('button', { name: 'Search field scope' });

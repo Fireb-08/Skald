@@ -62,6 +62,8 @@ function stubTwoSourceWorld() {
   tauri.handlers.set('get_local_library_items', () => [book('local-book', 'Local Book', 'C:/Books/Local Book')]);
   tauri.handlers.set('get_local_library_progress', () => []);
   tauri.handlers.set('get_downloads', () => []);
+  tauri.handlers.set('take_corrupt_persistence_notices', () => []);
+  tauri.handlers.set('flush_offline_progress', () => 0);
   tauri.handlers.set('load_library_cache', () => []);
 }
 
@@ -150,5 +152,54 @@ describe('journey: partial combined load is visible and recoverable (H1)', () =>
     act(() => result.current.dismissAllLibrariesPartial());
     expect(result.current.allLibrariesPartial).toBeNull();
     expect(result.current.library.map(b => b.id)).toEqual(['local-book']);
+  });
+});
+
+describe('playback-state regression guards', () => {
+  it('does not run the global arrow seek for a key already owned by a component', async () => {
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    act(() => { result.current.setCurrentBookId('abs-book'); });
+    const before = tauri.calls.filter(call => call.cmd === 'seek_audio').length;
+
+    const handled = new KeyboardEvent('keydown', {
+      key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true,
+    });
+    handled.preventDefault();
+    act(() => { window.dispatchEvent(handled); });
+    expect(tauri.calls.filter(call => call.cmd === 'seek_audio')).toHaveLength(before);
+
+    // Prove the shortcut itself is active: only the prevented event is ignored.
+    const unhandled = new KeyboardEvent('keydown', {
+      key: 'ArrowRight', code: 'ArrowRight', bubbles: true, cancelable: true,
+    });
+    act(() => { window.dispatchEvent(unhandled); });
+    expect(tauri.calls.filter(call => call.cmd === 'seek_audio').length).toBeGreaterThan(before);
+  });
+
+  it('surfaces offline-progress corruption discovered after the registry poll', async () => {
+    let resolveFlush: ((value: number) => void) | undefined;
+    const pendingFlush = new Promise<number>(resolve => { resolveFlush = resolve; });
+    tauri.handlers.set('flush_offline_progress', () => pendingFlush);
+
+    let noticePolls = 0;
+    tauri.handlers.set('take_corrupt_persistence_notices', () => {
+      noticePolls += 1;
+      return noticePolls === 1 ? [] : ['offline progress queue'];
+    });
+
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(noticePolls).toBe(1));
+    await waitFor(() => expect(tauri.calls.some(call => call.cmd === 'flush_offline_progress')).toBe(true));
+    expect(result.current.toast).toBeNull();
+
+    await act(async () => {
+      resolveFlush?.(0);
+      await pendingFlush;
+    });
+    await waitFor(() => {
+      expect(result.current.toast?.message).toContain('Damaged offline progress queue reset');
+    });
   });
 });

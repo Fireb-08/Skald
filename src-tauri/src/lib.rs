@@ -201,14 +201,33 @@ pub fn run() {
             .inner_size(1280.0, 800.0)
             .min_inner_size(1024.0, 640.0)
             .decorations(false)
-            .transparent(true)
+            .transparent(false)
+            // Force the webview onto WebView2's OPAQUE composite path. With
+            // a transparent window, WebView2 composites the
+            // page through a per-pixel-alpha -> DWM present; when a click repaints a
+            // small sub-rect inside a backdrop-filter panel, the re-rastered strip is
+            // presented with alpha that doesn't match the retained tiles, so the
+            // partial-blur mismatch reads as a lighter vertical "band" that only a
+            // full re-present (window blur/resize) clears. An opaque webview background
+            // makes that mismatch invisible (WebView2Feedback #4945). On Windows a
+            // non-zero alpha is coerced to fully opaque; 13,13,15 == index.css body
+            // #0d0d0f, so the app looks identical — the frosted glass is produced
+            // in-DOM (OnyxWash + Glass blur over the opaque body), never via window
+            // see-through, so nothing visual is lost.
+            .background_color(tauri::webview::Color(13, 13, 15, 255))
             .shadow(true)
             .disable_drag_drop_handler()
+            // Suppress WebView2's browser-level autofill ("Saved info" dropdown +
+            // forced white input styling), which ignores autocomplete="off" and
+            // looks alien over the Onyx UI (it popped up on the shelf search box).
+            // Windows-only setting (no-op elsewhere); deliberately does NOT touch
+            // password autofill — Skald stores credentials in the keyring itself.
+            .general_autofill_enabled(false)
             .build()?;
 
             // Confirm the handler was disabled at startup — regressing this silently
             // re-breaks all internal DOM drags (see CLAUDE.md critical lesson 12).
-            log::info!(target: "skald::app", "window '{}' created with file-drop handler disabled", win.label());
+            log::info!(target: "skald::app", "opaque window '{}' created with file-drop handler disabled and general autofill off", win.label());
 
             // Start the local-podcast auto-download scheduler (launch catch-up +
             // per-minute cron evaluation). No-op until a podcast enables it.
@@ -257,6 +276,7 @@ pub fn run() {
             commands::reveal_cache_dir,
             commands::get_downloads_dir,
             commands::reveal_downloads_dir,
+            commands::reveal_download_location,
             commands::set_downloads_dir,
             commands::set_cache_dir,
             commands::reveal_path,
@@ -471,7 +491,7 @@ pub fn run() {
 
                         // Extract data while holding the lock, then drop it
                         // before the async HTTP call (MutexGuard is not Send).
-                        let (sid, ct, tl, client) = {
+                        let (sid, item_id, episode_id, duration, ct, tl, client) = {
                             let guard = mgr.lock().await;
                             // Cancel the background tick and sync tasks before releasing
                             // the lock — prevents a racing 10-second sync from firing
@@ -506,6 +526,7 @@ pub fn run() {
                                         // Downloaded ABS book — offline queue (flushes later).
                                         let entry = downloads::OfflineProgressEntry {
                                             item_id: item_id.clone(),
+                                            episode_id: None,
                                             current_time: pos,
                                             duration: dur,
                                             progress: if dur > 0.0 { pos / dur } else { 0.0 },
@@ -537,19 +558,62 @@ pub fn run() {
 
                             match guard.session_id.clone() {
                                 None => return,
-                                Some(id) => (
-                                    id,
-                                    *guard.current_time.lock().unwrap(),
-                                    *guard.time_listened.lock().unwrap(),
-                                    guard.client.clone(),
-                                ),
+                                Some(id) => {
+                                    let player_duration = guard
+                                        .player
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .as_ref()
+                                        .map(audio::AudioPlayer::duration)
+                                        .unwrap_or(0.0);
+                                    (
+                                        id,
+                                        guard.online_item_id.clone(),
+                                        guard.online_episode_id.clone(),
+                                        guard.online_duration.max(player_duration),
+                                        *guard.current_time.lock().unwrap(),
+                                        *guard.time_listened.lock().unwrap(),
+                                        guard.client.clone(),
+                                    )
+                                }
                             }
                         };
-                        let _ = tokio::time::timeout(
+                        let close_result = tokio::time::timeout(
                             std::time::Duration::from_secs(5),
                             client.close_session(&sid, ct, tl),
                         )
                         .await;
+                        let queue_fallback = || match item_id.as_deref() {
+                            Some(item) => match session::queue_server_progress_fallback(
+                                item,
+                                episode_id.as_deref(),
+                                ct,
+                                duration,
+                            ) {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    log::error!(target: "skald::sync", "final playback fallback persist failed: {error}");
+                                    false
+                                }
+                            },
+                            None => {
+                                log::error!(target: "skald::sync", "final playback fallback unavailable: active server item missing");
+                                false
+                            }
+                        };
+                        match close_result {
+                            Ok(Ok(())) => {
+                                log::info!(target: "skald::sync", "final playback session sync completed");
+                            }
+                            Ok(Err(error)) => {
+                                let queued = queue_fallback();
+                                log::error!(target: "skald::sync", "final playback session sync failed queued_locally={queued}: {error}");
+                            }
+                            Err(_) => {
+                                let queued = queue_fallback();
+                                log::error!(target: "skald::sync", "final playback session sync timed out queued_locally={queued}");
+                            }
+                        }
                     });
                 });
                 let _ = t.join();

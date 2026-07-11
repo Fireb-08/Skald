@@ -22,6 +22,12 @@ export function revealDownloadsDir(): Promise<void> {
   return invoke('reveal_downloads_dir');
 }
 
+/** Reveal a completed download resolved from the backend registry. Single-file
+ *  books are selected in Explorer; multi-file books open their directory. */
+export function revealDownloadLocation(itemId: string): Promise<void> {
+  return invoke('reveal_download_location', { itemId });
+}
+
 /** Relocate the downloads root: moves existing files, repoints the registry, and
  *  persists the override so all future resolutions use the new path. */
 export function setDownloadsDir(path: string): Promise<void> {
@@ -109,6 +115,7 @@ export function cancelDownload(itemId: string): Promise<void> {
 // Mirrors downloads::OfflineProgressEntry in src-tauri/src/downloads.rs.
 export interface OfflineProgressEntry {
   itemId: string;
+  episodeId?: string | null;
   currentTime: number;
   duration: number;
   progress: number;    // 0.0–1.0

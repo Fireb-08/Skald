@@ -93,13 +93,13 @@ export default function TopNav({ st }: TopNavProps) {
     else focusOption(refs, current <= 0 ? refs.length - 1 : current - 1);
   };
 
-  // Switch the active library and reset the shelf view context so the new
-  // library starts clean (no stale search/filter/tab/focus from the old one).
+  // Switch the active library and reset source-specific navigation. Search and
+  // focus are persisted per library, so the target library restores its own
+  // values instead of erasing the source library through a stale setter closure.
   const switchLibrary = (id: string) => {
     if (id === st.currentLibraryId) { st.setScreen('library'); return; }
     st.setActiveLibrary(id).catch(e => log.error('library', 'library switch failed', { id, err: String(e) }));
     st.setScreen('library');
-    st.setSearch('');
     st.setContextFilter(null);
     st.setShelfTab('library');
     // Focus is scoped per library now — the target library's own focused book
@@ -194,9 +194,9 @@ export default function TopNav({ st }: TopNavProps) {
               // Frosted dark fill (panel tone, mostly opaque) behind the blur —
               // `--onyx-glass` alone is near-clear and hurts text readability over
               // the shelf, so we tint it for a frosted-but-legible menu surface.
-              background: st.translucent ? 'rgba(19, 19, 22, 0.88)' : 'var(--onyx-panel)',
-              backdropFilter: st.translucent ? 'blur(40px) saturate(120%)' : 'none',
-              WebkitBackdropFilter: st.translucent ? 'blur(40px) saturate(120%)' : 'none',
+              // Static frost, no live backdrop-filter (see Glass.tsx) — the menu is
+              // near-opaque for legibility, so dropping the blur is visually minor.
+              background: st.translucent ? 'rgba(20, 20, 25, 0.95)' : 'var(--onyx-panel)',
               border: '1px solid var(--onyx-accent-edge)', borderRadius: 10,
               boxShadow: '0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
               padding: 5, overflow: 'hidden',
@@ -211,6 +211,11 @@ export default function TopNav({ st }: TopNavProps) {
                   <button
                     key={l.id}
                     ref={(node) => { libOptionRefs.current[index] = node; }}
+                    // Roving tabindex: options are reached via Arrow/Home/End (handleListboxKey
+                    // moves focus programmatically), never via Tab. Native buttons default to
+                    // tabIndex 0, which would trap Tab inside the listbox instead of exiting it —
+                    // violating the ARIA listbox pattern. -1 keeps them focusable but out of tab order.
+                    tabIndex={-1}
                     role="option"
                     aria-selected={active}
                     onClick={() => { switchLibrary(l.id); setLibMenuOpen(false); }}
@@ -364,9 +369,8 @@ export default function TopNav({ st }: TopNavProps) {
                 // Same frosted panel surface as the library switcher menu above:
                 // tinted translucent fill behind the blur, gold accent edge, deep
                 // shadow + inner highlight — so the two menus read as one family.
-                background: st.translucent ? 'rgba(19, 19, 22, 0.88)' : 'var(--onyx-panel)',
-                backdropFilter: st.translucent ? 'blur(40px) saturate(120%)' : 'none',
-                WebkitBackdropFilter: st.translucent ? 'blur(40px) saturate(120%)' : 'none',
+                // Static frost, no live backdrop-filter (see Glass.tsx).
+                background: st.translucent ? 'rgba(20, 20, 25, 0.95)' : 'var(--onyx-panel)',
                 border: '1px solid var(--onyx-accent-edge)', borderRadius: 10,
                 boxShadow: '0 24px 60px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
                 padding: 5, overflow: 'hidden',
@@ -381,6 +385,9 @@ export default function TopNav({ st }: TopNavProps) {
                     <button
                       key={s.value}
                       ref={(node) => { scopeOptionRefs.current[index] = node; }}
+                      // Roving tabindex — see the library listbox above. Options are Arrow-key
+                      // navigable only; -1 keeps Tab from cycling through them instead of exiting.
+                      tabIndex={-1}
                       role="option"
                       aria-selected={active}
                       onClick={() => { st.setSearchScope(s.value); setScopeOpen(false); }}

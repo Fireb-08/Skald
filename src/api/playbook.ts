@@ -64,6 +64,22 @@ export async function playBook(
       st.setSessionReady(false);
       st.setSessionId('');
 
+      // Every downloaded ABS playback writes through this queue, even when an
+      // explicit/server resume position means we do not need its value today.
+      // Read it once up front so corruption is discovered and surfaced before
+      // the tick task can silently replace the damaged file. Local-library
+      // items use the SQLite catalog and never touch this queue.
+      let offlineProgress: Awaited<ReturnType<typeof getOfflineProgress>> = null;
+      if (!isLocalLibrary) {
+        try {
+          offlineProgress = await getOfflineProgress(bookId);
+        } catch {
+          // Resume still has the explicit/server/zero fallbacks below.
+        } finally {
+          await st.surfaceCorruptPersistenceNotices();
+        }
+      }
+
       // Resolve start position: explicit override > server progress > offline queue > 0.
       // When offline, st.mediaProgress may be empty since it requires a server fetch.
       // Fall back to the offline progress queue which persists locally between launches.
@@ -90,13 +106,8 @@ export async function playBook(
             // (same replay rule as the local-library branch above).
             startTime = saved.isFinished ? 0 : saved.currentTime;
           } else {
-            // Downloaded ABS book — query the local offline queue written by the tick task.
-            try {
-              const offlineProgress = await getOfflineProgress(bookId);
-              startTime = offlineProgress && !offlineProgress.isFinished ? offlineProgress.currentTime : 0;
-            } catch {
-              startTime = 0;
-            }
+            // Downloaded ABS book — use the local offline queue written by the tick task.
+            startTime = offlineProgress && !offlineProgress.isFinished ? offlineProgress.currentTime : 0;
           }
         }
       }

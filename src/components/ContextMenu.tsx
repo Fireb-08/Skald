@@ -103,19 +103,20 @@ export default function ContextMenu({ x, y, sections, onClose }: ContextMenuProp
     if (!target.matches('button[role="menuitem"]')) return;
     const rows = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([disabled])') ?? []);
     const index = rows.indexOf(target);
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
       e.preventDefault();
+      e.stopPropagation();
       const next = e.key === 'Home' ? 0 : e.key === 'End' ? rows.length - 1 : (index + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
       rows[next]?.focus();
       return;
     }
     const parentKey = target.dataset.parentKey;
     if (e.key === 'ArrowRight' && target.dataset.hasSub === 'true') {
-      e.preventDefault(); setOpenSub(target.dataset.menuKey ?? null); focusRow(`${target.dataset.menuKey}.0`); return;
+      e.preventDefault(); e.stopPropagation(); setOpenSub(target.dataset.menuKey ?? null); focusRow(`${target.dataset.menuKey}.0`); return;
     }
     if (e.key === 'ArrowLeft' && parentKey) {
-      e.preventDefault(); setOpenSub(null); focusRow(parentKey); return;
+      e.preventDefault(); e.stopPropagation(); setOpenSub(null); focusRow(parentKey); return;
     }
   };
 

@@ -4,10 +4,11 @@
 // Do NOT switch to HTTP header auth — LibVLC does not reliably forward
 // custom headers on Windows (CLAUDE.md critical lesson 2).
 
-use std::ffi::{CStr, CString, c_void};
+use std::collections::HashSet;
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::Notify;
 use vlc::{Instance, Media, MediaPlayer, MediaPlayerAudioEx, State, EventType};
 use crate::eq::EqSettings;
@@ -36,21 +37,51 @@ extern "C" {
     );
 }
 
-/// Swallow LibVLC's internal log stream. Its default logger prints straight to
-/// stderr, spamming the dev terminal on every player init/play with "option X
-/// does not exist" errors for video modules the bundled audio-only build omits
-/// (vmem/marquee/logo/adjust) plus per-play input jitter — none of it
-/// actionable for an audio player. Real playback failures still surface as
-/// Result errors on load()/play() (logged at the command boundary), and release
-/// builds have no console, so nothing diagnostic is lost. The va_list argument
-/// is deliberately never read.
-extern "C" fn vlc_log_drop(
+/// Redact and bound the static LibVLC format template before it reaches the
+/// rotated application log. The callback's `va_list` is intentionally not read:
+/// formatting it from Rust is ABI-sensitive, and its values can include the
+/// token-bearing media URL.
+fn safe_vlc_log_template(template: &str) -> String {
+    let single_line = template.trim().replace(['\r', '\n'], " ");
+    crate::redact_url(&single_line).chars().take(400).collect()
+}
+
+/// Forward each distinct LibVLC warning/error template once. Deduplication keeps
+/// omitted video-module noise out of the log flood while preserving evidence of
+/// asynchronous open, decoder, and network failures that `play()` cannot return.
+extern "C" fn vlc_log_forward(
     _data: *mut c_void,
-    _level: i32,
+    level: i32,
     _ctx: *const c_void,
-    _fmt: *const c_char,
+    fmt: *const c_char,
     _args: *mut c_void,
 ) {
+    if level < 3 || fmt.is_null() {
+        return;
+    }
+    // Never unwind across LibVLC's C callback boundary.
+    let _ = std::panic::catch_unwind(|| {
+        let template = unsafe { CStr::from_ptr(fmt) }.to_string_lossy();
+        let message = safe_vlc_log_template(&template);
+        if message.is_empty() {
+            return;
+        }
+        static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+        let key = format!("{level}:{message}");
+        let first = SEEN
+            .get_or_init(|| Mutex::new(HashSet::new()))
+            .lock()
+            .map(|mut seen| seen.insert(key))
+            .unwrap_or(false);
+        if !first {
+            return;
+        }
+        if level >= 4 {
+            log::error!(target: "skald::playback", "LibVLC error: {message}");
+        } else {
+            log::warn!(target: "skald::playback", "LibVLC warning: {message}");
+        }
+    });
 }
 
 // Mirror of libvlc_audio_output_device_t (linked list node).
@@ -109,10 +140,9 @@ impl AudioPlayer {
     pub fn new() -> Result<Self, String> {
         let instance = Instance::new()
             .ok_or_else(|| "Failed to initialize LibVLC instance".to_string())?;
-        // Route LibVLC's log stream into the no-op callback immediately — see
-        // vlc_log_drop for why the default stderr logger is pure noise here.
+        // Replace LibVLC's stderr logger with the filtered structured callback.
         unsafe {
-            libvlc_log_set(instance.raw() as *mut c_void, vlc_log_drop, std::ptr::null_mut());
+            libvlc_log_set(instance.raw() as *mut c_void, vlc_log_forward, std::ptr::null_mut());
         }
         let media_player = MediaPlayer::new(&instance)
             .ok_or_else(|| "Failed to create LibVLC media player".to_string())?;
@@ -355,6 +385,25 @@ impl AudioPlayer {
         self.media_player.is_playing()
     }
 
+    /// Report startup failure separately from `play()`: LibVLC opens media on an
+    /// internal thread and can enter Error only after the immediate call succeeds.
+    pub fn playback_error(&self) -> bool {
+        self.media_player.state() == State::Error
+    }
+
+    pub fn playback_state_name(&self) -> &'static str {
+        match self.media_player.state() {
+            State::NothingSpecial => "nothing-special",
+            State::Opening => "opening",
+            State::Buffering => "buffering",
+            State::Playing => "playing",
+            State::Paused => "paused",
+            State::Stopped => "stopped",
+            State::Ended => "ended",
+            State::Error => "error",
+        }
+    }
+
     /// True only when `get_time()` reflects a real playback position — i.e. the
     /// engine is steadily Playing or Paused with media loaded. During Opening /
     /// Buffering / Stopped / Ended / Error, libvlc's `get_time()` returns -1 (which
@@ -502,5 +551,19 @@ pub fn eq_band_frequencies() -> Vec<f32> {
         (0..count)
             .map(|i| libvlc_audio_equalizer_get_band_frequency(i))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_vlc_log_template;
+
+    #[test]
+    fn vlc_log_templates_are_single_line_bounded_and_redacted() {
+        let long = format!("open failed https://abs.test/audio?token=secret\n{}", "x".repeat(500));
+        let safe = safe_vlc_log_template(&long);
+        assert!(!safe.contains("secret"));
+        assert!(!safe.contains('\n'));
+        assert!(safe.chars().count() <= 400);
     }
 }

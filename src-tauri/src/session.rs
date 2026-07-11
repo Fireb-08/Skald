@@ -112,12 +112,19 @@ fn watch_task<R: tauri::Runtime>(
 pub struct SessionManager {
     pub client: AbsClient,
     pub session_id: Option<String>,
+    // Server identity for the active session. Session sync itself is keyed by
+    // session_id, but a failed sync/close must fall back to the durable progress
+    // queue, whose key is (library item, optional podcast episode).
+    pub online_item_id: Option<String>,
+    pub online_episode_id: Option<String>,
+    pub online_duration: f64,
     pub current_time: Arc<Mutex<f64>>,
     pub time_listened: Arc<Mutex<f64>>,
     // None until start_session is first called — avoids loading libvlc.dll at
     // app startup before the user has a chance to see the window.
     pub player: Arc<Mutex<Option<AudioPlayer>>>,
     active: Arc<AtomicBool>,
+    sync_degraded: Arc<AtomicBool>,
     // True while playing from a local file (no server session).
     // Set by play_local(); cleared by start_session() when returning to online playback.
     // The sync task is never spawned during local playback, so this flag is
@@ -183,15 +190,38 @@ pub fn flush_listen_time(
     }
 }
 
+/// Save a server-bound position locally when session sync cannot reach ABS.
+/// The regular reconnect/startup queue flush later sends it through the direct
+/// progress endpoint, so a failed session request never becomes silent loss.
+pub fn queue_server_progress_fallback(
+    item_id: &str,
+    episode_id: Option<&str>,
+    current_time: f64,
+    duration: f64,
+) -> Result<(), String> {
+    let downloads_dir = crate::downloads::downloads_dir()?;
+    crate::downloads::queue_server_progress(
+        &downloads_dir,
+        item_id,
+        episode_id,
+        current_time,
+        duration,
+    )
+}
+
 impl SessionManager {
     pub fn new(client: AbsClient) -> Self {
         Self {
             client,
             session_id: None,
+            online_item_id: None,
+            online_episode_id: None,
+            online_duration: 0.0,
             current_time: Arc::new(Mutex::new(0.0)),
             time_listened: Arc::new(Mutex::new(0.0)),
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
+            sync_degraded: Arc::new(AtomicBool::new(false)),
             is_local: false,
             local_item_id: None,
             is_local_library: false,
@@ -222,6 +252,10 @@ impl SessionManager {
         self.is_local_library = false;
         // Clear the local item ID — no longer tracking offline progress.
         self.local_item_id = None;
+        self.local_episode_id = None;
+        self.online_item_id = None;
+        self.online_episode_id = None;
+        self.online_duration = 0.0;
         // Online playback is counted by the server's own listening stats — stop
         // any local stats session (the old tick task drains pending on exit).
         self.local_listen_session = None;
@@ -248,6 +282,9 @@ impl SessionManager {
 
         let session = self.client.open_session(item_id, episode_id, start_time).await?;
         self.session_id = Some(session.id.clone());
+        self.online_item_id = Some(item_id.to_string());
+        self.online_episode_id = episode_id.filter(|id| !id.is_empty()).map(str::to_string);
+        self.online_duration = session.audio_tracks.iter().map(|track| track.duration).sum();
         // Prefer the caller-supplied start_time so LibVLC loads at the exact
         // chapter position even if the server's currentTime differs slightly.
         let load_time = resolve_load_time(start_time, session.current_time);
@@ -283,6 +320,8 @@ impl SessionManager {
 
         let active = Arc::new(AtomicBool::new(true));
         self.active = Arc::clone(&active);
+        let sync_degraded = Arc::new(AtomicBool::new(false));
+        self.sync_degraded = Arc::clone(&sync_degraded);
 
         // ── Tick task: every 1 second ────────────────────────────────────────
         let ct_tick = Arc::clone(&self.current_time);
@@ -339,10 +378,16 @@ impl SessionManager {
         let tl_sync = Arc::clone(&self.time_listened);
         let client_sync = self.client.clone();
         let session_id_sync = session.id.clone();
+        let item_id_sync = item_id.to_string();
+        let episode_id_sync = episode_id.map(str::to_string);
+        let known_duration_sync = self.online_duration;
+        let player_sync = Arc::clone(&self.player);
         let active_sync = Arc::clone(&active);
+        let app_sync = app.clone();
 
         let sync_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(10));
+            let mut last_queue_state: Option<bool> = None;
             interval.tick().await; // skip the immediate first tick
             loop {
                 interval.tick().await;
@@ -353,7 +398,48 @@ impl SessionManager {
                 // than the sync loop dying and progress never persisting again.
                 let ct = *ct_sync.lock().unwrap_or_else(|e| e.into_inner());
                 let tl = *tl_sync.lock().unwrap_or_else(|e| e.into_inner());
-                let _ = client_sync.sync_session(&session_id_sync, ct, tl).await;
+                match client_sync.sync_session(&session_id_sync, ct, tl).await {
+                    Ok(()) => {
+                        last_queue_state = None;
+                        if sync_degraded.swap(false, Ordering::Relaxed) {
+                            log::info!(target: "skald::sync", "server session sync restored item={item_id_sync}");
+                            let _ = app_sync.emit(
+                                "session-sync-restored",
+                                serde_json::json!({ "currentTime": ct }),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        let player_duration = player_sync
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .as_ref()
+                            .map(AudioPlayer::duration)
+                            .unwrap_or(0.0);
+                        let duration = known_duration_sync.max(player_duration);
+                        let queued = match queue_server_progress_fallback(
+                            &item_id_sync,
+                            episode_id_sync.as_deref(),
+                            ct,
+                            duration,
+                        ) {
+                            Ok(()) => true,
+                            Err(queue_error) => {
+                                log::error!(target: "skald::sync", "server sync fallback persist failed item={item_id_sync}: {queue_error}");
+                                false
+                            }
+                        };
+                        let first_failure = !sync_degraded.swap(true, Ordering::Relaxed);
+                        if first_failure || last_queue_state != Some(queued) {
+                            log::warn!(target: "skald::sync", "server session sync failed item={item_id_sync} queued_locally={queued}: {error}");
+                            let _ = app_sync.emit(
+                                "session-sync-warning",
+                                serde_json::json!({ "currentTime": ct, "queued": queued }),
+                            );
+                        }
+                        last_queue_state = Some(queued);
+                    }
+                }
             }
         });
         watch_task(app.clone(), "session sync", sync_handle);
@@ -430,6 +516,10 @@ impl SessionManager {
         // No server session — clear the ID so the shutdown handler and
         // close_active_session both exit early without an HTTP call.
         self.session_id = None;
+        self.online_item_id = None;
+        self.online_episode_id = None;
+        self.online_duration = 0.0;
+        self.sync_degraded.store(false, Ordering::Relaxed);
 
         // Mark as local so any code that inspects this flag knows we are offline.
         self.is_local = true;
@@ -598,6 +688,7 @@ impl SessionManager {
                 } else if let Some(ref dl_dir) = dl_dir_tick {
                     let entry = crate::downloads::OfflineProgressEntry {
                         item_id: item_id_tick.clone(),
+                        episode_id: None,
                         current_time: pos,
                         duration: dur,
                         progress: if dur > 0.0 { pos / dur } else { 0.0 },
@@ -714,6 +805,45 @@ impl SessionManager {
     /// so no further sync fires between the lock release and the HTTP request.
     pub fn cancel_tasks(&self) {
         self.active.store(false, Ordering::Relaxed);
+    }
+
+    /// Persist the current online position into the durable reconnect queue.
+    pub fn queue_current_server_progress(&self) -> Result<(), String> {
+        let item_id = self
+            .online_item_id
+            .as_deref()
+            .ok_or_else(|| "No active server item".to_string())?;
+        let current_time = *self.current_time.lock().unwrap_or_else(|e| e.into_inner());
+        let player_duration = self
+            .player
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(AudioPlayer::duration)
+            .unwrap_or(0.0);
+        queue_server_progress_fallback(
+            item_id,
+            self.online_episode_id.as_deref(),
+            current_time,
+            self.online_duration.max(player_duration),
+        )
+    }
+
+    /// Returns true only on the transition into a degraded sync state.
+    pub fn mark_sync_degraded(&self) -> bool {
+        !self.sync_degraded.swap(true, Ordering::Relaxed)
+    }
+
+    /// Returns true when an earlier failure was active and is now recovered.
+    pub fn mark_sync_restored(&self) -> bool {
+        self.sync_degraded.swap(false, Ordering::Relaxed)
+    }
+
+    pub fn clear_server_identity(&mut self) {
+        self.session_id = None;
+        self.online_item_id = None;
+        self.online_episode_id = None;
+        self.online_duration = 0.0;
     }
 
     /// Close the session on the server and stop background tasks.

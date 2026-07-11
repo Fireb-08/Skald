@@ -298,11 +298,7 @@ pub fn scan_unidentified(root: &str, library_id: &str) -> Result<Vec<ScannedItem
 
 fn scan_impl(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
     let root_path = Path::new(root);
-    if !root_path.exists() {
-        // Not yet created (e.g. a freshly-made library's Audiobooks folder is
-        // empty) — treat as no items rather than an error.
-        return Ok(Vec::new());
-    }
+    ensure_scannable_root(root_path)?;
     log::info!(target: "skald::library", "scan: start path={root}");
 
     // Group audio files by their immediate parent directory. A directory that
@@ -310,10 +306,10 @@ fn scan_impl(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
     // and become their own units if they hold audio.
     let mut by_dir: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
     let mut supplemental = 0usize;
-    for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
+    for_each_walk_entry(root_path, WalkDir::new(root_path), |entry| {
         let p = entry.path();
         if !p.is_file() {
-            continue;
+            return;
         }
         if is_audio(p) {
             if let Some(parent) = p.parent() {
@@ -322,7 +318,7 @@ fn scan_impl(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
         } else if is_supplemental(p) {
             supplemental += 1;
         }
-    }
+    })?;
 
     let items: Vec<ScannedItem> = by_dir
         .into_iter()
@@ -345,20 +341,57 @@ fn scan_impl(root: &str, library_id: &str) -> Result<Vec<ScannedItem>, String> {
 /// genuinely-new directories get probed (via `scan_dir`). Blocking I/O.
 pub fn list_book_dirs(root: &str) -> Result<Vec<String>, String> {
     let root_path = Path::new(root);
-    if !root_path.exists() {
-        return Ok(Vec::new());
-    }
+    // A disconnected drive is not an empty library. Abort reconciliation so
+    // catalog items, resume progress, and bookmarks remain intact.
+    ensure_scannable_root(root_path)?;
     // BTreeSet de-duplicates parents (many files share one) and keeps a stable order.
     let mut dirs: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
-    for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
+    for_each_walk_entry(root_path, WalkDir::new(root_path), |entry| {
         let p = entry.path();
         if p.is_file() && is_audio(p) {
             if let Some(parent) = p.parent() {
                 dirs.insert(parent.to_path_buf());
             }
         }
-    }
+    })?;
     Ok(dirs.into_iter().map(|d| d.to_string_lossy().into_owned()).collect())
+}
+
+/// Reject roots that cannot be enumerated. Treating metadata failures as an
+/// empty scan would make a transient drive/permission problem look like deletion.
+fn ensure_scannable_root(root: &Path) -> Result<(), String> {
+    let result = std::fs::metadata(root)
+        .map_err(|e| format!("scan root unavailable {}: {e}", root.display()))
+        .and_then(|metadata| {
+            if metadata.is_dir() { Ok(()) }
+            else { Err(format!("scan root is not a directory: {}", root.display())) }
+        });
+    if let Err(error) = &result {
+        log::warn!(target: "skald::library", "scan: refusing incomplete walk: {error}");
+    }
+    result
+}
+
+/// Visit a walk only while every entry is readable. WalkDir may yield valid
+/// entries before an inaccessible descendant; that partial inventory is unsafe
+/// for a destructive catalog reconciliation.
+fn for_each_walk_entry<I, T, E, F>(root: &Path, entries: I, mut visit: F) -> Result<(), String>
+where
+    I: IntoIterator<Item = Result<T, E>>,
+    E: std::fmt::Display,
+    F: FnMut(T),
+{
+    for entry in entries {
+        match entry {
+            Ok(entry) => visit(entry),
+            Err(error) => {
+                let message = format!("scan traversal incomplete under {}: {error}", root.display());
+                log::warn!(target: "skald::library", "scan: refusing incomplete walk: {message}");
+                return Err(message);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Build one ScannedItem for a single newly-discovered book-unit directory,
@@ -377,4 +410,29 @@ pub fn scan_dir(dir: &str, root: &str, library_id: &str) -> Option<ScannedItem> 
         return None;
     }
     Some(build_item(dir_path, Path::new(root), files, library_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_scan_root_is_an_error_not_an_empty_inventory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("disconnected-drive");
+        let error = list_book_dirs(&missing.to_string_lossy()).expect_err("missing root");
+        assert!(error.contains("scan root unavailable"));
+    }
+
+    #[test]
+    fn traversal_error_invalidates_entries_already_seen() {
+        let mut visited = 0usize;
+        let entries: Vec<Result<(), &str>> =
+            vec![Ok(()), Err("synthetic descendant read failure"), Ok(())];
+        let error = for_each_walk_entry(Path::new("test-root"), entries, |_| visited += 1)
+            .expect_err("partial walk must fail");
+        assert_eq!(visited, 1, "walk must stop at the first unreadable entry");
+        assert!(error.contains("scan traversal incomplete"));
+        assert!(error.contains("synthetic descendant read failure"));
+    }
 }
