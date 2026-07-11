@@ -7,6 +7,7 @@ import type { LibraryItem, OnyxState } from '../state/onyx';
 import { bookAuthor } from '../state/onyx';
 import { findCovers, setCoverUrl, uploadCover, removeCover, getCover, COVER_PROVIDERS } from '../api/abs';
 import { bustCover } from '../lib/coverBust';
+import { useModalFocus } from '../hooks/useModalFocus';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO  = "'JetBrains Mono', ui-monospace, monospace";
@@ -30,6 +31,7 @@ export interface CoverPickerProps {
 }
 
 export default function CoverPicker({ item, st, onClose }: CoverPickerProps) {
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose);
   const meta = item.media.metadata;
   const [provider, setProvider] = useState<string>(COVER_PROVIDERS[0]);
   const [title, setTitle] = useState(meta.title ?? '');
@@ -120,7 +122,7 @@ export default function CoverPicker({ item, st, onClose }: CoverPickerProps) {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="cover-picker-title" style={{
         width: '100%', maxWidth: 720, maxHeight: '90vh',
         background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)',
         borderRadius: 16,
@@ -130,10 +132,10 @@ export default function CoverPicker({ item, st, onClose }: CoverPickerProps) {
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '22px 22px 0 24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Change Cover</div>
+            <div id="cover-picker-title" style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 500, letterSpacing: '-0.015em', lineHeight: 1.1 }}>Change Cover</div>
             <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.06em', marginTop: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{meta.title ?? item.id}</div>
           </div>
-          <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>✕</button>
+          <button onClick={onClose} aria-label="Close cover picker" style={{ width: 28, height: 28, borderRadius: 7, background: 'none', border: '1px solid transparent', color: 'var(--onyx-text-mute)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>✕</button>
         </div>
         <div style={{ flexShrink: 0, height: 1, background: 'var(--onyx-line)', margin: '14px 0 0' }} />
 
