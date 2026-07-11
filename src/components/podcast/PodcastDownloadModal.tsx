@@ -6,6 +6,9 @@ import ReactDOM from 'react-dom';
 import type { OnyxState } from '../../state/onyx';
 import { downloadEpisodes, downloadLocalEpisode, type RecentEpisode } from '../../api/abs';
 import { episodeKey } from '../../lib/podcastCover';
+import { useModalFocus } from '../../hooks/useModalFocus';
+import { errorMessage } from '../../lib/presentError';
+import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -29,6 +32,7 @@ export default function PodcastDownloadModal({ st, itemId, episodes, onClose, on
   const [since, setSince] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !busy);
 
   // Apply the optional since-date filter for display + selection scope.
   const visible = useMemo(() => {
@@ -59,7 +63,8 @@ export default function PodcastDownloadModal({ st, itemId, episodes, onClose, on
       onQueued();
       onClose();
     } catch (e) {
-      setError(`Download failed: ${String(e)}`);
+      log.warn('downloads', 'podcast download queue failed', { itemId, count: chosen.length, err: String(e) });
+      setError(errorMessage(e, { operation: 'download' }));
       setBusy(false);
     }
   }
@@ -69,13 +74,13 @@ export default function PodcastDownloadModal({ st, itemId, episodes, onClose, on
       style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)' }}
       onMouseDown={e => { if (e.target === e.currentTarget && !busy) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="podcast-download-title" style={{
         width: 540, maxHeight: '80vh', background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)',
         borderRadius: 12, boxShadow: '0 24px 60px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column',
       }}>
         {/* Header */}
         <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--onyx-line)' }}>
-          <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>Download Episodes</div>
+          <div id="podcast-download-title" style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>Download Episodes</div>
           <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', marginTop: 4, letterSpacing: '0.04em' }}>
             {visible.length} available · {selected.size} selected
           </div>

@@ -6,6 +6,9 @@ import ReactDOM from 'react-dom';
 import type { OnyxState } from '../../state/onyx';
 import { updateMedia, validateCron, updateLocalPodcastSettings, asPodcastItem, type LibraryItem } from '../../api/abs';
 import CronEditor from '../settings/CronEditor';
+import { useModalFocus } from '../../hooks/useModalFocus';
+import { errorMessage } from '../../lib/presentError';
+import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
@@ -26,6 +29,7 @@ export default function PodcastSettingsModal({ st, item, onClose, onSaved }: Pod
   const [maxNew, setMaxNew] = useState<number>(media.maxNewEpisodesToDownload ?? 3);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose, !saving);
 
   const isLocal = st.activeLibrary?.source === 'local';
 
@@ -57,7 +61,8 @@ export default function PodcastSettingsModal({ st, item, onClose, onSaved }: Pod
       onSaved();
       onClose();
     } catch (e) {
-      setError(`Save failed: ${String(e)}`);
+      log.warn('library', 'podcast settings save failed', { itemId: item.id, err: String(e) });
+      setError(errorMessage(e, { operation: 'save' }));
       setSaving(false);
     }
   }
@@ -81,12 +86,12 @@ export default function PodcastSettingsModal({ st, item, onClose, onSaved }: Pod
       style={{ position: 'fixed', inset: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)' }}
       onMouseDown={e => { if (e.target === e.currentTarget && !saving) onClose(); }}
     >
-      <div style={{
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="podcast-settings-title" style={{
         width: 460, maxHeight: '80vh', background: 'var(--onyx-panel2)', border: '1px solid var(--onyx-line)',
         borderRadius: 12, boxShadow: '0 24px 60px rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column',
       }}>
         <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--onyx-line)' }}>
-          <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>Auto-Download</div>
+          <div id="podcast-settings-title" style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, color: 'var(--onyx-text)' }}>Auto-Download</div>
           <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', marginTop: 4, letterSpacing: '0.04em' }}>
             {media.metadata?.title ?? ''}
           </div>

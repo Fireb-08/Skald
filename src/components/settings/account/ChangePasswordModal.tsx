@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { SERIF, MONO } from '../shared';
 import { changePassword } from '../../../api/abs';
+import { useModalFocus } from '../../../hooks/useModalFocus';
+import { errorMessage } from '../../../lib/presentError';
+import { log } from '../../../lib/log';
 
 // ── Shared modal field styles ────────────────────────────────────────────────
 const fieldLabelStyle: React.CSSProperties = {
@@ -36,6 +39,7 @@ export default function ChangePasswordModal({ serverUrl, onClose }: { serverUrl:
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState(false);
+  const dialogRef = useModalFocus<HTMLFormElement>(onClose, !pending);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +51,8 @@ export default function ChangePasswordModal({ serverUrl, onClose }: { serverUrl:
       await changePassword(serverUrl, current, next);
       setDone(true);
     } catch (err) {
-      setError(typeof err === 'string' ? err : (err as Error)?.message ?? 'Change failed.');
+      log.warn('auth', 'password change failed', { err: String(err) });
+      setError(errorMessage(err, { operation: 'save' }));
       setPending(false);
     }
   };
@@ -58,10 +63,14 @@ export default function ChangePasswordModal({ serverUrl, onClose }: { serverUrl:
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="change-password-title"
         onSubmit={submit}
         style={{ width: 400, maxWidth: '90vw', background: 'var(--onyx-panel2)', backdropFilter: 'blur(40px) saturate(120%)', WebkitBackdropFilter: 'blur(40px) saturate(120%)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 12, boxShadow: '0 24px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)', padding: '26px 26px 22px', display: 'flex', flexDirection: 'column', gap: 18 }}
       >
-        <div style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)' }}>Change password</div>
+        <div id="change-password-title" style={{ fontFamily: SERIF, fontSize: 18, fontWeight: 500, color: 'var(--onyx-text)' }}>Change password</div>
         {done ? (
           <>
             <div style={{ fontSize: 13, color: 'var(--onyx-text-dim)', lineHeight: 1.5 }}>
