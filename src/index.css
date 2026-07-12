@@ -153,9 +153,27 @@ input, textarea, [contenteditable="true"],
 
 /* ─── Utility hover classes ──────────────────────────────────────────────── */
 
-.onyx-tile:hover > div:first-child {
-  transform: translateY(-3px);
-  filter: drop-shadow(0 12px 24px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.18));
+/* Book-grid hover feedback uses a pre-painted inset glow whose opacity is the
+   only animated property. Transform/shadow hover either repainted the virtual
+   row or needed persistent layers that hurt native window enter/leave. */
+.onyx-tile > div:first-child::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border-radius: 4px;
+  /* Pre-painted once; pointer movement changes only compositor opacity. */
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.45),
+    inset 0 -24px 32px rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.10);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.onyx-tile:hover > div:first-child::after,
+.onyx-tile:focus-visible > div:first-child::after {
+  opacity: 1;
 }
 
 .onyx-winbtn:hover {
