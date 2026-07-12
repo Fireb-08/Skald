@@ -19,7 +19,7 @@ import MetadataEditor from '../MetadataEditor';
 import CoverPicker from '../CoverPicker';
 import CollectionPicker from '../CollectionPicker';
 import PlaylistPicker from '../PlaylistPicker';
-import FilesModal from './FilesModal';
+import FileTrackInspectorModal from '../player/FileTrackInspectorModal';
 import ShareModal from '../ShareModal';
 import { shelfScrollDecision } from './scrollState';
 import { recentlyAddedItems } from '../../lib/recentlyAdded';
@@ -811,9 +811,9 @@ export default function LibraryShelf({ st, items, sortMode, groupBySeries }: Lib
         />
       )}
       {filesItem && (
-        <FilesModal
-          bookId={filesItem.id}
-          serverUrl={st.serverUrl}
+        <FileTrackInspectorModal
+          item={filesItem}
+          st={st}
           onClose={() => setFilesItem(null)}
         />
       )}
