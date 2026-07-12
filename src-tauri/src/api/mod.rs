@@ -98,6 +98,7 @@ impl AbsClient {
 mod admin;
 mod auth;
 mod collections;
+mod files;
 mod library;
 mod metadata;
 mod playback;

@@ -133,7 +133,9 @@ export interface Chapter {
   title: string;
 }
 
-export interface AudioFile {
+/** A playback-session track. This is deliberately separate from the detailed
+ * audio-file record returned inside an expanded library item. */
+export interface AudioTrack {
   index: number;
   startOffset: number;
   duration: number;
@@ -141,8 +143,37 @@ export interface AudioFile {
   contentUrl: string;
 }
 
-// Keep AudioTrack as an alias — used by PlaySession.audioTracks.
-export type AudioTrack = AudioFile;
+export interface LibraryAudioFile {
+  index: number;
+  ino: string;
+  metadata: FileMetadata;
+  addedAt?: number | null;
+  updatedAt?: number | null;
+  trackNumFromMeta?: number | null;
+  discNumFromMeta?: number | null;
+  trackNumFromFilename?: number | null;
+  discNumFromFilename?: number | null;
+  manuallyVerified: boolean;
+  exclude: boolean;
+  error?: string | null;
+  format?: string | null;
+  duration?: number | null;
+  bitRate?: number | null;
+  language?: string | null;
+  codec?: string | null;
+  timeBase?: string | null;
+  channels?: number | null;
+  channelLayout?: string | null;
+  chapters?: Chapter[];
+  embeddedCoverArt?: string | boolean | null;
+  metaTags?: Record<string, unknown>;
+  mimeType?: string | null;
+}
+
+export interface TrackUpdateInput {
+  ino: string;
+  exclude: boolean;
+}
 
 export interface BookMedia {
   /** The Book record id (distinct from the LibraryItem id). Required as the
@@ -151,7 +182,9 @@ export interface BookMedia {
   id?: string;
   metadata: BookMetadata;
   chapters: Chapter[];
-  audioFiles: AudioFile[];
+  audioFiles: LibraryAudioFile[];
+  /** Expanded item responses also include the resolved playback track list. */
+  tracks?: AudioTrack[];
   tags: string[];
   duration: number;
 }
@@ -160,12 +193,21 @@ export interface FileMetadata {
   filename: string;
   size: number;
   path?: string | null;
+  relPath?: string | null;
+  ext?: string | null;
+  format?: string | null;
+  mtimeMs?: number | null;
+  ctimeMs?: number | null;
+  birthtimeMs?: number | null;
 }
 
 export interface LibraryFile {
   ino: string;
   metadata: FileMetadata;
   fileType: string;
+  isSupplementary?: boolean | null;
+  addedAt?: number | null;
+  updatedAt?: number | null;
 }
 
 export interface LibraryItem {
@@ -178,6 +220,10 @@ export interface LibraryItem {
   mediaType: string;
   media: BookMedia;
   libraryFiles?: LibraryFile[];
+  /** Expanded ABS item flags used by the file inspector. */
+  isFile?: boolean;
+  isMissing?: boolean;
+  relPath?: string | null;
   /** Local Library only: absolute on-disk path of the book unit (playback/ingest source). */
   localPath?: string;
   /** Local Library only: true when an embedded cover was detected during the scan. */

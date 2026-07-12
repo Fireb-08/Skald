@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
+import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, UserPermissions, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
 import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
@@ -186,6 +186,12 @@ export interface OnyxState {
   // Admin/root always can (the server's canUpload getter returns true for them);
   // other users need permissions.upload, captured from /api/me after load.
   canUpload: boolean;
+  // Item-file capabilities from /api/me. Admin/root implicitly have all four;
+  // delegated users follow the server's permission object.
+  canDownload: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
+  refreshPermissions: () => Promise<void>;
   // True when running without a server (local-only mode). Opens the app shell
   // just like an auth token does, so non-ABS users can use local libraries.
   localMode: boolean;
@@ -477,11 +483,19 @@ export function useOnyxState(): OnyxState {
     setUserRaw(clean);
   }, []);
 
-  // permissions.upload from /api/me — gates the shelf Upload button for
-  // non-admin users. Session-only (not persisted): the button simply appears
-  // once the post-library /api/me fetch lands, keeping revoked permissions from
-  // lingering across sessions.
-  const [uploadPerm, setUploadPerm] = useState(false);
+  // The complete /api/me capability set gates upload and item-file actions.
+  // Keep it session-only so revoked permissions never linger across launches.
+  const [userPermissions, setUserPermissions] = useState<UserPermissions | null>(null);
+  // useLiveSync historically refreshes the upload gate on reconnect. Preserve
+  // that narrow callback while the initial /api/me load owns the full set.
+  const setUploadPerm = useCallback((upload: boolean) => {
+    setUserPermissions(current => current ? { ...current, upload } : current);
+  }, []);
+  const refreshPermissions = useCallback(async () => {
+    if (!serverUrl || !authToken) return;
+    const me = await getMe(serverUrl);
+    setUserPermissions(me.permissions ?? null);
+  }, [serverUrl, authToken]);
 
   // Local-only mode (no server). Persisted so the app re-opens straight into the
   // shell on next launch without a login.
@@ -841,8 +855,8 @@ export function useOnyxState(): OnyxState {
         if (cancelled) return;
         applyServerProgress(me.mediaProgress);
         setBookmarks(me.bookmarks);
-        // Capture the upload permission for the shelf Upload button gate.
-        setUploadPerm(!!me.permissions?.upload);
+        // Capture upload and item-file capabilities from the authoritative profile.
+        setUserPermissions(me.permissions ?? null);
         // Refresh user type from server — merge into stored user record and persist.
         // Deliberately does NOT carry me.token forward: the profile is tokenless
         // (setUser strips it anyway); the keyring alone holds the session token.
@@ -1428,7 +1442,11 @@ export function useOnyxState(): OnyxState {
     // Server-side, the canUpload getter is true for admin/root regardless of the
     // permissions object, so mirror that here rather than trusting me.permissions
     // alone (it also covers the window before the /api/me fetch lands).
-    canUpload: user?.type === 'admin' || user?.type === 'root' || uploadPerm,
+    canUpload: user?.type === 'admin' || user?.type === 'root' || !!userPermissions?.upload,
+    canDownload: user?.type === 'admin' || user?.type === 'root' || !!userPermissions?.download,
+    canUpdate: user?.type === 'admin' || user?.type === 'root' || !!userPermissions?.update,
+    canDelete: user?.type === 'admin' || user?.type === 'root' || !!userPermissions?.delete,
+    refreshPermissions,
     localMode, setLocalMode,
     localDisplayName, setLocalDisplayName,
     onboarded, setOnboarded,

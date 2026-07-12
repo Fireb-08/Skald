@@ -244,6 +244,18 @@ pub struct FileMetadata {
     pub size: i64,
     #[serde(default)]
     pub path: Option<String>,
+    #[serde(default)]
+    pub rel_path: Option<String>,
+    #[serde(default)]
+    pub ext: Option<String>,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub mtime_ms: Option<f64>,
+    #[serde(default)]
+    pub ctime_ms: Option<f64>,
+    #[serde(default)]
+    pub birthtime_ms: Option<f64>,
 }
 
 /// A single physical file attached to a library item.
@@ -253,6 +265,12 @@ pub struct LibraryFile {
     pub ino: String,
     pub metadata: FileMetadata,
     pub file_type: String,
+    #[serde(default)]
+    pub is_supplementary: Option<bool>,
+    #[serde(default)]
+    pub added_at: Option<i64>,
+    #[serde(default)]
+    pub updated_at: Option<i64>,
 }
 
 /// Default media type for a library item when the server omits the field
@@ -288,6 +306,21 @@ pub struct LibraryItem {
     pub media: Value,
     #[serde(default)]
     pub library_files: Option<Vec<LibraryFile>>,
+    #[serde(default)]
+    pub is_file: Option<bool>,
+    #[serde(default)]
+    pub is_missing: Option<bool>,
+    #[serde(default)]
+    pub rel_path: Option<String>,
+}
+
+/// One entry in PATCH /api/items/{id}/tracks. ABS derives the new numeric
+/// indexes from array order, so sending an index or filename is unnecessary.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackUpdateInput {
+    pub ino: String,
+    pub exclude: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -9,7 +9,7 @@ export interface PresentedError {
 }
 
 export interface ErrorPresentationContext {
-  operation?: 'authenticate' | 'download' | 'save' | 'import' | 'refresh';
+  operation?: 'authenticate' | 'download' | 'delete' | 'save' | 'import' | 'refresh';
   credential?: 'api-key' | 'password' | 'saved-session';
 }
 

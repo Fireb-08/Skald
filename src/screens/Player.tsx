@@ -39,6 +39,7 @@ import { skipSeconds } from '../lib/playbackPrefs';
 // (review L3/L7) — pure moves, same behavior.
 import { railRow } from '../components/player/RailRow';
 import { SLEEP_OPTIONS, parseSleepDefault, type SleepMode } from '../components/player/sleep';
+import FileTrackInspectorModal from '../components/player/FileTrackInspectorModal';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -459,6 +460,7 @@ export default function Player({ st }: PlayerProps) {
   // Defaults to chapters as that is the most-used panel during playback. The
   // Synopsis lives here as its own pane (rather than a left-column flyout).
   const [activePane, setActivePane] = useState<'details' | 'chapters' | 'bookmarks' | 'synopsis'>('chapters');
+  const [showFileInspector, setShowFileInspector] = useState(false);
 
   // ── Chapter-list auto-scroll ──────────────────────────────────────────────
   // The currently-playing (or focused) chapter, mirroring rowChIdx in the list.
@@ -1079,7 +1081,29 @@ export default function Player({ st }: PlayerProps) {
 
             {/* ── Details panel — hidden in compact mode unless selected ── */}
             <Glass translucent={st.translucent} style={{ flex: 1, minWidth: 0, padding: 20, display: !panesStacked || activePane === 'details' ? 'flex' : 'none', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
-              <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 14 }}>Details</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>Details</div>
+                {!isPodcast && !b.localPath && (
+                  <button
+                    onClick={() => setShowFileInspector(true)}
+                    style={{
+                      marginLeft: 'auto',
+                      background: 'var(--onyx-accent-dim)',
+                      border: '1px solid var(--onyx-accent-edge)',
+                      borderRadius: 7,
+                      color: 'var(--onyx-accent)',
+                      fontFamily: MONO,
+                      fontSize: 9,
+                      letterSpacing: '0.08em',
+                      textTransform: 'uppercase',
+                      padding: '5px 9px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Files &amp; Tracks
+                  </button>
+                )}
+              </div>
               <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, marginRight: -8, paddingRight: 8 }}>
                 {(() => {
                   const meta = b.media?.metadata;
@@ -1219,6 +1243,9 @@ export default function Player({ st }: PlayerProps) {
                   );
                 })()}
               </div>
+              {showFileInspector && !isPodcast && !b.localPath && (
+                <FileTrackInspectorModal item={b} st={st} onClose={() => setShowFileInspector(false)} />
+              )}
             </Glass>
 
             {/* ── Chapters panel — hidden in compact mode unless selected ── */}

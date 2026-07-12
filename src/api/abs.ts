@@ -5,6 +5,7 @@ export * from './abs/admin';
 export * from './abs/app';
 export * from './abs/auth';
 export * from './abs/collections';
+export * from './abs/files';
 export * from './abs/library';
 export * from './abs/local';
 export * from './abs/localPodcasts';
