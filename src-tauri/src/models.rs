@@ -278,6 +278,10 @@ pub struct LibraryItem {
     pub id: String,
     pub ino: String,
     pub library_id: String,
+    /// ABS exposes its library-item `createdAt` database value as `addedAt`.
+    /// Keep it so source-agnostic shelves can reproduce ABS's recent ordering.
+    #[serde(default)]
+    pub added_at: Option<i64>,
     /// "book" | "podcast". Defaulted to "book" for payloads that omit it.
     #[serde(default = "default_book_media_type")]
     pub media_type: String,

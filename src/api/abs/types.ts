@@ -172,6 +172,8 @@ export interface LibraryItem {
   id: string;
   ino: string;
   libraryId: string;
+  /** ABS item creation time (Unix ms); local items use catalog insertion time. */
+  addedAt?: number | null;
   /** "book" | "podcast". Backend defaults to "book" when the server omits it. */
   mediaType: string;
   media: BookMedia;

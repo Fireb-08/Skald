@@ -18,6 +18,8 @@ import PodcastBrowse from '../components/podcast/PodcastBrowse';
 import MiniPlayer from '../components/player/MiniPlayer';
 import { prefetchReviews } from '../api/reviewCache';
 import { shelfTabForSource } from '../lib/shelfTabs';
+import { recentlyAddedItems } from '../lib/recentlyAdded';
+import { log } from '../lib/log';
 
 export interface LibraryProps {
   st: OnyxState;
@@ -32,6 +34,15 @@ export default function Library({ st }: LibraryProps) {
   // client-side browse tabs render for every source.
   const shelfSource = isAllLibraries ? 'all' : isLocalLibrary ? 'local' : 'abs';
   const visibleShelfTab = shelfTabForSource(st.shelfTab, shelfSource);
+  const recentlyAdded = recentlyAddedItems(st.library);
+
+  useEffect(() => {
+    if (visibleShelfTab !== 'recently-added') return;
+    log.info('library', 'recently added shelf opened', {
+      source: shelfSource,
+      items: recentlyAdded.length,
+    });
+  }, [visibleShelfTab, shelfSource, recentlyAdded.length]);
 
   useEffect(() => {
     // Open Library review enrichment is book-specific — skip it for podcasts.
@@ -104,6 +115,9 @@ export default function Library({ st }: LibraryProps) {
 
         {/* Shelf body — routed by shelfTab */}
         {visibleShelfTab === 'library'     && <LibraryShelf    st={st} />}
+        {visibleShelfTab === 'recently-added' && (
+          <LibraryShelf st={st} items={recentlyAdded} sortMode="recently" groupBySeries={false} />
+        )}
         {visibleShelfTab === 'series'      && <SeriesView      st={st} inline />}
         {visibleShelfTab === 'authors'     && <AuthorsView     st={st} inline />}
         {visibleShelfTab === 'narrators'   && <NarratorsView   st={st} inline />}

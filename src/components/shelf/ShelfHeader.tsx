@@ -11,6 +11,7 @@ import FilterPopover from './FilterPopover';
 import { log } from '../../lib/log';
 import { isServerOnlyShelfTab } from '../../lib/shelfTabs';
 import { seriesGroupName } from './tabs/SeriesView';
+import { recentlyAddedItems } from '../../lib/recentlyAdded';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -19,6 +20,7 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace";
 // Display (st.optionalTabs), defaulting off to keep the bar short.
 const TABS: { id: string; label: string; optional?: boolean }[] = [
   { id: 'library',     label: 'Home'        },
+  { id: 'recently-added', label: 'Recently Added' },
   { id: 'series',      label: 'Series'      },
   { id: 'authors',     label: 'Authors'     },
   { id: 'narrators',   label: 'Narrators',   optional: true },
@@ -167,6 +169,10 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
 
   const subtitleText = (() => {
     switch (st.shelfTab) {
+      case 'recently-added': {
+        const n = recentlyAddedItems(st.library).length;
+        return `${n} recently added title${n === 1 ? '' : 's'}`;
+      }
       case 'series': {
         // Prefer the canonical count from the series endpoint; fall back to the
         // library-derived estimate only while that fetch is still in flight.
@@ -276,7 +282,12 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
               .map(t => {
                 const active = st.shelfTab === t.id;
                 return (
-                  <button key={t.id} onClick={() => st.setShelfTab(t.id)} style={{
+                  <button key={t.id} onClick={() => {
+                    // Recently Added is a library-wide shelf, not a drill-in;
+                    // clear any hidden author/series context before opening it.
+                    if (t.id === 'recently-added') st.setContextFilter(null);
+                    st.setShelfTab(t.id);
+                  }} style={{
                     padding: '7px 10px', borderRadius: 7, cursor: 'pointer', fontFamily: 'inherit',
                     background: active ? 'var(--onyx-accent-dim)' : 'transparent',
                     border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,

@@ -660,5 +660,8 @@ mod tests {
         let items = list_items_conn(&conn, "lib1").unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["id"], json!("good"));
+        // Local list payloads expose the catalog insertion timestamp under the
+        // same legacy key ABS uses for its Recently Added shelf.
+        assert_eq!(items[0]["addedAt"], json!(0));
     }
 }

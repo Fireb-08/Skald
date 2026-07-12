@@ -22,6 +22,7 @@ import PlaylistPicker from '../PlaylistPicker';
 import FilesModal from './FilesModal';
 import ShareModal from '../ShareModal';
 import { shelfScrollDecision } from './scrollState';
+import { recentlyAddedItems } from '../../lib/recentlyAdded';
 // Shared series group key — the same normalization the client-derived Series
 // views (local + combined) use to build their groups, so drill-ins match.
 import { seriesGroupName } from './tabs/SeriesView';
@@ -508,11 +509,17 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
 
 export interface LibraryShelfProps {
   st: OnyxState;
+  /** Optional source subset used by derived shelves such as Recently Added. */
+  items?: LibraryItem[];
+  /** Override Home's saved sort without changing the user's preference. */
+  sortMode?: string;
+  /** Derived shelves can opt out of Home's series collapsing. */
+  groupBySeries?: boolean;
 }
 
 interface CtxMenu { x: number; y: number; item: LibraryItem }
 
-export default function LibraryShelf({ st }: LibraryShelfProps) {
+export default function LibraryShelf({ st, items, sortMode, groupBySeries }: LibraryShelfProps) {
   const coverW = COVER_SIZES[st.coverSize] ?? COVER_SIZES.L;
   const [contextMenu, setContextMenu] = useState<CtxMenu | null>(null);
 
@@ -564,11 +571,14 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   // WITHOUT an ID comes from the client-derived series views (local libraries
   // and the combined All Libraries shelf), where the normalized seriesName IS
   // the group key — match it directly over the loaded items.
+  const baseBooks = items ?? st.library;
+  const effectiveSort = sortMode ?? st.librarySort;
+  const effectiveGroupBySeries = groupBySeries ?? st.groupBySeries;
   const sourceBooks = (st.contextFilter?.kind === 'series')
     ? (st.contextFilter.seriesId
         ? (seriesBooks ?? [])
-        : st.library.filter(b => seriesGroupName(bookSeries(b)) === st.contextFilter?.value))
-    : st.library;
+        : baseBooks.filter(b => seriesGroupName(bookSeries(b)) === st.contextFilter?.value))
+    : baseBooks;
   // In-flight series drill-in: the body source is deliberately empty while the
   // server fetch resolves, so show a loading placeholder instead of the
   // misleading "No titles match" empty state (UI Bugs Follow-up, 2026-07-08).
@@ -601,17 +611,19 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
     filtered.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   } else if (st.contextFilter?.kind === 'series') {
     filtered.sort((a, b) => seriesVolOf(bookSeries(a)) - seriesVolOf(bookSeries(b)));
-  } else if (st.librarySort === 'title') {
+  } else if (effectiveSort === 'recently') {
+    filtered.splice(0, filtered.length, ...recentlyAddedItems(filtered, filtered.length));
+  } else if (effectiveSort === 'title') {
     const prefixes = st.serverSettings?.sortingIgnorePrefix ? (st.serverSettings.sortingPrefixes ?? []) : [];
     filtered.sort((a, b) => naturalTitleCompare(bookTitle(a), bookTitle(b), prefixes));
-  } else if (st.librarySort === 'author') {
+  } else if (effectiveSort === 'author') {
     filtered.sort((a, b) => bookAuthor(a).localeCompare(bookAuthor(b)) || bookTitle(a).localeCompare(bookTitle(b)));
-  } else if (st.librarySort === 'most-listened') {
+  } else if (effectiveSort === 'most-listened') {
     filtered.sort((a, b) => bookProgress(b, st.mediaProgress) - bookProgress(a, st.mediaProgress));
   }
 
   let shelfBooks = filtered;
-  if (st.groupBySeries && st.contextFilter?.kind !== 'series') {
+  if (effectiveGroupBySeries && st.contextFilter?.kind !== 'series') {
     const seen = new Set<string>();
     shelfBooks = filtered.filter(b => {
       const name = seriesNameOf(bookSeries(b));
@@ -629,10 +641,11 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   // register as a new dataset.
   const datasetKey = [
     st.currentLibraryId,
+    st.shelfTab,
     st.filter,
     st.showFinished,
-    st.librarySort,
-    st.groupBySeries,
+    effectiveSort,
+    effectiveGroupBySeries,
     st.contextFilter?.kind ?? '',
     st.contextFilter?.value ?? '',
     st.search,
@@ -656,7 +669,7 @@ export default function LibraryShelf({ st }: LibraryShelfProps) {
   //    filter, or an async series fetch landing): scroll to the top so the new
   //    ordering shows from its start and an inherited scrollTop can't strand the
   //    viewport mid-list. Layout effect so it lands before paint.
-  const scrollStorageKey = `onyx.shelf.scroll.${st.currentLibraryId}.${st.libraryView}.${st.filter}.${st.contextFilter?.kind ?? ''}.${st.contextFilter?.value ?? ''}.${st.search}`;
+  const scrollStorageKey = `onyx.shelf.scroll.${st.currentLibraryId}.${st.shelfTab}.${st.libraryView}.${st.filter}.${st.contextFilter?.kind ?? ''}.${st.contextFilter?.value ?? ''}.${st.search}`;
   const prevViewScrollKey = useRef<string | null>(null);
   const pendingScrollRestoreKey = useRef<string | null>(null);
   useLayoutEffect(() => {

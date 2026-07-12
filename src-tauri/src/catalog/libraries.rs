@@ -333,16 +333,23 @@ pub fn list_items(library_id: &str) -> Result<Vec<Value>, String> {
 
 pub(crate) fn list_items_conn(conn: &Connection, library_id: &str) -> Result<Vec<Value>, String> {
     let mut stmt = conn
-        .prepare("SELECT item_json FROM items WHERE library_id = ?1")
+        .prepare("SELECT item_json, added_at FROM items WHERE library_id = ?1")
         .map_err(|e| format!("list items: {e}"))?;
     let rows = stmt
-        .query_map(params![library_id], |r| r.get::<_, String>(0))
+        .query_map(params![library_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
         .map_err(|e| format!("list items query: {e}"))?;
     let mut out = Vec::new();
     for row in rows {
-        let s = row.map_err(|e| format!("row: {e}"))?;
+        let (s, added_at) = row.map_err(|e| format!("row: {e}"))?;
         match serde_json::from_str::<Value>(&s) {
-            Ok(v) => out.push(v),
+            Ok(mut v) => {
+                // Local catalog insertion time is equivalent to the ABS
+                // library-item creation time used by its Recently Added shelf.
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("addedAt".into(), Value::from(added_at));
+                }
+                out.push(v);
+            }
             Err(e) => log::warn!(target: "skald::library", "catalog: bad item_json ({e})"),
         }
     }
