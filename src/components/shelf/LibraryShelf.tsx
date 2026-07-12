@@ -446,13 +446,21 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
                     overflow: 'hidden',
                     borderRadius: 4,
                     transform: b.id === selectedId ? 'translateY(-4px)' : 'none',
+                    // The grid is virtualized, so this hint is bounded to the
+                    // visible/overscanned covers. Keep the lift on a compositor
+                    // layer instead of repainting the entire absolute-positioned
+                    // grid row on every transform frame.
+                    willChange: 'transform',
                     // box-shadow (not filter: drop-shadow) for the selected lift: a
                     // child `filter` spawns its own compositing layer and forces the
                     // enclosing backdrop-filter panel to re-sample a narrow sub-rect on
                     // click — the source of the vertical banding. box-shadow is a plain
                     // paint with the same visual and no backdrop re-sample.
                     boxShadow: b.id === selectedId ? '0 12px 24px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.35)' : 'none',
-                    transition: 'transform 0.15s, box-shadow 0.15s',
+                    // Shadows require raster paint. Switching the shadow once is
+                    // cheap; interpolating it for every 0.15s animation frame was
+                    // the shelf hover repaint storm. Only the lift is animated.
+                    transition: 'transform 0.15s',
                   }}>
                     <Cover item={b} size={coverW} serverUrl={st.serverUrl} />
                     {b.id === selectedId && (

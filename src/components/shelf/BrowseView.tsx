@@ -53,7 +53,9 @@ export function posterTile(): CSSProperties {
     background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
     borderRadius: 14, cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
     textAlign: 'left', overflow: 'hidden',
-    transition: 'transform 0.15s, border-color 0.15s, box-shadow 0.15s',
+    // Shadows are deliberately not interpolated: blur/shadow animation paints
+    // every frame. The lift stays smooth while the visual shadow switches once.
+    transition: 'transform 0.15s, border-color 0.15s',
   };
 }
 
