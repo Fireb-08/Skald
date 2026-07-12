@@ -446,11 +446,6 @@ function ShelfGrid({ books, st, coverW, selectedId, openBook, onContextMenu, onA
                     overflow: 'hidden',
                     borderRadius: 4,
                     transform: b.id === selectedId ? 'translateY(-4px)' : 'none',
-                    // The grid is virtualized, so this hint is bounded to the
-                    // visible/overscanned covers. Keep the lift on a compositor
-                    // layer instead of repainting the entire absolute-positioned
-                    // grid row on every transform frame.
-                    willChange: 'transform',
                     // box-shadow (not filter: drop-shadow) for the selected lift: a
                     // child `filter` spawns its own compositing layer and forces the
                     // enclosing backdrop-filter panel to re-sample a narrow sub-rect on
