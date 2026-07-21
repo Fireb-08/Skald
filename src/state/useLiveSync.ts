@@ -161,13 +161,21 @@ export function useLiveSync({
 
     // item_added — a new book arrived; append it to the shelf after normalising
     // author/narrator fields with patchLibraryItems so it matches the rest.
+    // Idempotent by id: ABS can emit item_added more than once for a single new
+    // item (the folder watcher scans it in and a subsequent scan re-emits; the
+    // socket can also redeliver on reconnect), and an upload's item is not yet
+    // on the shelf. Without this guard a repeat event appended a duplicate that
+    // only cleared on a fresh fetch (relaunch). If the id is already present,
+    // merge instead — same semantics as item_updated.
     listen<string>('library-item-added', event => {
       try {
         const raw  = JSON.parse(event.payload) as LibraryItem;
         // Only process items that belong to the currently loaded library.
         if (!shelfAcceptsLibrary(raw.libraryId)) return;
         const item = patchLibraryItems([raw])[0];
-        setLibraryRaw(prev => [...prev, item]);
+        setLibraryRaw(prev => prev.some(b => b.id === item.id)
+          ? prev.map(b => b.id === item.id ? { ...b, ...item } : b)
+          : [...prev, item]);
       } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlistenAdded = fn; });
 

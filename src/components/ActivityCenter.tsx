@@ -1,8 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { OnyxState } from '../state/onyx';
 import Icon from './Icon';
 
 export interface ActivityCenterProps { st: OnyxState; }
+
+// The trigger lives inside the titlebar's drag region, so it must opt out of
+// window-drag to stay clickable (WebkitAppRegion isn't in the CSSProperties type).
+type NoDragStyle = CSSProperties & { WebkitAppRegion?: string };
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
 function relativeTime(timestamp: number): string {
@@ -27,13 +32,20 @@ export default function ActivityCenter({ st }: ActivityCenterProps) {
   }, [open]);
 
   return (
-    <div ref={rootRef} style={{ position: 'fixed', top: 52, right: 16, zIndex: 850 }}>
-      <button ref={triggerRef} type="button" aria-label={`Recent activity${st.activity.length ? `, ${st.activity.length} items` : ''}`} aria-haspopup="dialog" aria-expanded={open} aria-controls="onyx-activity-center" title="Recent activity" onClick={() => setOpen(value => !value)} style={{ position: 'relative', width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 9, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel2)', color: 'var(--onyx-text-dim)', cursor: 'pointer', boxShadow: '0 8px 20px rgba(0,0,0,0.25)' }}>
-        <Icon name="bell" size={15} />
+    // Inline within the titlebar (to the right of the ONYX / NOT ENCRYPTED cluster).
+    // Relative so the dropdown anchors to the trigger; no-drag so clicks aren't
+    // swallowed by the surrounding window-drag region.
+    <div ref={rootRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', WebkitAppRegion: 'no-drag' } as NoDragStyle}>
+      <button ref={triggerRef} type="button" aria-label={`Recent activity${st.activity.length ? `, ${st.activity.length} items` : ''}`} aria-haspopup="dialog" aria-expanded={open} aria-controls="onyx-activity-center" title="Recent activity" onClick={() => setOpen(value => !value)} style={{ position: 'relative', width: 30, height: 30, display: 'grid', placeItems: 'center', borderRadius: 8, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel2)', color: 'var(--onyx-text-dim)', cursor: 'pointer' }}>
+        <Icon name="bell" size={14} />
         {st.activity.length > 0 && <span aria-hidden="true" style={{ position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16, padding: '0 3px', boxSizing: 'border-box', borderRadius: 8, background: 'var(--onyx-accent)', color: 'var(--onyx-bg)', font: `700 9px/16px ${MONO}`, textAlign: 'center' }}>{Math.min(99, st.activity.length)}</span>}
       </button>
+      {/* Static translucent popout — NO live backdrop-filter (see Glass.tsx: it
+          caused the WebView2 banding). Without a blur to soften the busy shelf
+          behind it, the tint is raised to 0.86 so the small activity text stays
+          legible while still reading as a translucent surface. */}
       {open && (
-        <section id="onyx-activity-center" role="dialog" aria-modal="false" aria-labelledby="onyx-activity-title" style={{ position: 'absolute', top: 42, right: 0, width: 360, maxHeight: 420, overflow: 'auto', padding: 14, borderRadius: 12, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel2)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}>
+        <section id="onyx-activity-center" role="dialog" aria-modal="false" aria-labelledby="onyx-activity-title" style={{ position: 'absolute', top: 'calc(100% + 8px)', left: 0, zIndex: 850, width: 360, maxHeight: 420, overflow: 'auto', padding: 14, borderRadius: 12, border: '1px solid var(--onyx-glass-edge)', background: st.translucent ? 'rgba(19, 19, 22, 0.86)' : 'var(--onyx-panel2)', boxShadow: '0 24px 60px rgba(0,0,0,0.5)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
             <h2 id="onyx-activity-title" style={{ margin: 0, fontFamily: MONO, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Recent activity</h2>
             {st.activity.length > 0 && <button type="button" onClick={st.clearActivity} style={{ border: 0, background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 9 }}>Clear</button>}

@@ -95,6 +95,29 @@ describe('useLiveSync runtime preference lifecycle', () => {
     expect(stableDeps.setMediaProgress).toHaveBeenCalledTimes(1);
   });
 
+  it('appends a newly added item once even if item_added is delivered twice', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    // ABS can emit item_added more than once for a single new upload (folder
+    // watcher scan + a subsequent scan pass, or a socket redelivery). The shelf
+    // must stay idempotent by id — a relaunch used to be the only thing that
+    // cleared the duplicate.
+    const added = JSON.stringify({ id: 'newbook', libraryId: 'library', media: { metadata: {} } });
+    await act(async () => {
+      tauri.emit('library-item-added', added);
+      tauri.emit('library-item-added', added);
+    });
+
+    // The handler passes functional updaters; replay them over an empty shelf.
+    let shelf: { id: string }[] = [];
+    for (const call of (stableDeps.setLibraryRaw as ReturnType<typeof vi.fn>).mock.calls) {
+      shelf = call[0](shelf);
+    }
+    expect(shelf.filter(b => b.id === 'newbook')).toHaveLength(1);
+  });
+
   it('does not leak async listener registrations when disabled immediately', async () => {
     const stableDeps = deps();
     const { rerender } = renderHook(

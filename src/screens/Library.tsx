@@ -107,8 +107,11 @@ export default function Library({ st }: LibraryProps) {
       {/* overflow: visible required — TopNav active tab indicator protrudes below nav bar via position:absolute */}
       {focusColumn}
 
-      {/* RIGHT — shelf column */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+      {/* RIGHT — shelf column. minHeight:0 lets the flex:1 LibraryShelf shrink to
+          the column height instead of growing to its (virtualized, very tall)
+          content — without it the shelf's scroll container can resolve to a
+          fragile/near-zero height, which the virtualizer then measures. */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, minHeight: 0 }}>
         <TopNav st={st} />
         <PickItUp st={st} />
         <ShelfHeader st={st} />

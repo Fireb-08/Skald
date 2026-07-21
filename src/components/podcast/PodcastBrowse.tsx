@@ -92,19 +92,21 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
   // Podcast downloads use the same backend byte events as book downloads. Keep
   // a row-local projection so the feed and global progress card never disagree.
   useEffect(() => {
-    let offProgress: (() => void) | undefined;
-    let offComplete: (() => void) | undefined;
-    let offFailed: (() => void) | undefined;
-    let offCancelled: (() => void) | undefined;
-    listen<{ itemId: string; bytesDownloaded: number; totalBytes: number }>('download-progress', event => {
-      const { itemId, bytesDownloaded, totalBytes } = event.payload;
-      setDownloadProgress(current => new Map(current).set(itemId, { downloaded: bytesDownloaded, total: totalBytes }));
-    }).then(off => { offProgress = off; });
+    // Hold the listen() Promises (not the resolved UnlistenFns) so cleanup is
+    // race-free: if this component unmounts before a Promise resolves, awaiting it
+    // in the teardown still unregisters the listener. Assigning the fn to a local
+    // in .then() would leave it undefined at cleanup time and leak the listener.
     const clear = (itemId: string) => setDownloadProgress(current => { const next = new Map(current); next.delete(itemId); return next; });
-    listen<{ itemId: string }>('download-complete', event => clear(event.payload.itemId)).then(off => { offComplete = off; });
-    listen<{ itemId: string }>('download-failed', event => clear(event.payload.itemId)).then(off => { offFailed = off; });
-    listen<{ itemId: string }>('download-cancelled', event => clear(event.payload.itemId)).then(off => { offCancelled = off; });
-    return () => { offProgress?.(); offComplete?.(); offFailed?.(); offCancelled?.(); };
+    const unlisteners = [
+      listen<{ itemId: string; bytesDownloaded: number; totalBytes: number }>('download-progress', event => {
+        const { itemId, bytesDownloaded, totalBytes } = event.payload;
+        setDownloadProgress(current => new Map(current).set(itemId, { downloaded: bytesDownloaded, total: totalBytes }));
+      }),
+      listen<{ itemId: string }>('download-complete', event => clear(event.payload.itemId)),
+      listen<{ itemId: string }>('download-failed', event => clear(event.payload.itemId)),
+      listen<{ itemId: string }>('download-cancelled', event => clear(event.payload.itemId)),
+    ];
+    return () => { unlisteners.forEach(p => p.then(off => off())); };
   }, []);
 
   const onCarouselMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {

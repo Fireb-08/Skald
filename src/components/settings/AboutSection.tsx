@@ -3,6 +3,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import lyreIcon from '../../assets/lyre.png';
 import type { OnyxState } from '../../state/onyx';
+import { useModalFocus } from '../../hooks/useModalFocus';
 import { SectionHead, Row, SERIF, MONO } from './shared';
 import { exportTextFile } from '../../api/abs';
 import { log } from '../../lib/log';
@@ -50,6 +51,10 @@ async function loadNotices(): Promise<string> {
 
 function LicensesModal({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState('');
+  // Shared modal contract: Escape to close, Tab containment, focus restore. Without
+  // it this modal had no Escape handler and no focus trap — a keyboard user could
+  // Tab straight into the background settings shell.
+  const dialogRef = useModalFocus<HTMLDivElement>(onClose);
 
   const copyFull = async () => {
     setStatus('Loading…');
@@ -76,7 +81,7 @@ function LicensesModal({ onClose }: { onClose: () => void }) {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
     >
-      <div style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 16, boxShadow: '0 40px 100px rgba(0,0,0,0.72), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), inset 0 1px 0 rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Open source licenses" style={{ width: '100%', maxWidth: 520, maxHeight: '85vh', background: 'var(--onyx-panel)', border: '1px solid var(--onyx-glass-edge)', borderRadius: 16, boxShadow: '0 40px 100px rgba(0,0,0,0.72), 0 0 0 1px rgba(var(--onyx-accent-r),var(--onyx-accent-g),var(--onyx-accent-b),0.06), inset 0 1px 0 rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Header */}
         <div style={{ flexShrink: 0, padding: '20px 20px 0 22px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ minWidth: 0 }}>
@@ -128,14 +133,13 @@ function LicensesModal({ onClose }: { onClose: () => void }) {
 }
 
 function HelpModal({ onClose }: { onClose: () => void }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  // Shared modal contract (Escape, Tab containment, focus restore) — replaces the
+  // ad-hoc Escape-only listener this modal had, which left no focus trap so a
+  // keyboard user could Tab out into the settings shell behind it.
+  const dialogRef = useModalFocus<HTMLElement>(onClose);
   return (
     <div onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, zIndex: 500, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(10px)' }}>
-      <section role="dialog" aria-modal="true" aria-labelledby="quick-start-title" style={{ width: '100%', maxWidth: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 16, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel)', boxShadow: '0 40px 100px rgba(0,0,0,0.72)' }}>
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="quick-start-title" style={{ width: '100%', maxWidth: 700, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRadius: 16, border: '1px solid var(--onyx-glass-edge)', background: 'var(--onyx-panel)', boxShadow: '0 40px 100px rgba(0,0,0,0.72)' }}>
         <div style={{ padding: '18px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--onyx-line)' }}>
           <h2 id="quick-start-title" style={{ margin: 0, fontFamily: SERIF, fontSize: 20 }}>Quick start and troubleshooting</h2>
           <button onClick={onClose} aria-label="Close quick start" style={{ width: 30, height: 30, border: 0, background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontSize: 17 }}>×</button>

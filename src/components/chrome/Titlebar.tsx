@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import lyreIcon from '../../assets/lyre.png';
 
@@ -7,6 +7,10 @@ export interface TitlebarProps {
   isDark: boolean;
   // When true, only "SKALD" is shown — no theme name or subtitle.
   minimal?: boolean;
+  // Optional controls rendered in the left cluster, just right of the app-name
+  // and status pills (e.g. the Recent-activity bell). Interactive children must
+  // opt out of the drag region themselves (WebkitAppRegion: 'no-drag').
+  trailing?: ReactNode;
   // True when the library was loaded from the disk cache (server unreachable).
   // Displays a persistent amber OFFLINE pill so the user always knows they are
   // browsing cached data rather than a live server connection.
@@ -32,7 +36,7 @@ const HANDLERS: Record<string, () => void> = {
   close: () => { void getCurrentWindow().close(); },
 };
 
-export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted }: TitlebarProps) {
+export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted, trailing }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
 
@@ -108,6 +112,10 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
             not encrypted
           </div>
         )}
+        {/* Optional trailing controls (e.g. Recent activity) sit just right of the
+            status pills. Rendered inside the left cluster so they follow the app
+            name rather than crowding the window buttons. */}
+        {trailing}
       </div>
       <div style={noDrag}>
         {BUTTONS.map((b) => (

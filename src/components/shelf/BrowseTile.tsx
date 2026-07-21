@@ -29,9 +29,12 @@ export interface BrowseTileProps {
 const TAG_STYLE: CSSProperties = {
   position: 'absolute', top: 8, left: 8, zIndex: 3,
   padding: '3px 8px', borderRadius: 5,
-  background: 'rgba(8,8,11,0.72)', border: '1px solid var(--onyx-glass-edge)',
+  // No backdrop-filter (see Glass.tsx) — the tag sits on cover art inside a
+  // scrolling panel; a slightly more opaque fill replaces the 4px blur for
+  // legibility without a live backdrop sample.
+  background: 'rgba(8,8,11,0.82)', border: '1px solid var(--onyx-glass-edge)',
   color: 'var(--onyx-text-dim)', fontFamily: MONO, fontSize: 9,
-  letterSpacing: '0.12em', textTransform: 'uppercase', backdropFilter: 'blur(4px)',
+  letterSpacing: '0.12em', textTransform: 'uppercase',
 };
 
 const EMPTY_ART: CSSProperties = {

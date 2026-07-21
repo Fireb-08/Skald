@@ -28,11 +28,12 @@ export default function VolumeControl({ st, compact, style }: VolumeControlProps
       display: 'flex', alignItems: 'center', gap: compact ? 6 : 10, padding: '6px 12px',
       border: '1px solid var(--onyx-glass-edge)', borderRadius: 8,
       background: 'var(--onyx-glass)',
-      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+      // No backdrop-filter (see Glass.tsx) — control sits on the static-tinted top bar.
       ...style,
     }}>
       <button
         onClick={() => st.muted ? unmuteAudio(st) : muteAudio(st)}
+        aria-label={st.muted ? 'Unmute' : 'Mute'}
         style={{ background: 'none', border: 'none', color: 'var(--onyx-text-dim)', cursor: 'pointer', padding: 2, display: 'flex' }}
         title="Mute"
       >
@@ -52,6 +53,7 @@ export default function VolumeControl({ st, compact, style }: VolumeControlProps
         }} />
         <input
           type="range" min={0} max={100} value={Math.round(v * 100)}
+          aria-label="Volume"
           onChange={onChange}
           style={{ position: 'absolute', inset: 0, width: '100%', opacity: 0, cursor: 'pointer' }}
         />

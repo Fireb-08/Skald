@@ -65,6 +65,10 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
     <div ref={ref} style={{ ...style }}>
       <button
         ref={triggerRef}
+        aria-label={`Audio output: ${current?.name ?? 'loading devices'}`}
+        aria-haspopup="listbox"
+        aria-expanded={st.deviceOpen}
+        aria-controls="onyx-device-listbox"
         onClick={() => {
           // Measure the trigger's viewport rect before opening so the dropdown
           // panel is positioned flush below the button regardless of scroll.
@@ -80,7 +84,8 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
           border: `1px solid ${st.deviceOpen ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
           borderRadius: 8,
           background: st.deviceOpen ? 'var(--onyx-accent-dim)' : 'var(--onyx-glass)',
-          backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+          // No backdrop-filter (see Glass.tsx) — this control sits on the already
+          // static-tinted top bar, so blurring behind it did nothing visible.
           color: 'var(--onyx-text)', cursor: 'pointer', fontFamily: 'inherit',
         }}
       >
@@ -110,6 +115,9 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
       {st.deviceOpen && ReactDOM.createPortal(
         <div
           ref={panelRef}
+          id="onyx-device-listbox"
+          role="listbox"
+          aria-label="Audio output device"
           style={{
             position: 'fixed',
             top: dropPos.top,
@@ -129,6 +137,8 @@ export default function DeviceSelector({ st, compact, style }: DeviceSelectorPro
           ) : devices.map(d => (
             <button
               key={d.id}
+              role="option"
+              aria-selected={d.id === st.device}
               onClick={() => {
                 st.setDevice(d.id);
                 setAudioDevice(d.id).catch(e => log.error('playback', 'setAudioDevice failed', { device: d.id, err: String(e) }));

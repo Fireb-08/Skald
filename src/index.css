@@ -115,7 +115,21 @@ input:focus-visible {
 .onyx-item-wrap:focus-within > .onyx-item-actions,
 .onyx-item-actions:focus-visible { opacity: 1; }
 
+/* Selection highlight is scoped to genuinely-selectable content only. The chrome
+   is user-select:none (below), but a drag *begun* inside a selectable island — the
+   top-bar search field, a Player/book description — can still extend a DOM
+   selection across the non-selectable layout in between. Chromium then paints
+   ::selection over every element the range crosses, which showed up as an accent
+   "bar" spanning the sidebar or top bar (and looks especially bad over the
+   translucent panels). Defaulting the highlight to transparent keeps that stray
+   selection invisible; the opt-in set below (identical to the user-select:text
+   surfaces) restores real feedback where text selection is actually meaningful. */
 ::selection {
+  background: transparent;
+}
+.onyx-selectable::selection, .onyx-selectable *::selection,
+input::selection, textarea::selection,
+[contenteditable="true"]::selection, [contenteditable="true"] *::selection {
   background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.35);
 }
 

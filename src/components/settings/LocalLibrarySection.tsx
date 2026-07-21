@@ -82,12 +82,15 @@ export default function LocalLibrarySection({ st, embedded = false }: LocalLibra
   useEffect(() => { void reloadUnidentified(); }, [reloadUnidentified]);
 
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<{ libraryId: string; phase: string; processed: number; total: number; currentItem?: string }>('local-scan-progress', event => {
+    // Hold the listen() Promise so cleanup is race-free: if this pane unmounts
+    // before the Promise resolves, awaiting it in teardown still unregisters the
+    // listener. A local UnlistenFn assigned in .then() would be undefined at cleanup
+    // time (and the listener would leak) when the pane is dismissed quickly.
+    const unlisten = listen<{ libraryId: string; phase: string; processed: number; total: number; currentItem?: string }>('local-scan-progress', event => {
       const payload = event.payload;
       setScanProgress(current => ({ ...current, [payload.libraryId]: payload }));
-    }).then(off => { unlisten = off; });
-    return () => unlisten?.();
+    });
+    return () => { unlisten.then(off => off()); };
   }, []);
 
   // Choose the parent location where the new library folder will be created.

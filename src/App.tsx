@@ -252,14 +252,18 @@ export default function App() {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      transform: `scale(${z})`,
+      // Skip the transform entirely at 100% scale: even scale(1) forces the
+      // whole app subtree through an extra rastered layer, which feeds the
+      // WebView2 partial-repaint banding on the translucent panels (see
+      // Glass.tsx). At non-default scales the transform is the feature itself.
+      transform: z === 1 ? undefined : `scale(${z})`,
       transformOrigin: 'top left',
     }}>
       {/* Ambient wash gradient and titlebar chrome */}
       <OnyxWash isDark={isDark} />
       {/* isOffline is true when the library loaded from disk cache (server unreachable);
           isUnencrypted flags a plain-http ABS connection (review L6 — visible, never blocked) */}
-      <Titlebar isDark={isDark} isOffline={st.isOffline} lastRefresh={st.lastLibraryRefresh} isUnencrypted={!!st.authToken && st.serverUrl.startsWith('http://')} />
+      <Titlebar isDark={isDark} isOffline={st.isOffline} lastRefresh={st.lastLibraryRefresh} isUnencrypted={!!st.authToken && st.serverUrl.startsWith('http://')} trailing={<ActivityCenter st={st} />} />
 
       {/* Screen content area — sits below the 44px titlebar */}
       <div style={{
@@ -299,8 +303,6 @@ export default function App() {
         onCancel={(title) => st.setToast({ message: `Download cancelled — "${title}"`, type: 'info' })}
         onFailed={(title, _error) => { st.setToast({ message: `Download failed — "${title}"`, type: 'error' }); st.recordActivity({ category: 'downloads', outcome: 'error', message: `Download failed — "${title}"` }); }}
       />
-
-      <ActivityCenter st={st} />
 
       {/* Quarantine notice — local-library books awaiting a metadata match. */}
       <UnidentifiedNotice st={st} />

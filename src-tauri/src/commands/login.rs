@@ -136,6 +136,15 @@ pub async fn login_with_api_key(
         .unwrap_or("")
         .to_string();
 
+    // Guard against an empty session token. Without this, an empty string would be
+    // returned to the frontend, saved into the keyring and React auth state, and
+    // leave the app in an authenticated-but-broken state (every API call 401s) that
+    // only a manual token clear escapes. The password path filters empty tokens the
+    // same way; mirror that here. (See bug B1 — missing empty-token guard.)
+    if token.is_empty() {
+        return Err("ABS server did not return a session token in /api/me".to_string());
+    }
+
     // Deserialize User fields — extra fields (mediaProgress, bookmarks, etc.)
     // are silently ignored by serde.
     let user: models::User = serde_json::from_value(body_json)
