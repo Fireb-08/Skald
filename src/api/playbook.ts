@@ -151,26 +151,29 @@ export async function playBook(
     st.setSessionId('');
     st.setPlaying(false);
 
-    // 2. Determine start position: explicit override wins, otherwise the
-    //    book's saved progress from the server, otherwise 0. A finished book
-    //    restarts from the beginning — its record sits at the media duration,
-    //    so resuming there would open the player at the end.
-    let startTime = startTimeOverride;
-    if (startTime === undefined) {
-      const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
-      startTime = saved && !saved.isFinished ? saved.currentTime : 0;
-    }
+    // 2. Let ABS choose an ordinary resume position from its authoritative
+    // MediaProgress record. That record may have advanced on a phone, the web
+    // client, or another Skald instance since our last socket event. Passing
+    // st.mediaProgress here turned a cached value into an explicit seek and
+    // overrode the fresher currentTime returned by the newly-opened session.
+    // Only a real user action (chapter/bookmark jump) is an explicit override.
+    const requestedStartTime = startTimeOverride;
 
-    // 3. Open the session at the resolved position — server tells LibVLC
-    //    to begin decoding from startTime so there is no seek glitch.
+    // 3. Open the session. Rust loads LibVLC at either the explicit override or
+    //    the authoritative currentTime returned with the new ABS session.
     let result;
     try {
-      result = await openPlaybackSession(st.serverUrl, bookId, startTime);
+      result = await openPlaybackSession(st.serverUrl, bookId, requestedStartTime);
     } catch (e) {
       log.error('playback', 'openPlaybackSession failed', { bookId, err: String(e) });
       throw e;
     }
-    log.info('playback', 'session opened', { bookId, sessionId: result.sessionId });
+    log.info('playback', 'session opened', {
+      bookId,
+      sessionId: result.sessionId,
+      resumeSource: requestedStartTime === undefined ? 'server' : 'explicit',
+      currentTime: result.currentTime,
+    });
     st.setSessionId(result.sessionId);
     st.setSessionReady(true);
     st.setCurrentBookId(bookId);
@@ -252,18 +255,18 @@ export async function playEpisode(
     st.setSessionId('');
     st.setPlaying(false);
 
-    // Resolve start position: explicit override > saved episode progress > 0.
-    // Episode progress records carry both libraryItemId and episodeId. A
-    // finished episode restarts from the beginning (same rule as books).
-    let startTime = startTimeOverride;
-    if (startTime === undefined) {
-      const saved = st.mediaProgress.find(
-        p => p.libraryItemId === podcastItemId && p.episodeId === episodeId,
-      );
-      startTime = saved && !saved.isFinished ? saved.currentTime : 0;
-    }
-
-    const result = await openPlaybackSession(st.serverUrl, podcastItemId, startTime, episodeId);
+    // As with books, an ordinary resume must use the server session's currentTime
+    // so playback on another device wins over Skald's cached mediaProgress. Only
+    // an explicit episode/chapter jump should override the server position.
+    const requestedStartTime = startTimeOverride;
+    const result = await openPlaybackSession(st.serverUrl, podcastItemId, requestedStartTime, episodeId);
+    log.info('playback', 'episode session opened', {
+      bookId: podcastItemId,
+      episodeId,
+      sessionId: result.sessionId,
+      resumeSource: requestedStartTime === undefined ? 'server' : 'explicit',
+      currentTime: result.currentTime,
+    });
     st.setSessionId(result.sessionId);
     st.setSessionReady(true);
     st.setCurrentEpisodeId(episodeId);

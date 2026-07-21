@@ -111,8 +111,10 @@ impl AbsClient {
 
     /// POST /api/items/{id}/play — opens a playback session; request body asks
     /// for direct play so LibVLC receives plain file URLs (no HLS transcode).
-    /// Optional `start_time` is passed as `startTime` so the server begins the
-    /// session at a specific position, eliminating a separate seek after open.
+    /// Optional `start_time` is included for protocol compatibility, but current
+    /// ABS chooses the session's resume point from its MediaProgress record. The
+    /// SessionManager applies a genuine chapter/bookmark override client-side
+    /// after the response; an ordinary cold start trusts the returned currentTime.
     ///
     /// When `episode_id` is `Some`, the request targets the episode-playback
     /// route `POST /api/items/{id}/play/{episodeId}` instead (podcast cluster E,

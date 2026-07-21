@@ -14,7 +14,7 @@ use crate::{api::AbsClient, audio::AudioPlayer};
 // I/O may creep in here (that would break the seam).
 
 /// The position the player should load at: an explicit caller start (chapter/
-/// bookmark jump) always beats the server's possibly-stale currentTime.
+/// bookmark jump) always beats the server-selected resume currentTime.
 fn resolve_load_time(start_time: Option<f64>, server_current_time: f64) -> f64 {
     start_time.unwrap_or(server_current_time)
 }
