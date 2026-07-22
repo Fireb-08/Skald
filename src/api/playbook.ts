@@ -176,7 +176,7 @@ export async function playBook(
     //    the authoritative currentTime returned with the new ABS session.
     let result;
     try {
-      result = await openPlaybackSession(st.serverUrl, bookId, requestedStartTime);
+      result = await openPlaybackSession(st.serverUrl, bookId, st.userId, requestedStartTime);
     } catch (e) {
       log.error('playback', 'openPlaybackSession failed', { bookId, err: String(e) });
       throw e;
@@ -272,7 +272,7 @@ export async function playEpisode(
     // so playback on another device wins over Skald's cached mediaProgress. Only
     // an explicit episode/chapter jump should override the server position.
     const requestedStartTime = startTimeOverride;
-    const result = await openPlaybackSession(st.serverUrl, podcastItemId, requestedStartTime, episodeId);
+    const result = await openPlaybackSession(st.serverUrl, podcastItemId, st.userId, requestedStartTime, episodeId);
     log.info('playback', 'episode session opened', {
       bookId: podcastItemId,
       episodeId,

@@ -33,6 +33,11 @@ fn project_dirs() -> Result<directories::ProjectDirs, String> {
         .ok_or_else(|| "Could not resolve app directories".to_string())
 }
 
+/// Small application-owned state that must not move with downloads or cache.
+pub fn data_local_dir() -> Result<PathBuf, String> {
+    Ok(project_dirs()?.data_local_dir().to_path_buf())
+}
+
 fn overrides_path() -> Result<PathBuf, String> {
     Ok(project_dirs()?.data_local_dir().join("paths.json"))
 }

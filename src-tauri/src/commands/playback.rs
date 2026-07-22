@@ -29,17 +29,30 @@ pub async fn open_playback_session(
     item_id: String,
     episode_id: Option<String>,
     start_time: Option<f64>,
+    user_id: String,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<OpenSessionResult, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let client = AbsClient::new(server_url).with_token(token);
+    let resolved_user_id = if user_id.trim().is_empty() {
+        client.get_me().await?.id
+    } else {
+        user_id
+    };
     // Scope the SessionManager lock so it is released before this command
     // returns — play_audio acquires the same lock and must not see it held.
     let result = {
         let mut mgr = state.lock().await;
-        mgr.client = AbsClient::new(server_url).with_token(token);
-        let current_time = mgr.start_session(&item_id, episode_id.as_deref(), app.clone(), start_time).await?;
+        mgr.client = client;
+        let current_time = mgr.start_session(
+            &item_id,
+            episode_id.as_deref(),
+            app.clone(),
+            start_time,
+            &resolved_user_id,
+        ).await?;
         let session_id = mgr.session_id.clone()
             .ok_or_else(|| "Session ID not set after start".to_string())?;
         OpenSessionResult { session_id, current_time }
@@ -50,6 +63,26 @@ pub async fn open_playback_session(
         "at": chrono::Utc::now().timestamp_millis(),
     }));
     Ok(result)
+}
+
+/// Retry only session IDs durably recorded by this Skald installation for the
+/// authenticated ABS user. The active session is excluded defensively.
+#[tauri::command]
+pub async fn cleanup_owned_playback_sessions(
+    server_url: String,
+    user_id: String,
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<u32, String> {
+    let token = auth::load_token()?
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    let client = AbsClient::new(server_url).with_token(token);
+    let resolved_user_id = if user_id.trim().is_empty() {
+        client.get_me().await?.id
+    } else {
+        user_id
+    };
+    let active_session_id = state.lock().await.session_id.clone();
+    crate::session_ownership::retry_owned(&client, &resolved_user_id, active_session_id.as_deref()).await
 }
 
 #[tauri::command]
@@ -360,10 +393,16 @@ pub async fn close_session(
 ) -> Result<(), String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
+    let result = AbsClient::new(server_url)
         .with_token(token)
         .close_session(&session_id, current_time, time_listened)
-        .await
+        .await;
+    if result.is_ok() {
+        if let Err(error) = crate::session_ownership::remove_owned(&session_id) {
+            log::warn!(target: "skald::sync", "session closed but journal removal deferred session_id={session_id}: {error}");
+        }
+    }
+    result
 }
 
 // record_stop_point — writes a local position snapshot for the given book.

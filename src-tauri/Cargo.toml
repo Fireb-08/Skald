@@ -31,6 +31,7 @@ keyring = { version = "3", features = ["windows-native"] }
 directories = "5"
 fs2 = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
 vlc-rs = "0.3"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-dialog = "2"

@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
+import { cleanupOwnedPlaybackSessions, closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
 import { log } from './lib/log';
 import Toast from './components/ui/Toast';
 import ActivityCenter from './components/ActivityCenter';
@@ -63,6 +63,9 @@ export default function App() {
     }
     if (socketInitialised) return;
     socketInitialised = true;
+    cleanupOwnedPlaybackSessions(st.serverUrl, st.userId).then(count => {
+      if (count > 0) log.info('sync', 'closed Skald-owned orphan sessions', { count });
+    }).catch(e => log.warn('sync', 'owned session cleanup deferred', { err: String(e) }));
     // Auth is present: restore connection if the preference is enabled.
     if (localStorage.getItem('onyx.sync.live') === 'true') {
       connectSocket(st.serverUrl).catch(e => {

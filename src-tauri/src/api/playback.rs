@@ -126,9 +126,17 @@ impl AbsClient {
         item_id: &str,
         episode_id: Option<&str>,
         start_time: Option<f64>,
+        device_id: &str,
     ) -> Result<PlaySession, String> {
         let mut body = serde_json::json!({
-            "deviceInfo": { "clientName": "Skald", "clientVersion": "1.0.0" },
+            // ABS closes prior sessions only when both userId and deviceId
+            // match. This persistent installation ID prevents crash-orphans
+            // without touching sessions opened by phones or web clients.
+            "deviceInfo": {
+                "deviceId": device_id,
+                "clientName": "Skald",
+                "clientVersion": env!("CARGO_PKG_VERSION"),
+            },
             "mediaPlayer": "vlc",
             "supportedMimeTypes": ["audio/mpeg", "audio/ogg", "audio/aac", "audio/flac", "audio/wav"],
             "forceDirectPlay": true,
@@ -182,10 +190,31 @@ impl AbsClient {
             .await
             .map_err(|e| e.to_string())?;
 
-        if !resp.status().is_success() {
+        // Close is intentionally idempotent: the frontend safety net and Rust
+        // ExitRequested handler may race, and ABS also closes same-device
+        // sessions automatically when a replacement starts.
+        if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
             return Err(format!("close_session failed: HTTP {}", resp.status()));
         }
 
+        Ok(())
+    }
+
+    /// Close an installation-owned orphan without sending a potentially stale
+    /// progress payload. ABS saves the session's last periodic sync before removal.
+    pub async fn close_session_without_sync(&self, session_id: &str) -> Result<(), String> {
+        let resp = self
+            .http
+            .post(format!("{}/api/session/{session_id}/close", self.root()))
+            .header("Authorization", self.auth_header()?)
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+
+        if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
+            return Err(format!("owned session close failed: HTTP {}", resp.status()));
+        }
         Ok(())
     }
 }

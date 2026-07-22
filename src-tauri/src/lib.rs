@@ -19,6 +19,7 @@ pub mod watcher;   // Local Library: staging-folder file-system watcher
 pub mod podcast_feed; // Local Podcasts: server-free RSS/Atom feed + OPML parsing
 pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
 pub mod sync_config; // Shared Rust/React playback-sync cadence definition
+pub mod session_ownership; // Stable ABS device identity + Skald-owned session journal
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -259,6 +260,7 @@ pub fn run() {
             commands::close_session,
             commands::save_token,
             commands::open_playback_session,
+            commands::cleanup_owned_playback_sessions,
             commands::play_audio,
             commands::pause_audio,
             commands::seek_audio,
@@ -612,6 +614,9 @@ pub fn run() {
                         };
                         match close_result {
                             Ok(Ok(())) => {
+                                if let Err(error) = session_ownership::remove_owned(&sid) {
+                                    log::warn!(target: "skald::sync", "final session closed but journal removal deferred session_id={sid}: {error}");
+                                }
                                 log::info!(target: "skald::sync", "final playback session sync completed");
                             }
                             Ok(Err(error)) => {

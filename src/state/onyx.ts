@@ -874,8 +874,8 @@ export function useOnyxState(): OnyxState {
           const base = storedRaw ? (JSON.parse(storedRaw) as User) : {} as User;
           setUser({ ...base, id: me.id, username: me.username, token: '', type: me.type });
         }
-        const resolvedId = userId || me.id;
-        if (!userId && me.id) setUserId(me.id);
+        const resolvedId = me.id || userId;
+        if (me.id && userId !== me.id) setUserId(me.id);
         const stats = await fetchListeningStats(serverUrl, resolvedId);
         if (cancelled) return;
         setListeningStats(stats);

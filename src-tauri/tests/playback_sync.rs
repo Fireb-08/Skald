@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{sleep, Duration};
 
-async fn capture_one_request(listener: TcpListener) -> String {
+async fn capture_one_request_with_response(listener: TcpListener, status: &str, response_body: &str) -> String {
     let (mut stream, _) = listener.accept().await.expect("accept test request");
     let mut request = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -42,12 +42,65 @@ async fn capture_one_request(listener: TcpListener) -> String {
         request.extend_from_slice(&chunk[..read]);
     }
 
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response_body}",
+        response_body.len(),
+    );
     stream
-        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .write_all(response.as_bytes())
         .await
         .expect("write test response");
 
     String::from_utf8(request[..target_len].to_vec()).expect("request is UTF-8")
+}
+
+async fn capture_one_request(listener: TcpListener) -> String {
+    capture_one_request_with_response(listener, "200 OK", "").await
+}
+
+#[tokio::test]
+async fn open_session_sends_stable_device_identity() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+    let address = listener.local_addr().expect("test server address");
+    let request_task = tokio::spawn(capture_one_request_with_response(
+        listener,
+        "200 OK",
+        r#"{"id":"session-123","currentTime":45,"audioTracks":[]}"#,
+    ));
+
+    let session = AbsClient::new(format!("http://{address}"))
+        .with_token("test-token".to_string())
+        .open_session("item-123", None, None, "install-device-123")
+        .await
+        .expect("open request succeeds");
+    assert_eq!(session.id, "session-123");
+
+    let request = request_task.await.expect("capture task succeeds");
+    let (headers, body) = request.split_once("\r\n\r\n").expect("body boundary");
+    assert_eq!(headers.lines().next(), Some("POST /api/items/item-123/play HTTP/1.1"));
+    let payload: serde_json::Value = serde_json::from_str(body).expect("valid JSON body");
+    assert_eq!(payload["deviceInfo"]["deviceId"], "install-device-123");
+    assert_eq!(payload["deviceInfo"]["clientName"], "Skald");
+}
+
+#[tokio::test]
+async fn owned_session_cleanup_closes_without_stale_progress_and_accepts_missing() {
+    for (status, session_id) in [("200 OK", "owned-open"), ("404 Not Found", "already-gone")] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let request_task = tokio::spawn(capture_one_request_with_response(listener, status, ""));
+
+        AbsClient::new(format!("http://{address}"))
+            .with_token("test-token".to_string())
+            .close_session_without_sync(session_id)
+            .await
+            .expect("owned close is idempotent");
+
+        let request = request_task.await.expect("capture task succeeds");
+        let (headers, body) = request.split_once("\r\n\r\n").expect("body boundary");
+        assert_eq!(headers.lines().next(), Some(format!("POST /api/session/{session_id}/close HTTP/1.1").as_str()));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(body).unwrap(), serde_json::json!({}));
+    }
 }
 
 #[tokio::test]
@@ -187,7 +240,12 @@ async fn live_abs_persists_session_progress() {
     let before = client.get_me().await.expect("read original ABS progress");
     let original = item_progress(&before, &config.item_id).cloned();
     let session = client
-        .open_session(&config.item_id, None, None)
+        .open_session(
+            &config.item_id,
+            None,
+            None,
+            "00000000-0000-4000-8000-000000000001",
+        )
         .await
         .expect("open ABS playback session");
     let duration = session

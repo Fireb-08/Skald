@@ -475,6 +475,8 @@ pub struct AuthSettings {
 #[serde(rename_all = "camelCase")]
 pub struct PlaySession {
     pub id: String,
+    #[serde(default)]
+    pub user_id: String,
     pub current_time: f64,
     #[serde(default)]
     pub audio_tracks: Vec<AudioFile>,

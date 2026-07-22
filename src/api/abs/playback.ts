@@ -7,12 +7,14 @@ import type { AudioDevice, Bookmark, OpenSessionResult } from './types';
 export function openPlaybackSession(
   serverUrl: string,
   itemId: string,
+  userId: string,
   startTime?: number,
   episodeId?: string,
 ): Promise<OpenSessionResult> {
   return invoke('open_playback_session', {
     serverUrl,
     itemId,
+    userId,
     episodeId: episodeId ?? null,
     startTime: startTime ?? null,
   });
@@ -28,6 +30,11 @@ export function pauseAudio(): Promise<void> {
 
 export function seekAudio(secs: number): Promise<void> {
   return invoke('seek_audio', { secs });
+}
+
+/** Retry closing only sessions journaled by this Skald installation/user. */
+export function cleanupOwnedPlaybackSessions(serverUrl: string, userId: string): Promise<number> {
+  return invoke('cleanup_owned_playback_sessions', { serverUrl, userId });
 }
 
 /** Persist the backend player's current position before a lifecycle boundary. */

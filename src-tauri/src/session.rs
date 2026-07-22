@@ -277,6 +277,7 @@ impl SessionManager {
         episode_id: Option<&str>,
         app: tauri::AppHandle<R>,
         start_time: Option<f64>,
+        user_id: &str,
     ) -> Result<f64, String> {
         // Stop any tasks from a previous session (online or local).
         self.active.store(false, Ordering::Relaxed);
@@ -315,7 +316,22 @@ impl SessionManager {
             }
         }
 
-        let session = self.client.open_session(item_id, episode_id, start_time).await?;
+        let device_id = crate::session_ownership::device_id()?;
+        // Retry only IDs journaled by this installation. ABS's stable-device
+        // cleanup remains the fallback if an individual orphan close is deferred.
+        crate::session_ownership::retry_owned(&self.client, user_id, self.session_id.as_deref()).await?;
+        let session = self.client.open_session(item_id, episode_id, start_time, &device_id).await?;
+        let owner_user_id = if session.user_id.is_empty() { user_id } else { &session.user_id };
+        if let Err(error) = crate::session_ownership::record_owned(
+            &self.client.base_url,
+            owner_user_id,
+            &session.id,
+        ) {
+            // An unjournaled session would recreate the original leak. Close it
+            // without a stale progress payload and fail the open visibly.
+            let _ = self.client.close_session_without_sync(&session.id).await;
+            return Err(format!("Could not journal opened playback session: {error}"));
+        }
         self.session_id = Some(session.id.clone());
         self.online_item_id = Some(item_id.to_string());
         self.online_episode_id = episode_id.filter(|id| !id.is_empty()).map(str::to_string);
@@ -336,7 +352,7 @@ impl SessionManager {
         let token = self.client.token.as_deref().unwrap_or("").to_string();
         let base = self.client.base_url.trim_end_matches('/').to_string();
         let online_multitrack = session.audio_tracks.len() > 1;
-        {
+        let load_result = {
             let player_guard = self.player.lock().unwrap();
             if let Some(p) = player_guard.as_ref() {
                 if online_multitrack {
@@ -345,12 +361,23 @@ impl SessionManager {
                         .iter()
                         .map(|t| (format!("{base}{}?token={token}", t.content_url), t.duration))
                         .collect();
-                    p.load_tracks(tracks, load_time)?;
+                    p.load_tracks(tracks, load_time)
                 } else if let Some(track) = session.audio_tracks.first() {
                     let url = format!("{base}{}?token={token}", track.content_url);
-                    p.load(&url, load_time)?;
+                    p.load(&url, load_time)
+                } else {
+                    Ok(())
                 }
+            } else {
+                Ok(())
             }
+        };
+        if let Err(error) = load_result {
+            if self.client.close_session_without_sync(&session.id).await.is_ok() {
+                let _ = crate::session_ownership::remove_owned(&session.id);
+            }
+            self.clear_server_identity();
+            return Err(error);
         }
 
         let active = Arc::new(AtomicBool::new(true));
@@ -986,7 +1013,13 @@ impl SessionManager {
             *current
         };
         let tl = *self.time_listened.lock().unwrap();
-        self.client.close_session(sid, ct, tl).await
+        let result = self.client.close_session(sid, ct, tl).await;
+        if result.is_ok() {
+            if let Err(error) = crate::session_ownership::remove_owned(sid) {
+                log::warn!(target: "skald::sync", "closed session but journal removal deferred session_id={sid}: {error}");
+            }
+        }
+        result
     }
 }
 

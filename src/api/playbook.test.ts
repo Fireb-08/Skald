@@ -24,6 +24,7 @@ import { playBook, playEpisode } from './playbook';
 function state(overrides: Partial<OnyxState> = {}): OnyxState {
   return {
     serverUrl: 'http://abs.local',
+    userId: 'user-123',
     downloads: [],
     library: [],
     mediaProgress: [],
@@ -56,7 +57,7 @@ describe('server-backed playback resume', () => {
 
     await playBook(st, 'book');
 
-    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'book', undefined);
+    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'book', 'user-123', undefined);
     expect(st.setPosition).toHaveBeenCalledWith(420);
   });
 
@@ -66,7 +67,7 @@ describe('server-backed playback resume', () => {
 
     await playBook(st, 'book', 90);
 
-    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'book', 90);
+    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'book', 'user-123', 90);
     expect(st.setPosition).toHaveBeenCalledWith(90);
   });
 
@@ -79,7 +80,7 @@ describe('server-backed playback resume', () => {
 
     await playEpisode(st, 'podcast', episode);
 
-    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'podcast', undefined, 'episode');
+    expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'podcast', 'user-123', undefined, 'episode');
     expect(st.setPosition).toHaveBeenCalledWith(300);
   });
 });
