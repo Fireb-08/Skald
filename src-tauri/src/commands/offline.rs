@@ -298,7 +298,10 @@ pub async fn flush_offline_progress(server_url: String, app: tauri::AppHandle) -
     // Snapshot the queue before iterating so remove_progress_entry modifies the
     // file independently of our iteration — no borrow-checker conflict.
     let queue = downloads::load_progress_queue(&dl_dir);
-    if queue.is_empty() { return Ok(0); }
+    if queue.is_empty() {
+        let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": 0, "queued": 0 }));
+        return Ok(0);
+    }
     let server_progress = match require_server_progress(client.get_me().await) {
         Ok(progress) => progress,
         Err(error) => {
@@ -346,6 +349,8 @@ pub async fn flush_offline_progress(server_url: String, app: tauri::AppHandle) -
             }
         }
     }
+    let queued = downloads::load_progress_queue(&dl_dir).len() as u32;
+    let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": flushed, "queued": queued }));
     Ok(flushed)
 }
 
@@ -370,6 +375,13 @@ pub fn get_offline_progress(item_id: String) -> Result<Option<downloads::Offline
     // Downloaded-book resume reads only the book-level entry; failed online
     // podcast syncs remain distinct in the same queue until reconnect flush.
     Ok(queue.into_iter().find(|e| e.item_id == item_id && e.episode_id.is_none()))
+}
+
+/// Exposes only queue size for Settings diagnostics; progress payloads remain local.
+#[tauri::command]
+pub fn get_offline_progress_count() -> Result<u32, String> {
+    let dl_dir = downloads::downloads_dir()?;
+    Ok(downloads::load_progress_queue(&dl_dir).len() as u32)
 }
 
 // Saves chapter data for a specific item to a per-item JSON cache file.

@@ -30,6 +30,11 @@ export function seekAudio(secs: number): Promise<void> {
   return invoke('seek_audio', { secs });
 }
 
+/** Persist the backend player's current position before a lifecycle boundary. */
+export function syncActiveSession(): Promise<void> {
+  return invoke('sync_active_session');
+}
+
 export function setSpeed(rate: number): Promise<void> {
   return invoke('set_speed', { rate });
 }

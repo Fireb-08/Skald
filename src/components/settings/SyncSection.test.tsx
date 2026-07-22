@@ -64,6 +64,29 @@ afterEach(() => {
 });
 
 describe('SyncSection connection confirmation', () => {
+  it('shows server delivery health, queued writes, and the conflicting device', async () => {
+    const st = {
+      serverUrl: 'http://abs.local',
+      authToken: '__keyring__',
+      liveSyncEnabled: false,
+      setLiveSyncEnabled: vi.fn(),
+      setToast,
+      syncHealth: {
+        lastSuccessfulServerSync: null,
+        queuedUpdates: 2,
+        degraded: true,
+      },
+      syncConflict: { deviceDescription: 'Phone' },
+    } as unknown as OnyxState;
+
+    render(<SyncSection st={st} embedded />);
+    await act(async () => {});
+
+    expect(screen.getByText('Degraded')).toBeTruthy();
+    expect(screen.getByText('2')).toBeTruthy();
+    expect(screen.getByText('Phone (conflict)')).toBeTruthy();
+  });
+
   it('does not arm a stale timeout when authentication arrives before connect resolves', async () => {
     let resolveConnect: (() => void) | undefined;
     socket.connect.mockImplementation(() => new Promise<void>(resolve => { resolveConnect = resolve; }));

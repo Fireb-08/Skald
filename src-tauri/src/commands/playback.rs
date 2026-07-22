@@ -10,6 +10,19 @@ pub struct OpenSessionResult {
     current_time: f64,
 }
 
+fn spawn_session_sync(
+    app: tauri::AppHandle,
+    manager: Arc<Mutex<SessionManager>>,
+    reason: &'static str,
+) {
+    tauri::async_runtime::spawn(async move {
+        let manager = manager.lock().await;
+        if let Err(error) = manager.sync_now(&app, reason).await {
+            log::warn!(target: "skald::sync", "immediate session sync failed reason={reason}: {error}");
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn open_playback_session(
     server_url: String,
@@ -26,11 +39,16 @@ pub async fn open_playback_session(
     let result = {
         let mut mgr = state.lock().await;
         mgr.client = AbsClient::new(server_url).with_token(token);
-        let current_time = mgr.start_session(&item_id, episode_id.as_deref(), app, start_time).await?;
+        let current_time = mgr.start_session(&item_id, episode_id.as_deref(), app.clone(), start_time).await?;
         let session_id = mgr.session_id.clone()
             .ok_or_else(|| "Session ID not set after start".to_string())?;
         OpenSessionResult { session_id, current_time }
     };
+    let _ = app.emit("session-sync-success", serde_json::json!({
+        "currentTime": result.current_time,
+        "reason": "session-open",
+        "at": chrono::Utc::now().timestamp_millis(),
+    }));
     Ok(result)
 }
 
@@ -84,27 +102,55 @@ pub async fn play_audio(
 
 #[tauri::command]
 pub async fn pause_audio(
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
     let player_arc = Arc::clone(&state.lock().await.player);
-    let guard = player_arc.lock().unwrap();
-    match guard.as_ref() {
+    let pause_result = match player_arc.lock().unwrap().as_ref() {
         Some(p) => { p.pause(); Ok(()) }
         None => Err("No audio player initialized".to_string()),
+    };
+    if pause_result.is_ok() {
+        spawn_session_sync(app, Arc::clone(state.inner()), "pause");
     }
+    pause_result
 }
 
 #[tauri::command]
 pub async fn seek_audio(
     secs: f64,
+    app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
     let player_arc = Arc::clone(&state.lock().await.player);
-    let guard = player_arc.lock().unwrap();
-    match guard.as_ref() {
+    let seek_result = match player_arc.lock().unwrap().as_ref() {
         Some(p) => p.seek(secs),
         None => Err("No audio player initialized".to_string()),
+    };
+    if seek_result.is_ok() {
+        let manager = Arc::clone(state.inner());
+        let generation = manager.lock().await.next_seek_sync_generation();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(
+                crate::sync_config::playback_sync_cadence().seek_debounce_milliseconds,
+            )).await;
+            let manager = manager.lock().await;
+            if manager.seek_sync_is_current(generation) {
+                if let Err(error) = manager.sync_now(&app, "settled-seek").await {
+                    log::warn!(target: "skald::sync", "settled seek sync failed: {error}");
+                }
+            }
+        });
     }
+    seek_result
+}
+
+#[tauri::command]
+pub async fn sync_active_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<(), String> {
+    state.lock().await.sync_now(&app, "lifecycle").await
 }
 
 #[tauri::command]
@@ -272,6 +318,9 @@ pub async fn close_active_session(
 /// (multi-file book); the session layer resolves the correct first file.
 /// item_id is stored in the session manager so the offline progress queue
 /// and the shutdown handler can write progress entries keyed to the ABS book.
+// Tauri maps these named fields directly from the frontend payload. Keeping
+// them explicit preserves command-surface verification and optional defaults.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn play_local_file(
     file_path: String,

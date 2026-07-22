@@ -285,9 +285,44 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
     </Row>
   );
 
+  const health = st.syncHealth ?? {
+    lastSuccessfulServerSync: null,
+    queuedUpdates: 0,
+    degraded: false,
+  };
+  const healthValueStyle = {
+    fontFamily: MONO,
+    fontSize: 11,
+    color: 'var(--onyx-text-dim)',
+  } as const;
+  const healthRows = (
+    <>
+      <Row label="Server delivery" hint="HTTP session writes are authoritative; failed writes stay in Skald's local recovery queue.">
+        <span style={{ ...healthValueStyle, color: health.degraded ? '#f59e0b' : '#4caf50' }}>
+          {health.degraded ? 'Degraded' : 'Healthy'}
+        </span>
+      </Row>
+      <Row label="Last server sync" hint="The most recent playback position acknowledged by ABS.">
+        <span style={healthValueStyle}>
+          {health.lastSuccessfulServerSync
+            ? new Date(health.lastSuccessfulServerSync).toLocaleTimeString()
+            : 'Not yet this session'}
+        </span>
+      </Row>
+      <Row label="Queued updates" hint="Local progress writes waiting for conflict-safe delivery to ABS.">
+        <span style={healthValueStyle}>{health.queuedUpdates}</span>
+      </Row>
+      <Row label="Playback device" hint="A remote device only moves Skald after you choose which position to keep.">
+        <span style={healthValueStyle}>
+          {st.syncConflict ? `${st.syncConflict.deviceDescription} (conflict)` : 'Skald'}
+        </span>
+      </Row>
+    </>
+  );
+
   // Embedded under the Server panel: render just the row (the panel supplies the
   // heading). Standalone: keep the section header for backward compatibility.
-  if (embedded) return liveSyncRow;
+  if (embedded) return <>{liveSyncRow}{healthRows}</>;
 
   return (
     <div>
@@ -296,6 +331,7 @@ export default function SyncSection({ st, embedded = false }: SyncSectionProps) 
         subtitle="Control how Skald stays in sync with your server."
       />
       {liveSyncRow}
+      {healthRows}
     </div>
   );
 }

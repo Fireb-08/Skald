@@ -16,7 +16,12 @@ const tauri = vi.hoisted(() => {
   };
 });
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => undefined) }));
+const invokeMock = vi.hoisted(() => vi.fn<(command: string) => Promise<unknown>>(async (command: string) => {
+  if (command === 'get_offline_progress_count') return 0;
+  return undefined;
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: tauri.listen }));
 vi.mock('@tauri-apps/plugin-log', () => ({
   info: vi.fn(async () => {}), warn: vi.fn(async () => {}), error: vi.fn(async () => {}),
@@ -32,6 +37,7 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     currentBookIdRef: { current: '' },
     currentEpisodeIdRef: { current: null },
     playingRef: { current: false },
+    positionRef: { current: 0 },
     sessionIdRef: { current: '' },
     sessionReadyRef: { current: false },
     currentLibraryIdRef: { current: 'library' },
@@ -40,6 +46,7 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     setMediaProgress: vi.fn(),
     setPosition: vi.fn(),
     setSyncConflict: vi.fn(),
+    setSyncHealth: vi.fn(),
     setLibraryRaw: vi.fn(),
     setCurrentBookId: vi.fn(),
     setFocusedBookId: vi.fn(),
@@ -54,7 +61,14 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
   };
 }
 
-beforeEach(() => tauri.reset());
+beforeEach(() => {
+  tauri.reset();
+  invokeMock.mockReset();
+  invokeMock.mockImplementation(async (command: string) => {
+    if (command === 'get_offline_progress_count') return 0;
+    return undefined;
+  });
+});
 
 describe('useLiveSync runtime preference lifecycle', () => {
   it('uses session identity to ignore own transport echoes and surface other devices', async () => {
@@ -212,5 +226,43 @@ describe('useLiveSync runtime preference lifecycle', () => {
     expect(stableDeps.recordActivity).toHaveBeenLastCalledWith({
       category: 'sync', outcome: 'success', message: 'Progress sync restored',
     });
+  });
+
+  it('reconciles from ABS on focus and asks before applying newer remote progress', async () => {
+    const stableDeps = deps();
+    stableDeps.currentBookIdRef.current = 'book';
+    stableDeps.sessionIdRef.current = 'skald-session';
+    stableDeps.sessionReadyRef.current = true;
+    stableDeps.positionRef.current = 20;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'get_offline_progress_count') return 0;
+      if (command === 'get_me') return {
+        mediaProgress: [{
+          id: 'progress', libraryItemId: 'book', episodeId: null,
+          duration: 1000, progress: 0.08, currentTime: 80,
+          isFinished: false, lastUpdate: 2_000,
+        }],
+      };
+      return undefined;
+    });
+
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: false }));
+    await act(async () => {});
+    act(() => {
+      tauri.emit('session-sync-success', { currentTime: 20, reason: 'periodic', at: 1_000 });
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(stableDeps.applyServerProgress).toHaveBeenCalled();
+    expect(stableDeps.setSyncConflict).toHaveBeenCalledWith(expect.objectContaining({
+      libraryItemId: 'book',
+      currentTime: 80,
+      sessionId: 'focus-reconcile',
+    }));
+    expect(stableDeps.setPosition).not.toHaveBeenCalled();
   });
 });

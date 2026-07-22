@@ -18,6 +18,7 @@ pub mod providers; // Local Library: server-free metadata providers (match flow)
 pub mod watcher;   // Local Library: staging-folder file-system watcher
 pub mod podcast_feed; // Local Podcasts: server-free RSS/Atom feed + OPML parsing
 pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
+pub mod sync_config; // Shared Rust/React playback-sync cadence definition
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -261,6 +262,7 @@ pub fn run() {
             commands::play_audio,
             commands::pause_audio,
             commands::seek_audio,
+            commands::sync_active_session,
             commands::set_speed,
             commands::set_volume,
             commands::get_cover,
@@ -299,6 +301,7 @@ pub fn run() {
             commands::flush_offline_progress,
             // Read one entry from the queue — used to restore position on offline launch
             commands::get_offline_progress,
+            commands::get_offline_progress_count,
             // Flag a downloaded book as no longer present on the server
             commands::mark_server_deleted,
             commands::close_active_session,

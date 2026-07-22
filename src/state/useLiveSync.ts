@@ -9,12 +9,13 @@
 // LiveSyncDeps — that was already their design inside onyx.ts (so socket
 // listeners never re-subscribe on every position tick), which is what makes
 // this seam clean: the hook needs the refs and stable setters, nothing else.
-import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library } from '../api/abs';
-import { getMe, markServerDeleted } from '../api/abs';
+import { getMe, getOfflineProgressCount, markServerDeleted } from '../api/abs';
 import { log } from '../lib/log';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
+import { FOCUS_RECONCILE_MINIMUM_MS } from '../lib/syncCadence';
 import { patchLibraryItems } from './bookHelpers';
 
 export interface LiveSyncDeps {
@@ -27,6 +28,7 @@ export interface LiveSyncDeps {
   currentBookIdRef: RefObject<string>;
   currentEpisodeIdRef: RefObject<string | null>;
   playingRef: RefObject<boolean>;
+  positionRef: RefObject<number>;
   sessionIdRef: RefObject<string>;
   sessionReadyRef: RefObject<boolean>;
   currentLibraryIdRef: RefObject<string>;
@@ -36,6 +38,7 @@ export interface LiveSyncDeps {
   setMediaProgress: Dispatch<SetStateAction<MediaProgress[]>>;
   setPosition: Dispatch<SetStateAction<number>>;
   setSyncConflict: Dispatch<SetStateAction<PlaybackSyncConflict | null>>;
+  setSyncHealth: Dispatch<SetStateAction<SyncHealth>>;
   setLibraryRaw: Dispatch<SetStateAction<LibraryItem[]>>;
   setCurrentBookId: Dispatch<SetStateAction<string>>;
   setFocusedBookId: Dispatch<SetStateAction<string | null>>;
@@ -58,6 +61,12 @@ export interface PlaybackSyncConflict {
   receivedAt: number;
 }
 
+export interface SyncHealth {
+  lastSuccessfulServerSync: number | null;
+  queuedUpdates: number;
+  degraded: boolean;
+}
+
 export function useLiveSync({
   serverUrl,
   authToken,
@@ -65,6 +74,7 @@ export function useLiveSync({
   currentBookIdRef,
   currentEpisodeIdRef,
   playingRef,
+  positionRef,
   sessionIdRef,
   sessionReadyRef,
   currentLibraryIdRef,
@@ -73,6 +83,7 @@ export function useLiveSync({
   setMediaProgress,
   setPosition,
   setSyncConflict,
+  setSyncHealth,
   setLibraryRaw,
   setCurrentBookId,
   setFocusedBookId,
@@ -85,6 +96,15 @@ export function useLiveSync({
   refreshLibrary,
   applyServerProgress,
 }: LiveSyncDeps): void {
+  const lastSuccessfulServerSyncRef = useRef<number | null>(null);
+  const lastFocusReconcileRef = useRef(0);
+
+  const refreshQueuedCount = () => {
+    getOfflineProgressCount()
+      .then(queuedUpdates => setSyncHealth(previous => ({ ...previous, queuedUpdates })))
+      .catch(error => log.warn('sync', 'offline progress queue count failed', { err: String(error) }));
+  };
+
   // Subscribe to progress-updated events forwarded from the Rust socket layer.
   // Re-arms when auth context or the live preference changes, so a runtime
   // enable starts reconciliation immediately and a disable tears it down.
@@ -108,7 +128,7 @@ export function useLiveSync({
           : 'another device';
 
         // ── Self-echo guard ───────────────────────────────────────────────────
-        // Skald syncs its own playback position to the server every 30 seconds.
+        // Skald syncs its own playback position to the server on the shared cadence.
         // Those writes echo back here as progress-updated events. If we applied
         // the echo to the live transport position, it would yank the playhead
         // backwards on every sync cycle. The guard detects this case by checking
@@ -185,6 +205,68 @@ export function useLiveSync({
     return () => { disposed = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSyncEnabled, serverUrl, authToken]);
+
+  // Socket events are not replayed after sleep, network loss, or another
+  // device updating progress while live sync is disabled. Reconcile directly
+  // from ABS when Skald becomes visible again, with a throttle for focus churn.
+  useEffect(() => {
+    if (!serverUrl || !authToken) return;
+    let disposed = false;
+
+    const reconcile = async () => {
+      const now = Date.now();
+      if (now - lastFocusReconcileRef.current < FOCUS_RECONCILE_MINIMUM_MS) return;
+      lastFocusReconcileRef.current = now;
+      try {
+        const me = await getMe(serverUrl);
+        if (disposed) return;
+        applyServerProgress(me.mediaProgress);
+
+        const itemId = currentBookIdRef.current;
+        if (!itemId || !sessionReadyRef.current) return;
+        const episodeId = currentEpisodeIdRef.current ?? null;
+        const remote = me.mediaProgress.find(progress =>
+          progress.libraryItemId === itemId &&
+          (progress.episodeId ?? null) === episodeId);
+        if (!remote) return;
+
+        const changedAfterOurLastWrite = lastSuccessfulServerSyncRef.current !== null
+          && remote.lastUpdate > lastSuccessfulServerSyncRef.current;
+        const materiallyDifferent = Math.abs(remote.currentTime - positionRef.current) >= 5;
+        if (changedAfterOurLastWrite && materiallyDifferent) {
+          log.info('sync', 'focus reconciliation found newer ABS progress', {
+            itemId,
+            episodeId,
+            localCurrentTime: positionRef.current,
+            serverCurrentTime: remote.currentTime,
+            serverLastUpdate: remote.lastUpdate,
+          });
+          setSyncConflict({
+            libraryItemId: itemId,
+            episodeId,
+            currentTime: remote.currentTime,
+            deviceDescription: 'another device',
+            sessionId: 'focus-reconcile',
+            receivedAt: Date.now(),
+          });
+        }
+      } catch (error) {
+        log.warn('sync', 'focus reconciliation failed', { err: String(error) });
+      }
+    };
+
+    const onFocus = () => { if (document.visibilityState === 'visible') void reconcile(); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') void reconcile(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  // Stable refs/setters keep lifecycle listeners independent of playback ticks.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverUrl, authToken]);
 
   // ── Live library sync ──────────────────────────────────────────────────────
   // Subscribe to library item events forwarded from the Rust socket layer.
@@ -359,7 +441,22 @@ export function useLiveSync({
   useEffect(() => {
     let unlistenWarning: (() => void) | undefined;
     let unlistenRestored: (() => void) | undefined;
+    let unlistenSuccess: (() => void) | undefined;
+    let unlistenFlushed: (() => void) | undefined;
+    let unlistenConflict: (() => void) | undefined;
     let disposed = false;
+
+    refreshQueuedCount();
+
+    listen<{ at: number; currentTime: number; reason: string }>('session-sync-success', event => {
+      lastSuccessfulServerSyncRef.current = event.payload.at;
+      setSyncHealth(previous => ({
+        ...previous,
+        lastSuccessfulServerSync: event.payload.at,
+        degraded: false,
+      }));
+      refreshQueuedCount();
+    }).then(fn => { if (disposed) fn(); else unlistenSuccess = fn; });
 
     listen<{ currentTime: number; queued: boolean }>('session-sync-warning', event => {
       log.warn('sync', 'session progress sync failed', {
@@ -379,6 +476,8 @@ export function useLiveSync({
           ? 'Progress sync interrupted — position saved locally'
           : 'Progress sync interrupted — local fallback failed',
       });
+      setSyncHealth(previous => ({ ...previous, degraded: true }));
+      refreshQueuedCount();
       // The fallback write reads the offline queue and may have been the first
       // operation to discover that its persistence file was corrupt.
       void surfaceCorruptPersistenceNotices();
@@ -388,12 +487,35 @@ export function useLiveSync({
       log.info('sync', 'session progress sync restored', { currentTime: event.payload.currentTime });
       setToast({ message: 'Progress sync restored', type: 'success' });
       recordActivity({ category: 'sync', outcome: 'success', message: 'Progress sync restored' });
+      setSyncHealth(previous => ({ ...previous, degraded: false }));
+      refreshQueuedCount();
     }).then(fn => { if (disposed) fn(); else unlistenRestored = fn; });
+
+    listen<{ flushed: number; queued: number }>('offline-progress-flushed', event => {
+      setSyncHealth(previous => ({ ...previous, queuedUpdates: event.payload.queued }));
+    }).then(fn => { if (disposed) fn(); else unlistenFlushed = fn; });
+
+    listen<{ itemId: string; localCurrentTime: number; serverCurrentTime: number | null }>('offline-sync-conflict', event => {
+      log.warn('sync', 'offline progress conflict preserved ABS position', event.payload);
+      setToast({
+        message: 'ABS had newer progress. Skald kept the server position and saved the local stop point as a backup.',
+        type: 'info',
+      });
+      recordActivity({
+        category: 'sync',
+        outcome: 'info',
+        message: 'ABS progress won an offline conflict; local stop point retained',
+      });
+      refreshQueuedCount();
+    }).then(fn => { if (disposed) fn(); else unlistenConflict = fn; });
 
     return () => {
       disposed = true;
+      unlistenSuccess?.();
       unlistenWarning?.();
       unlistenRestored?.();
+      unlistenFlushed?.();
+      unlistenConflict?.();
     };
   // Stable setters/callbacks; local backend events do not depend on socket auth.
   // eslint-disable-next-line react-hooks/exhaustive-deps

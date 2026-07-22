@@ -139,6 +139,11 @@ export function getOfflineProgress(itemId: string): Promise<OfflineProgressEntry
   return invoke('get_offline_progress', { itemId });
 }
 
+/** Number of locally retained progress writes awaiting safe ABS reconciliation. */
+export function getOfflineProgressCount(): Promise<number> {
+  return invoke('get_offline_progress_count');
+}
+
 // ── Library disk cache ─────────────────────────────────────────────────────
 
 // Saves the library items to a local JSON cache file for offline fallback on next launch.

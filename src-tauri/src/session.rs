@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
@@ -32,6 +32,29 @@ fn commit_position(prev: f64, pos: f64, dur: f64, live: bool, ended: bool) -> f6
     } else {
         prev
     }
+}
+
+/// Lifecycle syncs run immediately after pause/seek/background transitions,
+/// where LibVLC may no longer report a "live" state. Keep the transient-zero
+/// guard while accepting a real paused/seeked position from the backend player.
+fn lifecycle_position(prev: f64, pos: f64, dur: f64, ended: bool) -> f64 {
+    if ended && dur > 0.0 { dur }
+    else if pos > 0.0 || prev <= 1.0 { pos.max(0.0) }
+    else { prev }
+}
+
+struct SyncClaim(Arc<AtomicBool>);
+
+impl SyncClaim {
+    fn acquire(flag: Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self(flag))
+    }
+}
+
+impl Drop for SyncClaim {
+    fn drop(&mut self) { self.0.store(false, Ordering::Release); }
 }
 
 /// Throttle state for the offline persist loop (play_local's tick task).
@@ -125,6 +148,8 @@ pub struct SessionManager {
     pub player: Arc<Mutex<Option<AudioPlayer>>>,
     active: Arc<AtomicBool>,
     sync_degraded: Arc<AtomicBool>,
+    sync_in_flight: Arc<AtomicBool>,
+    seek_sync_generation: Arc<AtomicU64>,
     // True while playing from a local file (no server session).
     // Set by play_local(); cleared by start_session() when returning to online playback.
     // The sync task is never spawned during local playback, so this flag is
@@ -226,6 +251,8 @@ impl SessionManager {
             player: Arc::new(Mutex::new(None)),
             active: Arc::new(AtomicBool::new(false)),
             sync_degraded: Arc::new(AtomicBool::new(false)),
+            sync_in_flight: Arc::new(AtomicBool::new(false)),
+            seek_sync_generation: Arc::new(AtomicU64::new(0)),
             is_local: false,
             local_item_id: None,
             is_local_library: false,
@@ -330,6 +357,8 @@ impl SessionManager {
         self.active = Arc::clone(&active);
         let sync_degraded = Arc::new(AtomicBool::new(false));
         self.sync_degraded = Arc::clone(&sync_degraded);
+        let sync_in_flight = Arc::new(AtomicBool::new(false));
+        self.sync_in_flight = Arc::clone(&sync_in_flight);
 
         // ── Tick task: every 1 second ────────────────────────────────────────
         let ct_tick = Arc::clone(&self.current_time);
@@ -394,7 +423,9 @@ impl SessionManager {
         let app_sync = app.clone();
 
         let sync_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            let mut interval = tokio::time::interval(Duration::from_secs(
+                crate::sync_config::playback_sync_cadence().online_session_seconds,
+            ));
             let mut last_queue_state: Option<bool> = None;
             interval.tick().await; // skip the immediate first tick
             loop {
@@ -402,6 +433,10 @@ impl SessionManager {
                 if !active_sync.load(Ordering::Relaxed) {
                     break;
                 }
+                let Some(_claim) = SyncClaim::acquire(Arc::clone(&sync_in_flight)) else {
+                    log::debug!(target: "skald::sync", "periodic session sync skipped because another write is in flight item={item_id_sync}");
+                    continue;
+                };
                 // Poison-tolerant (review H5): a stale read is strictly better
                 // than the sync loop dying and progress never persisting again.
                 let ct = *ct_sync.lock().unwrap_or_else(|e| e.into_inner());
@@ -409,6 +444,10 @@ impl SessionManager {
                 match client_sync.sync_session(&session_id_sync, ct, tl).await {
                     Ok(()) => {
                         last_queue_state = None;
+                        let _ = app_sync.emit(
+                            "session-sync-success",
+                            serde_json::json!({ "currentTime": ct, "reason": "periodic", "at": chrono::Utc::now().timestamp_millis() }),
+                        );
                         if sync_degraded.swap(false, Ordering::Relaxed) {
                             log::info!(target: "skald::sync", "server session sync restored item={item_id_sync}");
                             let _ = app_sync.emit(
@@ -506,6 +545,9 @@ impl SessionManager {
     /// - is_local is set to true so the shutdown handler skips the HTTP close.
     /// - item_id is stored so the tick task can queue progress entries to disk
     ///   and the shutdown handler can write a final entry on app close.
+    // Mirrors the Tauri local-playback boundary, including conflict-baseline
+    // metadata that must stay adjacent to the item/episode identity.
+    #[allow(clippy::too_many_arguments)]
     pub async fn play_local<R: tauri::Runtime>(
         &mut self,
         file_path: &str,
@@ -805,15 +847,75 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Sync the current position to the server.
-    pub async fn sync(&self) -> Result<(), String> {
-        let sid = self
-            .session_id
-            .as_deref()
-            .ok_or_else(|| "No active session".to_string())?;
-        let ct = *self.current_time.lock().unwrap();
-        let tl = *self.time_listened.lock().unwrap();
-        self.client.sync_session(sid, ct, tl).await
+    /// Read the backend player's position and persist it immediately. Frontend
+    /// lifecycle signals never supply a duplicate position counter.
+    pub async fn sync_now<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, reason: &str) -> Result<(), String> {
+        let (player_pos, player_duration, ended) = {
+            let guard = self.player.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(player) => (player.position(), player.duration(), player.book_ended()),
+                None => (0.0, 0.0, false),
+            }
+        };
+        let current_time = {
+            let mut current = self.current_time.lock().unwrap_or_else(|e| e.into_inner());
+            *current = lifecycle_position(*current, player_pos, player_duration, ended);
+            *current
+        };
+
+        if self.is_local {
+            let Some(item_id) = self.local_item_id.as_deref() else { return Ok(()) };
+            let duration = player_duration;
+            let finished = duration > 0.0 && current_time + 1.0 >= duration;
+            if self.is_local_library {
+                crate::catalog::set_progress(item_id, self.local_episode_id.as_deref(), current_time, duration, finished)?;
+            } else {
+                let downloads_dir = crate::downloads::downloads_dir()?;
+                crate::downloads::upsert_progress_entry(&downloads_dir, crate::downloads::OfflineProgressEntry {
+                    item_id: item_id.to_string(), episode_id: None, current_time, duration,
+                    progress: if duration > 0.0 { current_time / duration } else { 0.0 },
+                    is_finished: finished,
+                    recorded_at: chrono::Utc::now().timestamp_millis(),
+                    baseline_captured: self.local_baseline_captured,
+                    server_last_update: self.local_server_last_update,
+                })?;
+            }
+            return Ok(());
+        }
+
+        let Some(session_id) = self.session_id.as_deref() else { return Ok(()) };
+        let Some(_claim) = SyncClaim::acquire(Arc::clone(&self.sync_in_flight)) else {
+            return Ok(());
+        };
+        let listened = *self.time_listened.lock().unwrap_or_else(|e| e.into_inner());
+        match self.client.sync_session(session_id, current_time, listened).await {
+            Ok(()) => {
+                let _ = app.emit("session-sync-success", serde_json::json!({
+                    "currentTime": current_time, "reason": reason,
+                    "at": chrono::Utc::now().timestamp_millis(),
+                }));
+                if self.mark_sync_restored() {
+                    log::info!(target: "skald::sync", "server session sync restored reason={reason}");
+                    let _ = app.emit("session-sync-restored", serde_json::json!({ "currentTime": current_time }));
+                }
+                Ok(())
+            }
+            Err(error) => {
+                let queued = self.queue_current_server_progress().is_ok();
+                self.mark_sync_degraded();
+                log::warn!(target: "skald::sync", "immediate session sync failed reason={reason} queued_locally={queued}: {error}");
+                let _ = app.emit("session-sync-warning", serde_json::json!({ "currentTime": current_time, "queued": queued }));
+                Err(error)
+            }
+        }
+    }
+
+    pub fn next_seek_sync_generation(&self) -> u64 {
+        self.seek_sync_generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn seek_sync_is_current(&self, generation: u64) -> bool {
+        self.seek_sync_generation.load(Ordering::Acquire) == generation
     }
 
     /// Signal the tick and sync background tasks to stop on their next iteration.
@@ -870,7 +972,19 @@ impl SessionManager {
             .session_id
             .as_deref()
             .ok_or_else(|| "No active session".to_string())?;
-        let ct = *self.current_time.lock().unwrap();
+        // Exit and book-switch can happen between one-second ticks. Snapshot
+        // LibVLC here so the close request carries the actual final position.
+        let (player_pos, player_duration, ended) = self.player
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|player| (player.position(), player.duration(), player.book_ended()))
+            .unwrap_or((0.0, 0.0, false));
+        let ct = {
+            let mut current = self.current_time.lock().unwrap_or_else(|e| e.into_inner());
+            *current = lifecycle_position(*current, player_pos, player_duration, ended);
+            *current
+        };
         let tl = *self.time_listened.lock().unwrap();
         self.client.close_session(sid, ct, tl).await
     }
@@ -880,7 +994,9 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{commit_position, persist_decision, resolve_load_time, PersistState};
+    use super::{commit_position, lifecycle_position, persist_decision, resolve_load_time, PersistState, SessionManager, SyncClaim};
+    use crate::api::AbsClient;
+    use std::sync::{atomic::AtomicBool, Arc};
 
     #[test]
     fn load_time_prefers_explicit_start_over_server_time() {
@@ -891,6 +1007,31 @@ mod tick_tests {
         assert_eq!(resolve_load_time(Some(0.0), 3000.0), 0.0);
         // Plain resume: fall back to the server's saved position.
         assert_eq!(resolve_load_time(None, 3000.0), 3000.0);
+    }
+
+    #[test]
+    fn lifecycle_position_accepts_pause_seek_but_rejects_transient_zero() {
+        assert_eq!(lifecycle_position(120.0, 125.0, 3600.0, false), 125.0);
+        assert_eq!(lifecycle_position(120.0, 0.0, 3600.0, false), 120.0);
+        assert_eq!(lifecycle_position(120.0, 0.0, 3600.0, true), 3600.0);
+    }
+
+    #[test]
+    fn sync_claim_prevents_overlapping_writes() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let first = SyncClaim::acquire(Arc::clone(&flag)).expect("first write claims slot");
+        assert!(SyncClaim::acquire(Arc::clone(&flag)).is_none());
+        drop(first);
+        assert!(SyncClaim::acquire(flag).is_some());
+    }
+
+    #[test]
+    fn settled_seek_generation_supersedes_earlier_debounce() {
+        let manager = SessionManager::new(AbsClient::new("http://abs.invalid".to_string()));
+        let first = manager.next_seek_sync_generation();
+        let second = manager.next_seek_sync_generation();
+        assert!(!manager.seek_sync_is_current(first));
+        assert!(manager.seek_sync_is_current(second));
     }
 
     #[test]

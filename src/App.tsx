@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging } from './api/abs';
+import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
 import { log } from './lib/log';
 import Toast from './components/ui/Toast';
 import ActivityCenter from './components/ActivityCenter';
@@ -19,6 +19,7 @@ import Library from './screens/Library';
 import Player from './screens/Player';
 import Settings from './screens/Settings';
 import PodcastDetail from './screens/PodcastDetail';
+import { OFFLINE_PROGRESS_FLUSH_MS } from './lib/syncCadence';
 
 // Guard against React StrictMode double-mounting which would open two
 // simultaneous socket connections, causing one to fail with EngineIO error.
@@ -134,6 +135,26 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Capture the backend position when Windows/WebView moves Skald out of the
+  // foreground. The backend owns the playback clock; no stale React position
+  // is sent across this boundary.
+  useEffect(() => {
+    let lastSync = 0;
+    const syncLifecycle = () => {
+      if (!st.currentBookId || Date.now() - lastSync < 500) return;
+      lastSync = Date.now();
+      syncActiveSession().catch(error =>
+        log.warn('sync', 'background lifecycle sync failed', { err: String(error) }));
+    };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') syncLifecycle(); };
+    window.addEventListener('blur', syncLifecycle);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('blur', syncLifecycle);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [st.currentBookId]);
+
   // ── Downloaded-book progress sync ────────────────────────────────────────
   // Downloaded books play from local disk with no server session, so the Rust
   // 30s session-sync never runs for them — their progress only lands in the
@@ -148,7 +169,7 @@ export default function App() {
         .catch(() => { /* offline — entries stay queued */ })
         .finally(st.surfaceCorruptPersistenceNotices);
     };
-    const iv = setInterval(flush, 30_000);
+    const iv = setInterval(flush, OFFLINE_PROGRESS_FLUSH_MS);
     return () => { clearInterval(iv); flush(); };
   }, [st.isLocalPlayback, st.serverUrl, st.surfaceCorruptPersistenceNotices]);
 
@@ -355,6 +376,8 @@ export default function App() {
           }}
           onCancel={() => {
             const device = st.syncConflict?.deviceDescription ?? 'another device';
+            syncActiveSession().catch(e =>
+              log.error('sync', 'local conflict position reassert failed', { err: String(e) }));
             st.recordActivity({ category: 'sync', outcome: 'info', message: `Continued in Skald instead of ${device}` });
             st.setSyncConflict(null);
           }}

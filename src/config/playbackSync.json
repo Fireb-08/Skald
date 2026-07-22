@@ -1,0 +1,6 @@
+{
+  "onlineSessionSeconds": 10,
+  "offlineFlushSeconds": 30,
+  "seekDebounceMilliseconds": 750,
+  "focusReconcileMinimumMilliseconds": 15000
+}

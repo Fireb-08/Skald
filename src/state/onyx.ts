@@ -7,7 +7,7 @@ import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
-import { useLiveSync, type PlaybackSyncConflict } from './useLiveSync';
+import { useLiveSync, type PlaybackSyncConflict, type SyncHealth } from './useLiveSync';
 import { prependActivity } from '../lib/activity';
 import { readLastRefresh, writeLastRefresh } from '../lib/offlineFreshness';
 
@@ -179,6 +179,7 @@ export interface OnyxState {
   setLiveSyncEnabled: (enabled: boolean) => void;
   syncConflict: PlaybackSyncConflict | null;
   setSyncConflict: Dispatch<SetStateAction<PlaybackSyncConflict | null>>;
+  syncHealth: SyncHealth;
   // Auth
   user: User | null;
   setUser: (user: User | null) => void;
@@ -446,6 +447,11 @@ export function useOnyxState(): OnyxState {
     () => localStorage.getItem('onyx.sync.live') === 'true',
   );
   const [syncConflict, setSyncConflict] = useState<PlaybackSyncConflict | null>(null);
+  const [syncHealth, setSyncHealth] = useState<SyncHealth>({
+    lastSuccessfulServerSync: null,
+    queuedUpdates: 0,
+    degraded: false,
+  });
 
   const setServerUrl = useCallback((v: string) => {
     localStorage.setItem('skald.serverUrl', v); setServerUrlRaw(v);
@@ -1356,6 +1362,7 @@ export function useOnyxState(): OnyxState {
     currentBookIdRef,
     currentEpisodeIdRef,
     playingRef,
+    positionRef,
     sessionIdRef,
     sessionReadyRef,
     currentLibraryIdRef,
@@ -1364,6 +1371,7 @@ export function useOnyxState(): OnyxState {
     setMediaProgress,
     setPosition,
     setSyncConflict,
+    setSyncHealth,
     setLibraryRaw,
     setCurrentBookId,
     setFocusedBookId,
@@ -1436,6 +1444,7 @@ export function useOnyxState(): OnyxState {
     authToken, setAuthToken,
     liveSyncEnabled, setLiveSyncEnabled,
     syncConflict, setSyncConflict,
+    syncHealth,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
     // Server-side, the canUpload getter is true for admin/root regardless of the
