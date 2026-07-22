@@ -252,14 +252,45 @@ pub fn set_cache_dir(path: String, app: tauri::AppHandle) -> Result<(), String> 
     Ok(())
 }
 
-// Flush offline progress entries to the server after reconnecting.
-// Uses latest-wins conflict resolution — the local recorded_at timestamp
-// is not sent; we simply write what we have. If the server has newer
-// progress (e.g. from another device used while offline), the server's
-// value will be overwritten only if our recorded_at is more recent.
-// For simplicity in v0.1.0, always write local progress on reconnect.
+type ProgressKey = (String, Option<String>);
+
+#[derive(Debug, PartialEq, Eq)]
+enum OfflineFlushDecision { Write, PreserveServer }
+
+fn progress_key(item_id: &str, episode_id: Option<&str>) -> ProgressKey {
+    (item_id.to_string(), episode_id.map(str::to_string))
+}
+
+/// New entries compare the exact ABS revision captured when local playback
+/// began; legacy/online-fallback entries retain the timestamp compatibility guard.
+fn offline_flush_decision(entry: &downloads::OfflineProgressEntry, server: Option<&models::MediaProgress>) -> OfflineFlushDecision {
+    if entry.baseline_captured {
+        return match (entry.server_last_update, server) {
+            (Some(baseline), Some(progress)) if progress.last_update == baseline => OfflineFlushDecision::Write,
+            (None, None) => OfflineFlushDecision::Write,
+            _ => OfflineFlushDecision::PreserveServer,
+        };
+    }
+    match server {
+        Some(progress) if progress.last_update >= entry.recorded_at => OfflineFlushDecision::PreserveServer,
+        _ => OfflineFlushDecision::Write,
+    }
+}
+
+/// `/api/me` is the required conflict snapshot. Failure is terminal for this
+/// attempt: no server write or queue removal may occur without it.
+fn require_server_progress(result: Result<models::MeResponse, String>) -> Result<std::collections::HashMap<ProgressKey, models::MediaProgress>, String> {
+    result
+        .map(|me| me.media_progress.into_iter().map(|progress| {
+            ((progress.library_item_id.clone(), progress.episode_id.clone()), progress)
+        }).collect())
+        .map_err(|error| format!("offline progress reconciliation deferred: {error}"))
+}
+
+// Flush only after obtaining the authoritative ABS conflict snapshot. A
+// conflict becomes a local recovery stop point and never overwrites ABS.
 #[tauri::command]
-pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
+pub async fn flush_offline_progress(server_url: String, app: tauri::AppHandle) -> Result<u32, String> {
     let token = auth::load_token()?
         .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     let client = AbsClient::new(server_url).with_token(token);
@@ -268,38 +299,34 @@ pub async fn flush_offline_progress(server_url: String) -> Result<u32, String> {
     // file independently of our iteration — no borrow-checker conflict.
     let queue = downloads::load_progress_queue(&dl_dir);
     if queue.is_empty() { return Ok(0); }
-    // Snapshot the server's current progress once for last-write-wins conflict
-    // resolution, keyed by the same (item, episode) identity as the queue. If the snapshot can't be
-    // fetched (still offline / transient error), proceed without the guard — a
-    // best-effort flush is better than stranding progress, and the guard only
-    // prevents *regressions*, never forward progress.
-    let server_last_update: std::collections::HashMap<(String, Option<String>), i64> = match client.get_me().await {
-        Ok(me) => me
-            .media_progress
-            .into_iter()
-            .map(|p| ((p.library_item_id, p.episode_id), p.last_update))
-            .collect(),
-        Err(_) => std::collections::HashMap::new(),
+    let server_progress = match require_server_progress(client.get_me().await) {
+        Ok(progress) => progress,
+        Err(error) => {
+            log::warn!(target: "skald::sync", "offline progress flush deferred because ABS state is unavailable: {error}");
+            return Err(error);
+        }
     };
     let mut flushed: u32 = 0;
     for entry in &queue {
         // Local-library items (id prefix "local_") have no server counterpart —
         // their progress lives in the catalog, so never attempt to flush them.
         if entry.item_id.starts_with("local_") { continue; }
-        // Skip (and drop) any queued entry the server has already superseded with a
-        // newer update — e.g. the user listened on another device while this one was
-        // offline. Without this, a stale local position would clobber the newer
-        // server one on reconnect.
-        if let Some(&server_lu) = server_last_update.get(&(entry.item_id.clone(), entry.episode_id.clone())) {
-            if server_lu >= entry.recorded_at {
-                let _ = downloads::remove_progress_entry(
-                    &dl_dir,
-                    &entry.item_id,
-                    entry.episode_id.as_deref(),
-                    entry.recorded_at,
-                );
+        let key = progress_key(&entry.item_id, entry.episode_id.as_deref());
+        let server = server_progress.get(&key);
+        if offline_flush_decision(entry, server) == OfflineFlushDecision::PreserveServer {
+            if let Err(error) = downloads::record_stop_point(&dl_dir, &entry.item_id, entry.current_time) {
+                log::warn!(target: "skald::sync", "offline conflict recovery point failed item={}: {error}", entry.item_id);
                 continue;
             }
+            downloads::remove_progress_entry(&dl_dir, &entry.item_id, entry.episode_id.as_deref(), entry.recorded_at)?;
+            log::warn!(target: "skald::sync", "offline progress conflict preserved ABS item={} local_time={} server_time={}", entry.item_id, entry.current_time, server.map(|p| p.current_time).unwrap_or(0.0));
+            let _ = app.emit("offline-sync-conflict", serde_json::json!({
+                "itemId": entry.item_id,
+                "episodeId": entry.episode_id,
+                "localCurrentTime": entry.current_time,
+                "serverCurrentTime": server.map(|progress| progress.current_time),
+            }));
+            continue;
         }
         match client.update_progress(&entry.item_id, entry.episode_id.as_deref(), entry.current_time, entry.duration, entry.is_finished).await {
             Ok(()) => {
@@ -918,6 +945,43 @@ pub fn remove_download(item_id: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn queued(baseline_captured: bool, server_last_update: Option<i64>) -> downloads::OfflineProgressEntry {
+        downloads::OfflineProgressEntry {
+            item_id: "book".to_string(), episode_id: None, current_time: 90.0,
+            duration: 1000.0, progress: 0.09, is_finished: false,
+            recorded_at: 2_000, baseline_captured, server_last_update,
+        }
+    }
+
+    fn server(last_update: i64) -> models::MediaProgress {
+        models::MediaProgress {
+            id: "progress".to_string(), library_item_id: "book".to_string(), episode_id: None,
+            duration: 1000.0, progress: 0.2, current_time: 200.0,
+            is_finished: false, last_update,
+        }
+    }
+
+    #[test]
+    fn offline_flush_requires_server_snapshot_before_planning_writes() {
+        let error = require_server_progress(Err("HTTP 503".to_string())).unwrap_err();
+        assert!(error.contains("reconciliation deferred"));
+    }
+
+    #[test]
+    fn offline_flush_writes_only_when_captured_revision_is_unchanged() {
+        let entry = queued(true, Some(100));
+        assert_eq!(offline_flush_decision(&entry, Some(&server(100))), OfflineFlushDecision::Write);
+        assert_eq!(offline_flush_decision(&entry, Some(&server(101))), OfflineFlushDecision::PreserveServer);
+        assert_eq!(offline_flush_decision(&entry, None), OfflineFlushDecision::PreserveServer);
+    }
+
+    #[test]
+    fn offline_flush_detects_progress_created_after_empty_baseline() {
+        let entry = queued(true, None);
+        assert_eq!(offline_flush_decision(&entry, None), OfflineFlushDecision::Write);
+        assert_eq!(offline_flush_decision(&entry, Some(&server(100))), OfflineFlushDecision::PreserveServer);
+    }
 
     fn record(item_id: &str, path: &std::path::Path) -> downloads::DownloadRecord {
         downloads::DownloadRecord {

@@ -88,12 +88,6 @@ export function closeSession(
   return invoke('close_session', { serverUrl, sessionId, currentTime, timeListened });
 }
 
-// Closes all open listening sessions on the server, returning the count closed.
-// Called once on app startup to clear ghost sessions from previous runs.
-export function closeAllOpenSessions(serverUrl: string): Promise<number> {
-  return invoke('close_all_open_sessions', { serverUrl });
-}
-
 export function closeActiveSession(): Promise<void> {
   return invoke('close_active_session');
 }
@@ -104,6 +98,19 @@ export function closeActiveSession(): Promise<void> {
  *  Starts the 1-second playback-tick loop so all transport controls remain live.
  *  itemId is the ABS library item ID — stored so progress can be queued offline.
  *  Does NOT open a server session — no network access is required. */
-export function playLocalFile(filePath: string, itemId: string, startTime: number, localLibrary = false, episodeId?: string): Promise<void> {
-  return invoke('play_local_file', { filePath, itemId, startTime, localLibrary, episodeId: episodeId ?? null });
+export function playLocalFile(
+  filePath: string,
+  itemId: string,
+  startTime: number,
+  localLibrary = false,
+  episodeId?: string,
+  baselineCaptured = false,
+  serverLastUpdate?: number,
+): Promise<void> {
+  return invoke('play_local_file', {
+    filePath, itemId, startTime, localLibrary,
+    episodeId: episodeId ?? null,
+    baselineCaptured,
+    serverLastUpdate: serverLastUpdate ?? null,
+  });
 }

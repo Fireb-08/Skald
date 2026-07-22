@@ -302,7 +302,6 @@ pub fn run() {
             // Flag a downloaded book as no longer present on the server
             commands::mark_server_deleted,
             commands::close_active_session,
-            commands::close_all_open_sessions,
             commands::delete_item,
             commands::rescan_item,
             commands::get_collections,
@@ -540,6 +539,8 @@ pub fn run() {
                                                 .duration_since(std::time::UNIX_EPOCH)
                                                 .unwrap_or_default()
                                                 .as_millis() as i64,
+                                            baseline_captured: guard.local_baseline_captured,
+                                            server_last_update: guard.local_server_last_update,
                                         };
                                         if let Err(e) = downloads::upsert_progress_entry(&dl_dir, entry) {
                                             log::warn!(target: "skald::downloads", "shutdown progress write failed: {e}");

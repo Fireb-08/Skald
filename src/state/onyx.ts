@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, UserPermissions, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, closeAllOpenSessions, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
@@ -1186,18 +1186,6 @@ export function useOnyxState(): OnyxState {
       setFocusedBookId(library[0].id);
     }
   }, [library, focusedBookId, currentLibraryId]); // setFocusedBookId is stable
-
-  // On first authenticated load, close any ghost sessions left from the
-  // previous run so the server's session list stays consistent. Runs once
-  // when the server URL and library become available (same guards as preload).
-  useEffect(() => {
-    if (!serverUrl || library.length === 0) return;
-    closeAllOpenSessions(serverUrl)
-      .then(n => { if (n > 0) log.info('sync', 'startup ghost-session cleanup', { closed: n }); })
-      // non-fatal — stale sessions are a cosmetic issue
-      .catch(e => log.warn('sync', 'ghost-session cleanup failed', { err: String(e) }));
-  }, [serverUrl, library.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
 
   // Prefer the active library's copy; fall back to the playing-item snapshot when
   // the playing item lives in another library (so the player/mini stay correct

@@ -142,6 +142,10 @@ pub struct SessionManager {
     // the catalog (keyed per (item, episode)). Empty/None for a whole-item book.
     // Set by play_local(); used by the tick loop and the shutdown handler.
     pub local_episode_id: Option<String>,
+    // Server revision captured when downloaded playback branched. These remain
+    // fixed for the branch and are copied into every durable queue snapshot.
+    pub local_baseline_captured: bool,
+    pub local_server_last_update: Option<i64>,
     // ── Local listening stats (Local Listening Stats roadmap) ────────────────
     // Seconds of local-library listening not yet flushed to the catalog. The
     // 1-second tick increments it; flush_listen_time() drains it every
@@ -226,6 +230,8 @@ impl SessionManager {
             local_item_id: None,
             is_local_library: false,
             local_episode_id: None,
+            local_baseline_captured: false,
+            local_server_last_update: None,
             local_listen_pending: Arc::new(Mutex::new(0.0)),
             local_listen_session: None,
         }
@@ -253,6 +259,8 @@ impl SessionManager {
         // Clear the local item ID — no longer tracking offline progress.
         self.local_item_id = None;
         self.local_episode_id = None;
+        self.local_baseline_captured = false;
+        self.local_server_last_update = None;
         self.online_item_id = None;
         self.online_episode_id = None;
         self.online_duration = 0.0;
@@ -507,6 +515,8 @@ impl SessionManager {
         // For a local podcast episode, its id (progress keyed per episode). None
         // for a downloaded ABS book or a whole-item local book.
         episode_id: Option<&str>,
+        baseline_captured: bool,
+        server_last_update: Option<i64>,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
         // Kill any background tasks from a previous online or local session so
@@ -531,6 +541,8 @@ impl SessionManager {
         self.local_item_id = Some(item_id.to_string());
         // Remember the episode (if any) so catalog progress is written per episode.
         self.local_episode_id = episode_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
+        self.local_baseline_captured = baseline_captured;
+        self.local_server_last_update = server_last_update;
 
         // New local playback = new listening-stats session row (Local Listening
         // Stats roadmap). Only LOCAL-LIBRARY playback is counted — downloaded ABS
@@ -663,6 +675,8 @@ impl SessionManager {
         // Local-library items persist progress to the SQLite catalog; downloaded
         // ABS books persist to the offline queue (which later flushes to the server).
         let local_library_tick = local_library;
+        let baseline_captured_tick = baseline_captured;
+        let server_last_update_tick = server_last_update;
         // Listening-stats accumulation (local-library only — see the field docs).
         let listen_pending_tick = Arc::clone(&self.local_listen_pending);
         let listen_session_tick = self.local_listen_session.clone();
@@ -699,6 +713,8 @@ impl SessionManager {
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as i64,
+                        baseline_captured: baseline_captured_tick,
+                        server_last_update: server_last_update_tick,
                     };
                     if let Err(e) = crate::downloads::upsert_progress_entry(dl_dir, entry) {
                         log::warn!(target: "skald::downloads", "offline progress persist failed: {e}");

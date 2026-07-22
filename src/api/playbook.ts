@@ -116,7 +116,20 @@ export async function playBook(
       // construction and starts the 1-second tick loop so playback-tick events flow.
       // bookId is passed so the session layer can key offline progress queue entries
       // to the correct item.
-      await playLocalFile(localFilePath, bookId, startTime, isLocalLibrary);
+      const savedServerProgress = st.mediaProgress.find(p =>
+        p.libraryItemId === bookId && (p.episodeId ?? null) === null);
+      // Preserve the server revision observed when downloaded playback first
+      // branched. Reopening an existing offline branch must not silently adopt
+      // a newer server revision and later overwrite another device's progress.
+      const baselineCaptured = !isLocalLibrary
+        && (offlineProgress?.baselineCaptured ?? !st.isOffline);
+      const serverLastUpdate = offlineProgress?.baselineCaptured
+        ? offlineProgress.serverLastUpdate
+        : savedServerProgress?.lastUpdate;
+      await playLocalFile(
+        localFilePath, bookId, startTime, isLocalLibrary, undefined,
+        baselineCaptured, serverLastUpdate ?? undefined,
+      );
 
       // Signal to the frontend that we are in local playback mode so transport
       // controls bypass session management and call audio commands directly.

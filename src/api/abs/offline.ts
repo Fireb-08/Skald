@@ -121,6 +121,8 @@ export interface OfflineProgressEntry {
   progress: number;    // 0.0–1.0
   isFinished: boolean;
   recordedAt: number;  // Unix ms timestamp
+  baselineCaptured: boolean;
+  serverLastUpdate?: number | null;
 }
 
 // Flushes locally queued offline progress entries to the server.

@@ -192,6 +192,12 @@ pub struct OfflineProgressEntry {
     pub progress: f64,         // 0.0–1.0 — pre-computed for the flush command
     pub is_finished: bool,
     pub recorded_at: i64,      // Unix timestamp ms — used for conflict resolution
+    /// True when Skald captured whether ABS had progress at branch time.
+    #[serde(default)]
+    pub baseline_captured: bool,
+    /// ABS `lastUpdate` at branch time; None means no record existed then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_last_update: Option<i64>,
 }
 
 // The queue is stored as a sibling to downloads.json in the downloads directory.
@@ -289,6 +295,10 @@ pub fn queue_server_progress(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64,
+            // A failed online session write did not first capture `/api/me`.
+            // Keep it on the conservative legacy timestamp comparison path.
+            baseline_captured: false,
+            server_last_update: None,
         },
     )
 }
@@ -383,6 +393,8 @@ mod tests {
             progress: time / 3600.0,
             is_finished: false,
             recorded_at,
+            baseline_captured: false,
+            server_last_update: None,
         }
     }
 

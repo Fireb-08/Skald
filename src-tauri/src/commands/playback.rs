@@ -221,24 +221,6 @@ pub async fn set_audio_device(
     Ok(())
 }
 
-/// Closes all open listening sessions for the current user. Called once on
-/// app startup to clean up ghost sessions left from previous runs so the
-/// server's session list stays consistent.
-#[tauri::command]
-pub async fn close_all_open_sessions(server_url: String) -> Result<u32, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let client = AbsClient::new(server_url).with_token(token);
-    let ids = client.get_open_sessions().await?;
-    let mut closed: u32 = 0;
-    for id in &ids {
-        if client.close_session_by_id(id).await.is_ok() {
-            closed += 1;
-        }
-    }
-    Ok(closed)
-}
-
 #[tauri::command]
 pub async fn close_active_session(
     app: tauri::AppHandle,
@@ -300,11 +282,24 @@ pub async fn play_local_file(
     local_library: Option<bool>,
     // For a local podcast episode, its id so progress is written per (item, episode).
     episode_id: Option<String>,
+    // Downloaded ABS playback carries the exact server revision it branched
+    // from. Local-library playback ignores both values.
+    baseline_captured: Option<bool>,
+    server_last_update: Option<i64>,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
     let mut mgr = state.lock().await;
-    mgr.play_local(&file_path, &item_id, start_time, local_library.unwrap_or(false), episode_id.as_deref(), app).await
+    mgr.play_local(
+        &file_path,
+        &item_id,
+        start_time,
+        local_library.unwrap_or(false),
+        episode_id.as_deref(),
+        baseline_captured.unwrap_or(false),
+        server_last_update,
+        app,
+    ).await
 }
 
 #[tauri::command]
