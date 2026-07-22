@@ -14,6 +14,8 @@
     "test:front": "vitest run",
     "test:front:watch": "vitest",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:sync:contract": "cargo test --manifest-path src-tauri/Cargo.toml --test playback_sync sync_session_posts_expected_payload",
+    "test:sync:abs": "cargo test --manifest-path src-tauri/Cargo.toml --test playback_sync live_abs_persists_session_progress -- --ignored --nocapture",
     "verify:commands": "node scripts/check-tauri-commands.mjs",
     "verify:console": "node scripts/check-console.mjs",
     "verify:clippy": "cargo clippy --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings",
