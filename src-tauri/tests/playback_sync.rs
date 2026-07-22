@@ -1,6 +1,7 @@
 use skald_lib::api::AbsClient;
 use skald_lib::models::{MeResponse, MediaProgress};
-use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{sleep, Duration};
@@ -85,10 +86,70 @@ async fn sync_session_posts_expected_payload() {
     assert_eq!(payload["timeListened"], serde_json::json!(9.25));
 }
 
-fn required_env(name: &str) -> String {
-    env::var(name).unwrap_or_else(|_| {
-        panic!("{name} is required; use a dedicated ABS test account and never commit its token")
+const LIVE_TEST_CONFIG_NAME: &str = "Playback Sync Test.md";
+
+#[derive(Debug, PartialEq)]
+struct LiveTestConfig {
+    server_url: String,
+    token: String,
+    item_id: String,
+}
+
+fn live_test_config_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("src-tauri must have a project-root parent")
+        .join(LIVE_TEST_CONFIG_NAME)
+}
+
+fn config_value(contents: &str, label: &str) -> Result<String, String> {
+    let prefix = format!("{label}:");
+    let value = contents
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(&prefix))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("{label} is missing or blank"))?;
+
+    if value.starts_with('<') || value.starts_with("replace-") {
+        return Err(format!("{label} still contains a placeholder"));
+    }
+    Ok(value.to_string())
+}
+
+fn parse_live_test_config(contents: &str) -> Result<LiveTestConfig, String> {
+    Ok(LiveTestConfig {
+        server_url: config_value(contents, "ABS Server URL")?,
+        token: config_value(contents, "ABS Test Token")?,
+        item_id: config_value(contents, "ABS Audiobook Item ID")?,
     })
+}
+
+fn load_live_test_config() -> Result<LiveTestConfig, String> {
+    let path = live_test_config_path();
+    let contents = fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "read {}: {error}; copy Playback Sync Test.example.md and fill in its values",
+            path.display()
+        )
+    })?;
+    parse_live_test_config(&contents)
+}
+
+#[test]
+fn parses_live_test_markdown_config() {
+    let config = parse_live_test_config(
+        "# Playback Sync Live Test\n\
+         ABS Server URL: https://abs.example.test\n\
+         ABS Test Token: secret-test-token\n\
+         ABS Audiobook Item ID: item-123\n",
+    )
+    .expect("parse the documented configuration format");
+
+    assert_eq!(config.server_url, "https://abs.example.test");
+    assert_eq!(config.token, "secret-test-token");
+    assert_eq!(config.item_id, "item-123");
 }
 
 fn item_progress<'a>(me: &'a MeResponse, item_id: &str) -> Option<&'a MediaProgress> {
@@ -118,17 +179,15 @@ fn choose_marker(duration: f64, original: Option<&MediaProgress>) -> Result<f64,
 /// from `/api/me`, and restores the original progress. This is ignored by default because it
 /// deliberately mutates a live server and requires a dedicated account and audiobook.
 #[tokio::test]
-#[ignore = "requires SKALD_ABS_TEST_URL, SKALD_ABS_TEST_TOKEN, and SKALD_ABS_TEST_ITEM_ID"]
+#[ignore = "requires a completed, git-ignored Playback Sync Test.md"]
 async fn live_abs_persists_session_progress() {
-    let server_url = required_env("SKALD_ABS_TEST_URL");
-    let token = required_env("SKALD_ABS_TEST_TOKEN");
-    let item_id = required_env("SKALD_ABS_TEST_ITEM_ID");
-    let client = AbsClient::new(server_url).with_token(token);
+    let config = load_live_test_config().expect("load live ABS test configuration");
+    let client = AbsClient::new(config.server_url).with_token(config.token);
 
     let before = client.get_me().await.expect("read original ABS progress");
-    let original = item_progress(&before, &item_id).cloned();
+    let original = item_progress(&before, &config.item_id).cloned();
     let session = client
-        .open_session(&item_id, None, None)
+        .open_session(&config.item_id, None, None)
         .await
         .expect("open ABS playback session");
     let duration = session
@@ -159,7 +218,7 @@ async fn live_abs_persists_session_progress() {
                 .get_me()
                 .await
                 .map_err(|error| format!("failed to read progress back from ABS: {error}"))?;
-            if let Some(progress) = item_progress(&me, &item_id) {
+            if let Some(progress) = item_progress(&me, &config.item_id) {
                 if (progress.current_time - marker).abs() <= 0.5 {
                     return Ok(progress.clone());
                 }
@@ -178,7 +237,7 @@ async fn live_abs_persists_session_progress() {
         Some(progress) => {
             client
                 .update_progress(
-                    &item_id,
+                    &config.item_id,
                     None,
                     progress.current_time,
                     progress.duration,
@@ -187,7 +246,7 @@ async fn live_abs_persists_session_progress() {
                 .await
         }
         None => match client.get_me().await {
-            Ok(me) => match item_progress(&me, &item_id) {
+            Ok(me) => match item_progress(&me, &config.item_id) {
                 Some(created) => client.delete_progress(&created.id).await,
                 None => Ok(()),
             },
@@ -202,5 +261,5 @@ async fn live_abs_persists_session_progress() {
     close_result.expect("close the live test session during cleanup");
     restore_result.expect("restore the original ABS progress during cleanup");
     let observed = validation.expect("ABS persists session sync and returns it through /api/me");
-    assert_eq!(observed.library_item_id, item_id);
+    assert_eq!(observed.library_item_id, config.item_id);
 }

@@ -30,6 +30,7 @@ src-tauri/WixTools/
 Skald API Tokens.txt
 *tokens*.txt
 *tokens*.jsx
+/Playback Sync Test.md
 
 # Bundled VLC runtime — populated locally from the VLC installation.
 # Not committed; build.rs copies these to the binary output directory.
