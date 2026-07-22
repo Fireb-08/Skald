@@ -27,6 +27,10 @@ Work proceeds one scoped feature at a time. A planning assistant (Codex in the c
 - **Add diagnostic logging when building a feature** using the structured logging framework — `log.{info,warn,error,debug}(category, msg, ctx?)` from `src/lib/log.ts` (frontend) and `log::info!/warn!/error!(target: "skald::<category>", …)` (Rust). Both land in one rotated file (`skald.log`) and are viewable in **Settings → Logs → Skald**. **Valuable diagnostics are permanent**, not stripped: only temporary scaffolding is removed in the final pass. Categories: `auth library playback sync downloads sharing metadata app`. Never log secrets — pass context as keyed objects (`{ token }` is auto-redacted; a raw token string is not). Plain `console.log`/`println!` is for throwaway local tracing only. See the *Diagnostic Logging & Skald Log Viewer Roadmap* and *Notes*.
 - **Commit to local git between phases.** Use `pnpm` (not npm) — the project standardizes on it.
 
+### Secret-bearing test configuration
+
+`Playback Sync Test.md` is a local, git-ignored credential file consumed only by the opt-in ABS playback-sync integration test. **Never open, read, search, print, summarize, diff, attach, or otherwise expose this file through an AI/tool call.** Do not ask the user to paste its contents into chat. Agents may run `pnpm test:sync:abs`, which reads the file inside the compiled test process and does not print its values, and may inspect the safe committed `Playback Sync Test.example.md` template instead.
+
 Feature roadmaps (current and historical) are kept in the user's Obsidian vault at `Vault/Skald/` — completed ones are marked "Complete" and are a reliable reference for how an existing feature works. The vault is git-ignored.
 
 ---
