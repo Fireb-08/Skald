@@ -132,6 +132,44 @@ fn watch_task<R: tauri::Runtime>(
     });
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DownloadedProgressRevision {
+    pub baseline_captured: bool,
+    pub server_last_update: Option<i64>,
+}
+
+pub type SharedDownloadedProgressRevision = Arc<Mutex<DownloadedProgressRevision>>;
+
+/// Queue a downloaded-book position while holding its revision lock. The flush
+/// path uses the same lock while acknowledging an ABS write, preventing a tick
+/// that captured the old revision from landing after the durable rebase.
+// Mirrors the complete durable progress payload at this persistence boundary.
+#[allow(clippy::too_many_arguments)]
+pub fn queue_downloaded_progress(
+    downloads_dir: &std::path::Path,
+    item_id: &str,
+    episode_id: Option<&str>,
+    current_time: f64,
+    duration: f64,
+    is_finished: bool,
+    recorded_at: i64,
+    revision: &SharedDownloadedProgressRevision,
+) -> Result<(), String> {
+    let revision = revision.lock().unwrap_or_else(|error| error.into_inner());
+    crate::downloads::upsert_progress_entry(downloads_dir, crate::downloads::OfflineProgressEntry {
+        item_id: item_id.to_string(),
+        episode_id: episode_id.map(str::to_string),
+        current_time,
+        duration,
+        progress: if duration > 0.0 { current_time / duration } else { 0.0 },
+        is_finished,
+        recorded_at,
+        baseline_captured: revision.baseline_captured,
+        server_last_update: revision.server_last_update,
+        pending_confirmation_current_time: None,
+    })
+}
+
 pub struct SessionManager {
     pub client: AbsClient,
     pub session_id: Option<String>,
@@ -167,10 +205,10 @@ pub struct SessionManager {
     // the catalog (keyed per (item, episode)). Empty/None for a whole-item book.
     // Set by play_local(); used by the tick loop and the shutdown handler.
     pub local_episode_id: Option<String>,
-    // Server revision captured when downloaded playback branched. These remain
-    // fixed for the branch and are copied into every durable queue snapshot.
-    pub local_baseline_captured: bool,
-    pub local_server_last_update: Option<i64>,
+    // Mutable ABS revision for downloaded playback. Successful flushes advance
+    // this shared cell so later ticks do not mistake Skald's own write for a
+    // foreign update.
+    pub local_downloaded_revision: Option<SharedDownloadedProgressRevision>,
     // ── Local listening stats (Local Listening Stats roadmap) ────────────────
     // Seconds of local-library listening not yet flushed to the catalog. The
     // 1-second tick increments it; flush_listen_time() drains it every
@@ -257,8 +295,7 @@ impl SessionManager {
             local_item_id: None,
             is_local_library: false,
             local_episode_id: None,
-            local_baseline_captured: false,
-            local_server_last_update: None,
+            local_downloaded_revision: None,
             local_listen_pending: Arc::new(Mutex::new(0.0)),
             local_listen_session: None,
         }
@@ -287,8 +324,7 @@ impl SessionManager {
         // Clear the local item ID — no longer tracking offline progress.
         self.local_item_id = None;
         self.local_episode_id = None;
-        self.local_baseline_captured = false;
-        self.local_server_last_update = None;
+        self.local_downloaded_revision = None;
         self.online_item_id = None;
         self.online_episode_id = None;
         self.online_duration = 0.0;
@@ -317,9 +353,6 @@ impl SessionManager {
         }
 
         let device_id = crate::session_ownership::device_id()?;
-        // Retry only IDs journaled by this installation. ABS's stable-device
-        // cleanup remains the fallback if an individual orphan close is deferred.
-        crate::session_ownership::retry_owned(&self.client, user_id, self.session_id.as_deref()).await?;
         let session = self.client.open_session(item_id, episode_id, start_time, &device_id).await?;
         let owner_user_id = if session.user_id.is_empty() { user_id } else { &session.user_id };
         if let Err(error) = crate::session_ownership::record_owned(
@@ -332,6 +365,21 @@ impl SessionManager {
             let _ = self.client.close_session_without_sync(&session.id).await;
             return Err(format!("Could not journal opened playback session: {error}"));
         }
+        // ABS has already closed an older same-user/same-device session while
+        // opening this one. Reconcile the durable journal afterward so orphan
+        // cleanup latency and local prune failures never block playback start.
+        let cleanup_client = self.client.clone();
+        let cleanup_user_id = owner_user_id.to_string();
+        let cleanup_exclude = session.id.clone();
+        tokio::spawn(async move {
+            if let Err(error) = crate::session_ownership::retry_owned(
+                &cleanup_client,
+                &cleanup_user_id,
+                Some(&cleanup_exclude),
+            ).await {
+                log::warn!(target: "skald::sync", "background owned-session cleanup deferred: {error}");
+            }
+        });
         self.session_id = Some(session.id.clone());
         self.online_item_id = Some(item_id.to_string());
         self.online_episode_id = episode_id.filter(|id| !id.is_empty()).map(str::to_string);
@@ -610,8 +658,9 @@ impl SessionManager {
         self.local_item_id = Some(item_id.to_string());
         // Remember the episode (if any) so catalog progress is written per episode.
         self.local_episode_id = episode_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
-        self.local_baseline_captured = baseline_captured;
-        self.local_server_last_update = server_last_update;
+        self.local_downloaded_revision = (!local_library).then(|| Arc::new(Mutex::new(
+            DownloadedProgressRevision { baseline_captured, server_last_update },
+        )));
 
         // New local playback = new listening-stats session row (Local Listening
         // Stats roadmap). Only LOCAL-LIBRARY playback is counted — downloaded ABS
@@ -744,8 +793,7 @@ impl SessionManager {
         // Local-library items persist progress to the SQLite catalog; downloaded
         // ABS books persist to the offline queue (which later flushes to the server).
         let local_library_tick = local_library;
-        let baseline_captured_tick = baseline_captured;
-        let server_last_update_tick = server_last_update;
+        let downloaded_revision_tick = self.local_downloaded_revision.clone();
         // Listening-stats accumulation (local-library only — see the field docs).
         let listen_pending_tick = Arc::clone(&self.local_listen_pending);
         let listen_session_tick = self.local_listen_session.clone();
@@ -768,7 +816,8 @@ impl SessionManager {
                         // field — log it so skald.log captures the failure boundary.
                         log::warn!(target: "skald::library", "local progress persist failed: {e}");
                     }
-                } else if let Some(ref dl_dir) = dl_dir_tick {
+                } else if let (Some(ref dl_dir), Some(revision)) = (&dl_dir_tick, &downloaded_revision_tick) {
+                    let revision = revision.lock().unwrap_or_else(|error| error.into_inner());
                     let entry = crate::downloads::OfflineProgressEntry {
                         item_id: item_id_tick.clone(),
                         episode_id: None,
@@ -782,8 +831,9 @@ impl SessionManager {
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_millis() as i64,
-                        baseline_captured: baseline_captured_tick,
-                        server_last_update: server_last_update_tick,
+                        baseline_captured: revision.baseline_captured,
+                        server_last_update: revision.server_last_update,
+                        pending_confirmation_current_time: None,
                     };
                     if let Err(e) = crate::downloads::upsert_progress_entry(dl_dir, entry) {
                         log::warn!(target: "skald::downloads", "offline progress persist failed: {e}");
@@ -874,6 +924,21 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Return the live downloaded branch revision only when the requested queue
+    /// key is the item currently playing from disk.
+    pub fn downloaded_revision_for(
+        &self,
+        item_id: &str,
+        episode_id: Option<&str>,
+    ) -> Option<SharedDownloadedProgressRevision> {
+        (self.is_local
+            && !self.is_local_library
+            && self.local_item_id.as_deref() == Some(item_id)
+            && self.local_episode_id.as_deref() == episode_id)
+            .then(|| self.local_downloaded_revision.clone())
+            .flatten()
+    }
+
     /// Read the backend player's position and persist it immediately. Frontend
     /// lifecycle signals never supply a duplicate position counter.
     pub async fn sync_now<R: tauri::Runtime>(&self, app: &tauri::AppHandle<R>, reason: &str) -> Result<(), String> {
@@ -898,14 +963,18 @@ impl SessionManager {
                 crate::catalog::set_progress(item_id, self.local_episode_id.as_deref(), current_time, duration, finished)?;
             } else {
                 let downloads_dir = crate::downloads::downloads_dir()?;
-                crate::downloads::upsert_progress_entry(&downloads_dir, crate::downloads::OfflineProgressEntry {
-                    item_id: item_id.to_string(), episode_id: None, current_time, duration,
-                    progress: if duration > 0.0 { current_time / duration } else { 0.0 },
-                    is_finished: finished,
-                    recorded_at: chrono::Utc::now().timestamp_millis(),
-                    baseline_captured: self.local_baseline_captured,
-                    server_last_update: self.local_server_last_update,
-                })?;
+                let revision = self.local_downloaded_revision.as_ref()
+                    .ok_or_else(|| "Downloaded playback revision is unavailable".to_string())?;
+                queue_downloaded_progress(
+                    &downloads_dir,
+                    item_id,
+                    self.local_episode_id.as_deref(),
+                    current_time,
+                    duration,
+                    finished,
+                    chrono::Utc::now().timestamp_millis(),
+                    revision,
+                )?;
             }
             return Ok(());
         }
@@ -1027,9 +1096,9 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{commit_position, lifecycle_position, persist_decision, resolve_load_time, PersistState, SessionManager, SyncClaim};
+    use super::{commit_position, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, DownloadedProgressRevision, PersistState, SessionManager, SyncClaim};
     use crate::api::AbsClient;
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
     #[test]
     fn load_time_prefers_explicit_start_over_server_time() {
@@ -1065,6 +1134,24 @@ mod tick_tests {
         let second = manager.next_seek_sync_generation();
         assert!(!manager.seek_sync_is_current(first));
         assert!(manager.seek_sync_is_current(second));
+    }
+
+    #[test]
+    fn downloaded_ticks_use_the_revision_advanced_by_a_confirmed_flush() {
+        let dir = tempfile::tempdir().unwrap();
+        let revision = Arc::new(Mutex::new(DownloadedProgressRevision {
+            baseline_captured: true,
+            server_last_update: Some(100),
+        }));
+        queue_downloaded_progress(dir.path(), "book", None, 10.0, 1000.0, false, 1, &revision).unwrap();
+        let sent = crate::downloads::load_progress_queue(dir.path()).remove(0);
+        {
+            let mut revision = revision.lock().unwrap();
+            crate::downloads::acknowledge_progress_write(dir.path(), &sent, 101, 10.0).unwrap();
+            revision.server_last_update = Some(101);
+        }
+        queue_downloaded_progress(dir.path(), "book", None, 20.0, 1000.0, false, 2, &revision).unwrap();
+        assert_eq!(crate::downloads::load_progress_queue(dir.path())[0].server_last_update, Some(101));
     }
 
     #[test]

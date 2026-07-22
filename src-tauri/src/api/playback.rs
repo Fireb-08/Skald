@@ -200,6 +200,31 @@ impl AbsClient {
         Ok(())
     }
 
+    /// GET /api/me/progress/{libraryItemId}/{episodeId?}. ABS's PATCH route
+    /// returns an empty 200 response, so downloaded playback reads this record
+    /// back to obtain the authoritative revision assigned to its own write.
+    pub async fn get_media_progress(
+        &self,
+        item_id: &str,
+        episode_id: Option<&str>,
+    ) -> Result<crate::models::MediaProgress, String> {
+        let path = match episode_id {
+            Some(ep) => format!("{}/api/me/progress/{item_id}/{ep}", self.root()),
+            None => format!("{}/api/me/progress/{item_id}", self.root()),
+        };
+        let resp = self
+            .http
+            .get(path)
+            .header("Authorization", self.auth_header()?)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("get_media_progress failed: HTTP {}", resp.status()));
+        }
+        resp.json().await.map_err(|e| e.to_string())
+    }
+
     /// Close an installation-owned orphan without sending a potentially stale
     /// progress payload. ABS saves the session's last periodic sync before removal.
     pub async fn close_session_without_sync(&self, session_id: &str) -> Result<(), String> {

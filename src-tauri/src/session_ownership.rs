@@ -10,6 +10,7 @@ use crate::api::AbsClient;
 
 const IDENTITY_FILE: &str = "playback-device.json";
 const JOURNAL_FILE: &str = "owned-playback-sessions.json";
+const MAX_JOURNAL_ENTRIES: usize = 256;
 static FILE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,6 +102,11 @@ fn record_owned_at(root: &Path, entry: OwnedPlaybackSession) -> Result<(), Strin
     let mut entries = load_journal_unlocked(root);
     entries.retain(|existing| existing.session_id != entry.session_id);
     entries.push(entry);
+    // Changed URLs and users can leave entries that are not reclaimable during
+    // the current login. Keep that safety journal bounded without guessing that
+    // two different URL strings identify the same ABS server.
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.opened_at));
+    entries.truncate(MAX_JOURNAL_ENTRIES);
     save_journal_unlocked(root, &entries)
 }
 
@@ -148,6 +154,42 @@ pub fn remove_owned(session_id: &str) -> Result<bool, String> {
     remove_owned_at(&crate::paths::data_local_dir()?, session_id)
 }
 
+async fn retry_entries<Close, CloseFuture, Prune>(
+    entries: Vec<OwnedPlaybackSession>,
+    exclude_session_id: Option<&str>,
+    mut close: Close,
+    mut prune: Prune,
+) -> u32
+where
+    Close: FnMut(String) -> CloseFuture,
+    CloseFuture: std::future::Future<Output = Result<(), String>>,
+    Prune: FnMut(&str) -> Result<bool, String>,
+{
+    let mut resolved = 0;
+    for entry in entries {
+        if exclude_session_id == Some(entry.session_id.as_str()) {
+            continue;
+        }
+        match close(entry.session_id.clone()).await {
+            Ok(()) => match prune(&entry.session_id) {
+                Ok(_) => {
+                    resolved += 1;
+                    log::info!(target: "skald::sync", "resolved Skald-owned playback session session_id={}", entry.session_id);
+                }
+                Err(error) => {
+                    // The remote session is already closed. A local rewrite
+                    // failure should leave the row for retry, not block playback.
+                    log::warn!(target: "skald::sync", "owned session closed but journal prune deferred session_id={}: {error}", entry.session_id);
+                }
+            },
+            Err(error) => {
+                log::warn!(target: "skald::sync", "Skald-owned session close deferred session_id={}: {error}", entry.session_id);
+            }
+        }
+    }
+    resolved
+}
+
 /// Retry only sessions proven to have been opened by this installation. A 404
 /// is treated as success by the HTTP helper because ABS may already have closed
 /// the session through its same-user/same-device startSession cleanup.
@@ -158,23 +200,12 @@ pub async fn retry_owned(
 ) -> Result<u32, String> {
     let root = crate::paths::data_local_dir()?;
     let entries = matching_owned_at(&root, &client.base_url, user_id);
-    let mut resolved = 0;
-    for entry in entries {
-        if exclude_session_id == Some(entry.session_id.as_str()) {
-            continue;
-        }
-        match client.close_session_without_sync(&entry.session_id).await {
-            Ok(()) => {
-                remove_owned_at(&root, &entry.session_id)?;
-                resolved += 1;
-                log::info!(target: "skald::sync", "resolved Skald-owned playback session session_id={}", entry.session_id);
-            }
-            Err(error) => {
-                log::warn!(target: "skald::sync", "Skald-owned session close deferred session_id={}: {error}", entry.session_id);
-            }
-        }
-    }
-    Ok(resolved)
+    Ok(retry_entries(
+        entries,
+        exclude_session_id,
+        |session_id| async move { client.close_session_without_sync(&session_id).await },
+        |session_id| remove_owned_at(&root, session_id),
+    ).await)
 }
 
 #[cfg(test)]
@@ -221,5 +252,50 @@ mod tests {
         }).unwrap();
         assert!(root.path().join("owned-playback-sessions.json.corrupt").exists());
         assert_eq!(matching_owned_at(root.path(), "http://abs.local", "user").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn journal_prune_failure_after_remote_close_is_nonfatal() {
+        let entries = vec![OwnedPlaybackSession {
+            server_url: "http://abs.local".to_string(),
+            user_id: "user".to_string(),
+            session_id: "orphan".to_string(),
+            opened_at: 1,
+        }];
+        let mut close_calls = 0;
+        let mut prune_calls = 0;
+        let resolved = retry_entries(
+            entries,
+            None,
+            |_| {
+                close_calls += 1;
+                std::future::ready(Ok(()))
+            },
+            |_| {
+                prune_calls += 1;
+                Err("disk temporarily read-only".to_string())
+            },
+        ).await;
+
+        assert_eq!(resolved, 0, "an unpruned entry remains pending for retry");
+        assert_eq!(close_calls, 1);
+        assert_eq!(prune_calls, 1);
+    }
+
+    #[test]
+    fn journal_retention_is_bounded_to_the_newest_entries() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..=MAX_JOURNAL_ENTRIES {
+            record_owned_at(root.path(), OwnedPlaybackSession {
+                server_url: "http://abs.local".to_string(),
+                user_id: "user".to_string(),
+                session_id: format!("session-{index}"),
+                opened_at: index as i64,
+            }).unwrap();
+        }
+        let entries = load_journal_unlocked(root.path());
+        assert_eq!(entries.len(), MAX_JOURNAL_ENTRIES);
+        assert!(entries.iter().any(|entry| entry.session_id == format!("session-{MAX_JOURNAL_ENTRIES}")));
+        assert!(!entries.iter().any(|entry| entry.session_id == "session-0"));
     }
 }

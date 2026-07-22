@@ -123,6 +123,7 @@ export interface OfflineProgressEntry {
   recordedAt: number;  // Unix ms timestamp
   baselineCaptured: boolean;
   serverLastUpdate?: number | null;
+  pendingConfirmationCurrentTime?: number | null;
 }
 
 // Flushes locally queued offline progress entries to the server.

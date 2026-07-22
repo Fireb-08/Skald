@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::{sleep, Duration};
 
-async fn capture_one_request_with_response(listener: TcpListener, status: &str, response_body: &str) -> String {
+async fn capture_next_request_with_response(listener: &TcpListener, status: &str, response_body: &str) -> String {
     let (mut stream, _) = listener.accept().await.expect("accept test request");
     let mut request = Vec::new();
     let mut chunk = [0_u8; 4096];
@@ -52,6 +52,10 @@ async fn capture_one_request_with_response(listener: TcpListener, status: &str, 
         .expect("write test response");
 
     String::from_utf8(request[..target_len].to_vec()).expect("request is UTF-8")
+}
+
+async fn capture_one_request_with_response(listener: TcpListener, status: &str, response_body: &str) -> String {
+    capture_next_request_with_response(&listener, status, response_body).await
 }
 
 async fn capture_one_request(listener: TcpListener) -> String {
@@ -137,6 +141,34 @@ async fn sync_session_posts_expected_payload() {
     let payload: serde_json::Value = serde_json::from_str(body).expect("valid JSON body");
     assert_eq!(payload["currentTime"], serde_json::json!(123.5));
     assert_eq!(payload["timeListened"], serde_json::json!(9.25));
+}
+
+#[tokio::test]
+async fn progress_write_can_be_read_back_with_its_new_revision() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let address = listener.local_addr().expect("test server address");
+    let server = tokio::spawn(async move {
+        let body = r#"{"id":"progress","libraryItemId":"item-123","episodeId":null,"duration":1000.0,"progress":0.12,"currentTime":120.0,"isFinished":false,"lastUpdate":101}"#;
+        (
+            capture_next_request_with_response(&listener, "200 OK", "").await,
+            capture_next_request_with_response(&listener, "200 OK", body).await,
+        )
+    });
+
+    let client = AbsClient::new(format!("http://{address}"))
+        .with_token("test-token".to_string());
+    client.update_progress("item-123", None, 120.0, 1000.0, false)
+        .await.expect("progress patch succeeds");
+    let confirmed = client.get_media_progress("item-123", None)
+        .await.expect("confirmation read succeeds");
+    assert_eq!(confirmed.current_time, 120.0);
+    assert_eq!(confirmed.last_update, 101);
+
+    let (patch, get) = server.await.expect("test server succeeds");
+    assert_eq!(patch.lines().next(), Some("PATCH /api/me/progress/item-123 HTTP/1.1"));
+    assert_eq!(get.lines().next(), Some("GET /api/me/progress/item-123 HTTP/1.1"));
 }
 
 const LIVE_TEST_CONFIG_NAME: &str = "Playback Sync Test.md";

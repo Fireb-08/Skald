@@ -198,6 +198,11 @@ pub struct OfflineProgressEntry {
     /// ABS `lastUpdate` at branch time; None means no record existed then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_last_update: Option<i64>,
+    /// Position sent by a PATCH whose authoritative revision has not yet been
+    /// confirmed. Retained across newer ticks so a later snapshot can recover
+    /// safely when PATCH succeeded but its immediate GET failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_confirmation_current_time: Option<f64>,
 }
 
 // The queue is stored as a sibling to downloads.json in the downloads directory.
@@ -208,6 +213,7 @@ const PROGRESS_QUEUE_FILE: &str = "offline_progress.json";
 // this lock a remove's load→save window can overlap an upsert's and silently
 // drop the freshest position from the rewritten file (lost update).
 static QUEUE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static STOP_POINT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 // Load the progress queue from disk. Returns an empty vec if the file does not
 // exist (normal on first run); a corrupt file is preserved as
@@ -232,7 +238,7 @@ pub fn save_progress_queue(downloads_dir: &Path, queue: &[OfflineProgressEntry])
 
 // Add or replace a queue entry for the same book/episode identity — keep only
 // the latest position because older updates must never overwrite it later.
-pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) -> Result<(), String> {
+pub fn upsert_progress_entry(downloads_dir: &Path, mut entry: OfflineProgressEntry) -> Result<(), String> {
     // Poison-tolerant: a panic elsewhere must not permanently wedge progress writes.
     let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // Ensure the directory exists — the first offline write happens before any
@@ -240,9 +246,73 @@ pub fn upsert_progress_entry(downloads_dir: &Path, entry: OfflineProgressEntry) 
     std::fs::create_dir_all(downloads_dir)
         .map_err(|e| format!("Create dir failed: {e}"))?;
     let mut queue = load_progress_queue(downloads_dir);
+    // A tick can capture the old branch revision immediately before a server
+    // acknowledgement, then reach this lock afterward. Preserve the greatest
+    // known revision so that delayed write cannot roll the branch backward.
+    if let Some(existing) = queue.iter().find(|existing| {
+        existing.item_id == entry.item_id && existing.episode_id == entry.episode_id
+    }) {
+        if entry.baseline_captured && existing.baseline_captured {
+            entry.server_last_update = match (existing.server_last_update, entry.server_last_update) {
+                (Some(existing), Some(incoming)) => Some(existing.max(incoming)),
+                (Some(existing), None) => Some(existing),
+                (None, incoming) => incoming,
+            };
+        }
+        if entry.pending_confirmation_current_time.is_none() {
+            entry.pending_confirmation_current_time = existing.pending_confirmation_current_time;
+        }
+    }
     // Book progress (episode_id=None) stays distinct from each podcast episode.
     queue.retain(|e| e.item_id != entry.item_id || e.episode_id != entry.episode_id);
     queue.push(entry);
+    save_progress_queue(downloads_dir, &queue)
+}
+
+/// Apply the ABS revision assigned to a confirmed progress write. The exact
+/// sent entry is removed; a newer tick for the same item remains queued and is
+/// rebased onto the confirmed revision.
+pub fn acknowledge_progress_write(
+    downloads_dir: &Path,
+    sent: &OfflineProgressEntry,
+    server_last_update: i64,
+    confirmed_current_time: f64,
+) -> Result<(), String> {
+    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut queue = load_progress_queue(downloads_dir);
+    let Some(index) = queue.iter().position(|entry| {
+        entry.item_id == sent.item_id && entry.episode_id == sent.episode_id
+    }) else {
+        return Ok(());
+    };
+    // Recovery after an interrupted confirmation may use the newest queue row,
+    // whose current_time is later than the position ABS just confirmed. Only
+    // remove when the confirmed payload is truly the complete queued position.
+    if queue[index].recorded_at == sent.recorded_at
+        && (queue[index].current_time - confirmed_current_time).abs() <= 0.5
+    {
+        queue.remove(index);
+    } else {
+        queue[index].baseline_captured = true;
+        queue[index].server_last_update = Some(server_last_update);
+        queue[index].pending_confirmation_current_time = None;
+    }
+    save_progress_queue(downloads_dir, &queue)
+}
+
+/// Persist delivery intent before issuing PATCH. If the request succeeds but
+/// its confirmation GET fails, a later ABS snapshot can match this position and
+/// recover the assigned revision instead of misclassifying Skald's own write.
+pub fn mark_progress_write_pending(
+    downloads_dir: &Path,
+    sent: &OfflineProgressEntry,
+) -> Result<(), String> {
+    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut queue = load_progress_queue(downloads_dir);
+    let entry = queue.iter_mut().find(|entry| {
+        entry.item_id == sent.item_id && entry.episode_id == sent.episode_id
+    }).ok_or_else(|| "Offline progress entry disappeared before delivery".to_string())?;
+    entry.pending_confirmation_current_time = Some(sent.current_time);
     save_progress_queue(downloads_dir, &queue)
 }
 
@@ -299,6 +369,7 @@ pub fn queue_server_progress(
             // Keep it on the conservative legacy timestamp comparison path.
             baseline_captured: false,
             server_last_update: None,
+            pending_confirmation_current_time: None,
         },
     )
 }
@@ -314,6 +385,8 @@ pub fn queue_server_progress(
 #[serde(rename_all = "camelCase")]
 pub struct LocalStopPoint {
     pub item_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_recorded_at: Option<i64>,
     pub position: f64,    // playback position in seconds
     pub recorded_at: i64, // Unix timestamp ms — shown as date/time in the UI
 }
@@ -354,15 +427,41 @@ fn save_stop_points(data_dir: &Path, item_id: &str, points: &[LocalStopPoint]) -
 // Append a stop point for a book, keeping only the 10 most recent per book.
 // Called from record_stop_point command on pause, book-switch, and app-close.
 pub fn record_stop_point(data_dir: &Path, item_id: &str, position: f64) -> Result<(), String> {
+    let _guard = STOP_POINT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut points = load_stop_points(data_dir, item_id);
     points.insert(0, LocalStopPoint {
         item_id: item_id.to_string(),
+        source_recorded_at: None,
         position,
         recorded_at: chrono::Utc::now().timestamp_millis(),
     });
     // Keep only the 10 most recent entries — older history is not useful in the UI.
     points.truncate(10);
     save_stop_points(data_dir, item_id, &points)
+}
+
+/// Record one recovery point for a conflicted queue entry. The queue timestamp
+/// is a durable idempotency key, so a later removal retry cannot duplicate it.
+pub fn record_conflict_stop_point(
+    data_dir: &Path,
+    item_id: &str,
+    position: f64,
+    source_recorded_at: i64,
+) -> Result<bool, String> {
+    let _guard = STOP_POINT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut points = load_stop_points(data_dir, item_id);
+    if points.iter().any(|point| point.source_recorded_at == Some(source_recorded_at)) {
+        return Ok(false);
+    }
+    points.insert(0, LocalStopPoint {
+        item_id: item_id.to_string(),
+        source_recorded_at: Some(source_recorded_at),
+        position,
+        recorded_at: chrono::Utc::now().timestamp_millis(),
+    });
+    points.truncate(10);
+    save_stop_points(data_dir, item_id, &points)?;
+    Ok(true)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -395,6 +494,7 @@ mod tests {
             recorded_at,
             baseline_captured: false,
             server_last_update: None,
+            pending_confirmation_current_time: None,
         }
     }
 
@@ -517,6 +617,60 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_server_write_rebases_a_superseding_tick() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sent = entry("a", 10.0, 1);
+        sent.baseline_captured = true;
+        sent.server_last_update = Some(100);
+        upsert_progress_entry(dir.path(), sent.clone()).unwrap();
+
+        // Playback advances while the HTTP write is in flight. Confirmation of
+        // the older snapshot must retain this position but move its ABS revision.
+        let mut superseding = entry("a", 30.0, 9);
+        superseding.baseline_captured = true;
+        superseding.server_last_update = Some(100);
+        upsert_progress_entry(dir.path(), superseding).unwrap();
+        acknowledge_progress_write(dir.path(), &sent, 101, 10.0).unwrap();
+
+        let queue = load_progress_queue(dir.path());
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].current_time, 30.0);
+        assert_eq!(queue[0].server_last_update, Some(101));
+
+        // A tick that captured the old revision before acknowledgement must not
+        // roll the durable branch revision backwards when it finally acquires
+        // the queue lock.
+        let mut delayed = entry("a", 31.0, 10);
+        delayed.baseline_captured = true;
+        delayed.server_last_update = Some(100);
+        upsert_progress_entry(dir.path(), delayed).unwrap();
+        assert_eq!(load_progress_queue(dir.path())[0].server_last_update, Some(101));
+    }
+
+    #[test]
+    fn pending_confirmation_survives_new_ticks_until_revision_is_recovered() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sent = entry("a", 10.0, 1);
+        sent.baseline_captured = true;
+        sent.server_last_update = Some(100);
+        upsert_progress_entry(dir.path(), sent.clone()).unwrap();
+        mark_progress_write_pending(dir.path(), &sent).unwrap();
+
+        let mut newer = entry("a", 20.0, 2);
+        newer.baseline_captured = true;
+        newer.server_last_update = Some(100);
+        upsert_progress_entry(dir.path(), newer).unwrap();
+        assert_eq!(load_progress_queue(dir.path())[0].pending_confirmation_current_time, Some(10.0));
+
+        let recovery_snapshot = load_progress_queue(dir.path()).remove(0);
+        acknowledge_progress_write(dir.path(), &recovery_snapshot, 101, 10.0).unwrap();
+        let recovered = load_progress_queue(dir.path()).remove(0);
+        assert_eq!(recovered.current_time, 20.0);
+        assert_eq!(recovered.server_last_update, Some(101));
+        assert_eq!(recovered.pending_confirmation_current_time, None);
+    }
+
+    #[test]
     fn progress_queue_keeps_sibling_episodes_distinct() {
         let dir = tempfile::tempdir().unwrap();
         let mut first = entry("podcast", 10.0, 1);
@@ -541,5 +695,17 @@ mod tests {
         let points = load_stop_points(dir.path(), "book");
         assert_eq!(points.len(), 10, "history capped at 10");
         assert_eq!(points[0].position, 11.0, "newest first");
+    }
+
+
+    #[test]
+    fn conflict_stop_point_is_idempotent_for_the_same_queue_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(record_conflict_stop_point(dir.path(), "book", 42.0, 1234).unwrap());
+        assert!(!record_conflict_stop_point(dir.path(), "book", 42.0, 1234).unwrap());
+        let points = load_stop_points(dir.path(), "book");
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].position, 42.0);
+        assert_eq!(points[0].source_recorded_at, Some(1234));
     }
 }

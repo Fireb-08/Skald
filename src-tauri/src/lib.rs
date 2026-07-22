@@ -531,7 +531,11 @@ pub fn run() {
                                         if let Err(e) = catalog::set_progress(item_id, guard.local_episode_id.as_deref(), pos, dur, finished) {
                                             log::warn!(target: "skald::library", "shutdown progress write failed: {e}");
                                         }
-                                    } else if let Ok(dl_dir) = downloads::downloads_dir() {
+                                    } else if let (Ok(dl_dir), Some(revision)) = (
+                                        downloads::downloads_dir(),
+                                        guard.local_downloaded_revision.as_ref(),
+                                    ) {
+                                        let revision = revision.lock().unwrap_or_else(|error| error.into_inner());
                                         // Downloaded ABS book — offline queue (flushes later).
                                         let entry = downloads::OfflineProgressEntry {
                                             item_id: item_id.clone(),
@@ -544,8 +548,9 @@ pub fn run() {
                                                 .duration_since(std::time::UNIX_EPOCH)
                                                 .unwrap_or_default()
                                                 .as_millis() as i64,
-                                            baseline_captured: guard.local_baseline_captured,
-                                            server_last_update: guard.local_server_last_update,
+                                            baseline_captured: revision.baseline_captured,
+                                            server_last_update: revision.server_last_update,
+                                            pending_confirmation_current_time: None,
                                         };
                                         if let Err(e) = downloads::upsert_progress_entry(&dl_dir, entry) {
                                             log::warn!(target: "skald::downloads", "shutdown progress write failed: {e}");
