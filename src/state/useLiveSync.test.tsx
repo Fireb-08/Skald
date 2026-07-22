@@ -32,11 +32,14 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     currentBookIdRef: { current: '' },
     currentEpisodeIdRef: { current: null },
     playingRef: { current: false },
+    sessionIdRef: { current: '' },
+    sessionReadyRef: { current: false },
     currentLibraryIdRef: { current: 'library' },
     librariesRef: { current: [] },
     isOfflineRef: { current: false },
     setMediaProgress: vi.fn(),
     setPosition: vi.fn(),
+    setSyncConflict: vi.fn(),
     setLibraryRaw: vi.fn(),
     setCurrentBookId: vi.fn(),
     setFocusedBookId: vi.fn(),
@@ -54,6 +57,43 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
 beforeEach(() => tauri.reset());
 
 describe('useLiveSync runtime preference lifecycle', () => {
+  it('uses session identity to ignore own transport echoes and surface other devices', async () => {
+    const stableDeps = deps();
+    stableDeps.currentBookIdRef.current = 'book';
+    stableDeps.sessionIdRef.current = 'skald-session';
+    stableDeps.sessionReadyRef.current = true;
+    stableDeps.playingRef.current = true;
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    act(() => {
+      tauri.emit('progress-updated', JSON.stringify({
+        sessionId: 'skald-session',
+        deviceDescription: 'Skald',
+        data: { libraryItemId: 'book', currentTime: 45, duration: 100, progress: 0.45 },
+      }));
+    });
+    expect(stableDeps.setMediaProgress).toHaveBeenCalledTimes(1);
+    expect(stableDeps.setPosition).not.toHaveBeenCalled();
+    expect(stableDeps.setSyncConflict).not.toHaveBeenCalled();
+
+    act(() => {
+      tauri.emit('progress-updated', JSON.stringify({
+        sessionId: 'phone-session',
+        deviceDescription: 'Phone',
+        data: { libraryItemId: 'book', currentTime: 90, duration: 100, progress: 0.9 },
+      }));
+    });
+    expect(stableDeps.setMediaProgress).toHaveBeenCalledTimes(2);
+    expect(stableDeps.setPosition).not.toHaveBeenCalled();
+    expect(stableDeps.setSyncConflict).toHaveBeenLastCalledWith(expect.objectContaining({
+      libraryItemId: 'book',
+      currentTime: 90,
+      deviceDescription: 'Phone',
+      sessionId: 'phone-session',
+    }));
+  });
+
   it('installs socket listeners on enable and removes them on disable', async () => {
     const stableDeps = deps();
     const { rerender } = renderHook(

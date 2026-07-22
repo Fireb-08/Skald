@@ -27,12 +27,15 @@ export interface LiveSyncDeps {
   currentBookIdRef: RefObject<string>;
   currentEpisodeIdRef: RefObject<string | null>;
   playingRef: RefObject<boolean>;
+  sessionIdRef: RefObject<string>;
+  sessionReadyRef: RefObject<boolean>;
   currentLibraryIdRef: RefObject<string>;
   librariesRef: RefObject<Library[]>;
   isOfflineRef: RefObject<boolean>;
   // Stable setters / callbacks from useOnyxState.
   setMediaProgress: Dispatch<SetStateAction<MediaProgress[]>>;
   setPosition: Dispatch<SetStateAction<number>>;
+  setSyncConflict: Dispatch<SetStateAction<PlaybackSyncConflict | null>>;
   setLibraryRaw: Dispatch<SetStateAction<LibraryItem[]>>;
   setCurrentBookId: Dispatch<SetStateAction<string>>;
   setFocusedBookId: Dispatch<SetStateAction<string | null>>;
@@ -46,6 +49,15 @@ export interface LiveSyncDeps {
   applyServerProgress: (serverProgress: MediaProgress[]) => void;
 }
 
+export interface PlaybackSyncConflict {
+  libraryItemId: string;
+  episodeId: string | null;
+  currentTime: number;
+  deviceDescription: string;
+  sessionId: string;
+  receivedAt: number;
+}
+
 export function useLiveSync({
   serverUrl,
   authToken,
@@ -53,11 +65,14 @@ export function useLiveSync({
   currentBookIdRef,
   currentEpisodeIdRef,
   playingRef,
+  sessionIdRef,
+  sessionReadyRef,
   currentLibraryIdRef,
   librariesRef,
   isOfflineRef,
   setMediaProgress,
   setPosition,
+  setSyncConflict,
   setLibraryRaw,
   setCurrentBookId,
   setFocusedBookId,
@@ -87,6 +102,10 @@ export function useLiveSync({
           libraryItemId: string;
           currentTime: number;
         });
+        const eventSessionId = typeof raw.sessionId === 'string' ? raw.sessionId : '';
+        const deviceDescription = typeof raw.deviceDescription === 'string' && raw.deviceDescription.trim()
+          ? raw.deviceDescription.trim()
+          : 'another device';
 
         // ── Self-echo guard ───────────────────────────────────────────────────
         // Skald syncs its own playback position to the server every 30 seconds.
@@ -101,6 +120,9 @@ export function useLiveSync({
           update.libraryItemId === currentBookIdRef.current &&
           (update.episodeId ?? null) === (currentEpisodeIdRef.current ?? null);
         const isActivelyPlayingThisBook = isForCurrentPlayback && playingRef.current;
+        const activeSessionId = sessionReadyRef.current ? sessionIdRef.current : '';
+        const isOwnSessionEcho = !!eventSessionId && !!activeSessionId && eventSessionId === activeSessionId;
+        const isOtherSession = !!eventSessionId && !!activeSessionId && eventSessionId !== activeSessionId;
 
         // ── Stored progress reconciliation (always runs) ──────────────────────
         // Pick it up, library cover overlays, and the progress bar for
@@ -122,6 +144,29 @@ export function useLiveSync({
           // New record — append so newly-started books show in Pick it up.
           return [...prev, update as MediaProgress];
         });
+
+        // Preserve ABS's wrapper identity. Our own echo updates stored progress
+        // but never moves transport; a different session for the loaded item is
+        // a user decision, even while Skald is paused.
+        if (isForCurrentPlayback && isOwnSessionEcho) return;
+        if (isForCurrentPlayback && isOtherSession) {
+          log.info('sync', 'cross-device playback conflict detected', {
+            itemId: update.libraryItemId,
+            episodeId: update.episodeId ?? null,
+            sessionId: eventSessionId,
+            deviceDescription,
+            currentTime: update.currentTime,
+          });
+          setSyncConflict({
+            libraryItemId: update.libraryItemId,
+            episodeId: update.episodeId ?? null,
+            currentTime: update.currentTime,
+            deviceDescription,
+            sessionId: eventSessionId,
+            receivedAt: Date.now(),
+          });
+          return;
+        }
 
         // ── Live transport position (only when safe to update) ────────────────
         // If this update is for the focused book but we are NOT actively playing

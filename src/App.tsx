@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, startStagingWatch, autoIngestStaging } from './api/abs';
+import { closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging } from './api/abs';
 import { log } from './lib/log';
 import Toast from './components/ui/Toast';
 import ActivityCenter from './components/ActivityCenter';
@@ -30,6 +30,15 @@ export default function App() {
   const isDark = st.theme !== 'light';
   // UI scale factor applied via CSS transform on the root div
   const z = st.scale / 100;
+  const formatConflictTime = (seconds: number) => {
+    const whole = Math.max(0, Math.floor(seconds));
+    const hours = Math.floor(whole / 3600);
+    const minutes = Math.floor((whole % 3600) / 60);
+    const secs = whole % 60;
+    return hours > 0
+      ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+      : `${minutes}:${String(secs).padStart(2, '0')}`;
+  };
 
   // Register global keyboard shortcuts (Ctrl+Alt+Space etc.) once on mount
   useGlobalShortcuts(st);
@@ -325,6 +334,30 @@ export default function App() {
           danger
           onConfirm={() => { st.confirmDialog!.onConfirm(); st.setConfirmDialog(null); }}
           onCancel={() => st.setConfirmDialog(null)}
+        />
+      )}
+
+      {st.syncConflict && !st.confirmDialog && (
+        <ConfirmDialog
+          title="Playback changed on another device"
+          message={`Playback continued on ${st.syncConflict.deviceDescription} at ${formatConflictTime(st.syncConflict.currentTime)}. Use that server position, or continue from Skald's current position?`}
+          confirmLabel="Use server position"
+          cancelLabel="Continue here"
+          danger={false}
+          onConfirm={() => {
+            const conflict = st.syncConflict;
+            if (!conflict) return;
+            st.setPosition(conflict.currentTime);
+            seekAudio(conflict.currentTime).catch(e =>
+              log.error('playback', 'cross-device conflict seek failed', { err: String(e) }));
+            st.recordActivity({ category: 'sync', outcome: 'info', message: `Accepted playback position from ${conflict.deviceDescription}` });
+            st.setSyncConflict(null);
+          }}
+          onCancel={() => {
+            const device = st.syncConflict?.deviceDescription ?? 'another device';
+            st.recordActivity({ category: 'sync', outcome: 'info', message: `Continued in Skald instead of ${device}` });
+            st.setSyncConflict(null);
+          }}
         />
       )}
     </div>

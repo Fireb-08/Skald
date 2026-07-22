@@ -7,7 +7,7 @@ import { log } from '../lib/log';
 import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
-import { useLiveSync } from './useLiveSync';
+import { useLiveSync, type PlaybackSyncConflict } from './useLiveSync';
 import { prependActivity } from '../lib/activity';
 import { readLastRefresh, writeLastRefresh } from '../lib/offlineFreshness';
 
@@ -177,6 +177,8 @@ export interface OnyxState {
   // lets socket listeners subscribe/unsubscribe as soon as Settings changes it.
   liveSyncEnabled: boolean;
   setLiveSyncEnabled: (enabled: boolean) => void;
+  syncConflict: PlaybackSyncConflict | null;
+  setSyncConflict: Dispatch<SetStateAction<PlaybackSyncConflict | null>>;
   // Auth
   user: User | null;
   setUser: (user: User | null) => void;
@@ -443,6 +445,7 @@ export function useOnyxState(): OnyxState {
   const [liveSyncEnabled, setLiveSyncEnabledRaw] = useState(
     () => localStorage.getItem('onyx.sync.live') === 'true',
   );
+  const [syncConflict, setSyncConflict] = useState<PlaybackSyncConflict | null>(null);
 
   const setServerUrl = useCallback((v: string) => {
     localStorage.setItem('skald.serverUrl', v); setServerUrlRaw(v);
@@ -1213,6 +1216,8 @@ export function useOnyxState(): OnyxState {
   const currentBookIdRef    = useRef(currentBookId);
   const currentEpisodeIdRef = useRef(currentEpisodeId);
   const playingRef          = useRef(playing);
+  const sessionIdRef        = useRef(sessionId);
+  const sessionReadyRef     = useRef(sessionReady);
   const currentLibraryIdRef = useRef(currentLibraryId);
   const isLocalPlaybackRef  = useRef(isLocalPlayback);
   // Live position for the global keyboard-seek handler (which is registered once
@@ -1231,6 +1236,8 @@ export function useOnyxState(): OnyxState {
     currentBookIdRef.current    = currentBookId;
     currentEpisodeIdRef.current = currentEpisodeId;
     playingRef.current          = playing;
+    sessionIdRef.current        = sessionId;
+    sessionReadyRef.current     = sessionReady;
     currentLibraryIdRef.current = currentLibraryId;
     isLocalPlaybackRef.current  = isLocalPlayback;
     positionRef.current         = position;
@@ -1349,11 +1356,14 @@ export function useOnyxState(): OnyxState {
     currentBookIdRef,
     currentEpisodeIdRef,
     playingRef,
+    sessionIdRef,
+    sessionReadyRef,
     currentLibraryIdRef,
     librariesRef,
     isOfflineRef,
     setMediaProgress,
     setPosition,
+    setSyncConflict,
     setLibraryRaw,
     setCurrentBookId,
     setFocusedBookId,
@@ -1425,6 +1435,7 @@ export function useOnyxState(): OnyxState {
     userId, setUserId,
     authToken, setAuthToken,
     liveSyncEnabled, setLiveSyncEnabled,
+    syncConflict, setSyncConflict,
     user, setUser,
     isAdmin: user?.type === 'admin' || user?.type === 'root',
     // Server-side, the canUpload getter is true for admin/root regardless of the

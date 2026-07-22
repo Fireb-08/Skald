@@ -8,13 +8,14 @@ export interface ConfirmDialogProps {
   title: string;
   message: string;
   confirmLabel: string;
+  cancelLabel?: string;
   danger: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 export default function ConfirmDialog({
-  title, message, confirmLabel, danger, onConfirm, onCancel,
+  title, message, confirmLabel, cancelLabel = 'Cancel', danger, onConfirm, onCancel,
 }: ConfirmDialogProps) {
   // ConfirmDialog shares the modal stack so a parent dialog cannot also consume
   // Tab/Escape while this higher-z confirmation owns keyboard interaction.
@@ -70,7 +71,7 @@ export default function ConfirmDialog({
               cursor: 'pointer',
             }}
           >
-            Cancel
+            {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
