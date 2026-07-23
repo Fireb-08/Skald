@@ -33,6 +33,8 @@ Work proceeds one scoped feature at a time. A planning assistant (Codex in the c
 
 Feature roadmaps (current and historical) are kept in the user's Obsidian vault at `Vault/Skald/` — completed ones are marked "Complete" and are a reliable reference for how an existing feature works. The vault is git-ignored.
 
+**Place all newly created project documentation in the vault.** Reports, reviews, assessments, plans, and roadmaps written as `.md` files belong under the appropriate folder in `Vault/Skald/Skald/`, not at the repository root. Repository-control documents that must remain discoverable by tooling, such as `README.md`, `AGENTS.md`, and package-specific instruction files, are exceptions.
+
 ---
 
 ## Authoritative references

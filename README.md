@@ -6,7 +6,7 @@ Skald connects to your Audiobookshelf server for streaming, offline playback, li
 
 Built with **Tauri 2 + React 19 + TypeScript + Rust**, with audio handled natively by **LibVLC**. The user interface follows a bespoke design language called *Onyx*.
 
-> **Status:** Working alpha. The app authenticates via password or API key, streams and plays audio, syncs progress live over Socket.IO, downloads for offline use, and features a deep settings menu. The target platform is **Windows 11 x64**. Linux is a future second-class target (see `linux-roadmap.md`).
+> **Status:** Working alpha. The app authenticates via password or API key, streams and plays audio, syncs progress live over Socket.IO, downloads for offline use, and features a deep settings menu. The target platform is **Windows 11 x64**. Linux is a future second-class target (see `Vault/Skald/Skald/Roadmaps/linux-roadmap.md`).
 
 ---
 
