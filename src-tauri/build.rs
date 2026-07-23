@@ -1,6 +1,17 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // Build scripts execute on the host, which may differ from the Cargo
+    // target during cross-compilation. CARGO_CFG_TARGET_OS is therefore the
+    // authoritative switch for target-specific link and resource behavior.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        configure_windows_runtime();
+    }
+
+    tauri_build::build()
+}
+
+fn configure_windows_runtime() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // vlc-rs hardcodes `#[link(name = "vlc")]`; supply the directory that
@@ -32,15 +43,13 @@ fn main() {
         copy_dir_all(&bin_dir, &binary_dir);
         println!("cargo:rerun-if-changed={}", bin_dir.display());
     }
-
-    tauri_build::build()
 }
 
 // Copy failures FAIL THE BUILD with both paths in the message. A silently
 // missing DLL / VLC plugin / helper exe would otherwise surface much later as
-// a runtime failure in playback, probing, or tag writes. The common cause is
-// a running skald.exe locking libvlc.dll (OS error 32) — stop the app and
-// rebuild (CLAUDE.md critical lesson 11).
+// a runtime failure in playback, probing, or tag writes on Windows. The common
+// cause is a running skald.exe locking libvlc.dll (OS error 32) — stop the app
+// and rebuild (AGENTS.md critical lesson 11).
 fn copy_dir_all(src: &Path, dst: &Path) {
     let read = std::fs::read_dir(src)
         .unwrap_or_else(|e| panic!("cannot read bundled dir {}: {e}", src.display()));

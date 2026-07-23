@@ -124,13 +124,12 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
 
-            // Set VLC_PLUGIN_PATH to the bundled plugins directory so LibVLC can
-            // find its codecs/demuxers regardless of whether VLC is installed on
-            // the target machine. Must run before the first Instance::new() call,
-            // which is lazy (triggered by open_playback_session / play_local_file).
+            // Configure a bundled LibVLC plugin tree before the first lazy
+            // Instance::new() call. Windows always ships this tree. Native Linux
+            // packages intentionally leave VLC_PLUGIN_PATH alone so the system
+            // LibVLC can use its distro-managed plugin discovery.
             if let Ok(resource_dir) = app.path().resource_dir() {
                 let plugins = resource_dir.join("plugins");
-                std::env::set_var("VLC_PLUGIN_PATH", &plugins);
 
                 // Pre-build the LibVLC plugin cache (plugins.dat) when it's missing.
                 // Without it, libvlccore rebuilds the cache on the first Instance::new()
@@ -141,19 +140,34 @@ pub fn run() {
                 // has no cache, so build it here. Idempotent (skipped once present) and
                 // run WINDOWLESS. vlc-cache-gen needs libvlccore.dll in its own dir (it
                 // sits beside it in resource_dir) and an ABSOLUTE plugins path.
-                let cache_gen = resource_dir.join("vlc-cache-gen.exe");
-                if cache_gen.exists() && plugins.is_dir() && !plugins.join("plugins.dat").exists() {
-                    let mut cmd = std::process::Command::new(&cache_gen);
-                    cmd.arg(&plugins);
-                    #[cfg(windows)]
+                #[cfg(windows)]
+                {
+                    std::env::set_var("VLC_PLUGIN_PATH", &plugins);
+                    let cache_gen = resource_dir.join("vlc-cache-gen.exe");
+                    if cache_gen.exists()
+                        && plugins.is_dir()
+                        && !plugins.join("plugins.dat").exists()
                     {
+                        let mut cmd = std::process::Command::new(&cache_gen);
+                        cmd.arg(&plugins);
                         use std::os::windows::process::CommandExt;
                         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+                        match cmd.status() {
+                            Ok(s) => log::info!(target: "skald::app", "built LibVLC plugin cache (exit {:?})", s.code()),
+                            Err(e) => log::warn!(target: "skald::app", "LibVLC plugin cache build failed: {e}"),
+                        }
                     }
-                    match cmd.status() {
-                        Ok(s) => log::info!(target: "skald::app", "built LibVLC plugin cache (exit {:?})", s.code()),
-                        Err(e) => log::warn!(target: "skald::app", "LibVLC plugin cache build failed: {e}"),
-                    }
+                }
+
+                #[cfg(not(windows))]
+                if plugins.is_dir() {
+                    // Flatpak/AppImage may later bundle a validated plugin tree.
+                    // Native packages have no such directory and retain system
+                    // discovery by leaving the environment unchanged.
+                    std::env::set_var("VLC_PLUGIN_PATH", &plugins);
+                    log::info!(target: "skald::playback", "using bundled LibVLC plugin directory {}", plugins.display());
+                } else {
+                    log::info!(target: "skald::playback", "using system LibVLC plugin discovery");
                 }
             }
 
