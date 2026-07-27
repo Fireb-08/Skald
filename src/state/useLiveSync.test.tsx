@@ -37,7 +37,6 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     currentBookIdRef: { current: '' },
     currentEpisodeIdRef: { current: null },
     playingRef: { current: false },
-    isLocalPlaybackRef: { current: false },
     sessionIdRef: { current: '' },
     sessionReadyRef: { current: false },
     currentLibraryIdRef: { current: 'library' },
@@ -71,10 +70,9 @@ beforeEach(() => {
 });
 
 describe('useLiveSync runtime preference lifecycle', () => {
-  it('moves a loaded local transport to the ABS position after an offline conflict', async () => {
+  it('never moves a loaded transport during background offline reconciliation', async () => {
     const stableDeps = deps();
     stableDeps.currentBookIdRef.current = 'book';
-    stableDeps.isLocalPlaybackRef.current = true;
     renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: false }));
     await act(async () => {});
 
@@ -87,8 +85,8 @@ describe('useLiveSync runtime preference lifecycle', () => {
       });
     });
 
-    expect(stableDeps.setPosition).toHaveBeenCalledWith(420);
-    expect(invokeMock).toHaveBeenCalledWith('seek_audio', { secs: 420 });
+    expect(stableDeps.setPosition).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalledWith('seek_audio', expect.anything());
   });
 
   it('uses session identity to ignore own transport echoes and surface other devices', async () => {
