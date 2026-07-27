@@ -127,6 +127,61 @@ fn persist_decision(
     }
 }
 
+/// Latch for the end-of-item announcement (`playback-ended`, the auto-play-next
+/// trigger). Separate from `PersistState::finished_recorded` because that latch
+/// lives in the offline loop only, while this one must behave identically for
+/// streamed, downloaded, and local-library playback.
+#[derive(Default)]
+struct EndState {
+    announced: bool,
+}
+
+/// Whether this tick should announce that the item reached its natural end.
+///
+/// The distinction the auto-advance depends on: only a *natural* end announces.
+/// `ended` comes from `AudioPlayer::book_ended()`, which is true solely when the
+/// player sits in `State::Ended` on the final track — a user stop leaves it in
+/// `State::Stopped`, and a middle track ending is not the end of the book, so
+/// neither reaches here. Ended is a resting state the player stays in, so the
+/// latch keeps the announcement to one per end; a live position afterwards means
+/// the listener restarted or seeked back, which re-arms it.
+fn end_decision(st: &mut EndState, dur: f64, live: bool, ended: bool) -> bool {
+    if ended && dur > 0.0 {
+        if st.announced {
+            return false;
+        }
+        st.announced = true;
+        return true;
+    }
+    if live {
+        st.announced = false;
+    }
+    false
+}
+
+/// Announce the natural end of an item so the frontend can resolve what plays
+/// next. Deliberately fired from the tick loop *after* the tick has committed the
+/// end position (`commit_position` pins it at the duration): the advance that
+/// follows routes through the normal play path, whose session close syncs that
+/// committed position — so the final interval is accounted for before ABS is
+/// asked to open the next session.
+fn announce_end<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    item_id: &str,
+    episode_id: Option<&str>,
+    duration: f64,
+) {
+    log::info!(target: "skald::playback", "playback reached the end of the item item={item_id} episode={episode_id:?}");
+    let _ = app.emit(
+        "playback-ended",
+        serde_json::json!({
+            "itemId":    item_id,
+            "episodeId": episode_id,
+            "duration":  duration,
+        }),
+    );
+}
+
 /// Watch a spawned playback task and make its death observable (review H5): a
 /// panic inside a tick/sync loop is otherwise swallowed by tokio and progress
 /// tracking silently stops for the rest of the session. The watcher logs the
@@ -491,9 +546,14 @@ impl SessionManager {
         let player_tick = Arc::clone(&self.player);
         let active_tick = Arc::clone(&active);
         let app_tick = app.clone();
+        // Identity for the end-of-item announcement — captured, so an announcement
+        // always names the item this task was started for.
+        let item_id_tick = item_id.to_string();
+        let episode_id_tick = episode_id.map(str::to_string);
 
         let tick_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut end_state = EndState::default();
             loop {
                 interval.tick().await;
                 if !active_tick.load(Ordering::Relaxed) {
@@ -531,6 +591,9 @@ impl SessionManager {
                         "isPlaying":   playing,
                     }),
                 );
+                if end_decision(&mut end_state, dur, live, ended) {
+                    announce_end(&app_tick, &item_id_tick, episode_id_tick.as_deref(), dur);
+                }
             }
         });
         watch_task(app.clone(), "online tick", tick_handle);
@@ -916,6 +979,7 @@ impl SessionManager {
             // when the loop ends so a throttled write is never lost on book-switch/
             // stop. A stop is not a finish, so the flush always writes finished = false.
             let mut pstate = PersistState::default();
+            let mut end_state = EndState::default();
             loop {
                 interval.tick().await;
                 if !active_tick.load(Ordering::Relaxed) {
@@ -972,6 +1036,12 @@ impl SessionManager {
                 // persist_decision (pure, unit-tested); this loop only does the write.
                 if let Some(rec) = persist_decision(&mut pstate, report, dur, live, ended, PERSIST_EVERY) {
                     persist(rec.pos, rec.dur, rec.finished);
+                }
+                // Announced after the persist above, so the finished position is
+                // already on disk when the frontend acts on the end — offline
+                // advance must never race its own progress write.
+                if end_decision(&mut end_state, dur, live, ended) {
+                    announce_end(&app_tick, &item_id_tick, episode_id_tick.as_deref(), dur);
                 }
             }
         });
@@ -1197,7 +1267,7 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{acknowledge_listened, commit_position, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, PersistState, SessionManager, SyncClaim};
+    use super::{acknowledge_listened, commit_position, end_decision, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, EndState, PersistState, SessionManager, SyncClaim};
     use crate::api::AbsClient;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
@@ -1357,5 +1427,43 @@ mod tick_tests {
         let mut st = PersistState::default();
         assert!(persist_decision(&mut st, 100.0, 0.0, false, true, 5).is_none());
         assert!(!st.finished_recorded);
+    }
+
+    #[test]
+    fn only_a_natural_end_announces_the_item_finishing() {
+        let mut st = EndState::default();
+        // Playing, then paused: nothing to announce.
+        assert!(!end_decision(&mut st, 3600.0, true, false));
+        assert!(!end_decision(&mut st, 3600.0, true, false));
+        // A user stop leaves the player Stopped, not Ended — book_ended() is
+        // false, so the tick reports neither live nor ended. No announcement:
+        // this is the case that must never auto-advance.
+        assert!(!end_decision(&mut st, 3600.0, false, false));
+        // A middle track ending is likewise not a book end (book_ended() guards
+        // on the final track), so it arrives here as ended = false.
+        assert!(!end_decision(&mut st, 3600.0, false, false));
+        // The real end announces exactly once, though Ended is a resting state
+        // the player keeps reporting on every subsequent tick.
+        assert!(end_decision(&mut st, 3600.0, false, true));
+        assert!(!end_decision(&mut st, 3600.0, false, true));
+        assert!(!end_decision(&mut st, 3600.0, false, true));
+    }
+
+    #[test]
+    fn the_end_announcement_rearms_on_a_restart_and_waits_for_a_known_duration() {
+        let mut st = EndState::default();
+        assert!(end_decision(&mut st, 3600.0, false, true));
+        // Restarting or seeking back gives a live position again; finishing the
+        // re-listen must be able to advance just like the first time.
+        assert!(!end_decision(&mut st, 3600.0, true, false));
+        assert!(end_decision(&mut st, 3600.0, false, true));
+
+        // Ended with no known duration is the transient LibVLC state, not a
+        // finished item (mirrors commit_position holding its value): stay armed
+        // so the real end still announces once the duration is known.
+        let mut st = EndState::default();
+        assert!(!end_decision(&mut st, 0.0, false, true));
+        assert!(!st.announced);
+        assert!(end_decision(&mut st, 3600.0, false, true));
     }
 }
