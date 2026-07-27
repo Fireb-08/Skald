@@ -22,7 +22,7 @@ vi.mock('../lib/log', () => ({
 
 import type { PodcastEpisode } from './abs';
 import type { OnyxState } from '../state/onyx';
-import { playBook, playEpisode } from './playbook';
+import { playBook, playEpisode, resumePlayback, togglePlayback } from './playbook';
 
 function state(overrides: Partial<OnyxState> = {}): OnyxState {
   return {
@@ -314,5 +314,89 @@ describe('downloaded ABS playback resume', () => {
 
     expect(abs.getMe).not.toHaveBeenCalled();
     expect(st.setPosition).toHaveBeenCalledWith(90);
+  });
+});
+
+// ── Auto-rewind on resume (Auto-Rewind & Per-Book Speed roadmap, Phase 1) ─────
+// Freezes the shipped fixed-rewind behaviour before the adaptive upgrade.
+// resumePlayback is the canonical paused→playing transition for the CURRENT
+// book; playBook resolves its own resume position and must never be rewound on
+// top of it.
+describe('resumePlayback — fixed auto-rewind', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('steps back by the configured amount and keeps the UI in step', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('10s'));
+    const st = state({ position: 300, playing: false });
+
+    await resumePlayback(st);
+
+    expect(abs.seekAudio).toHaveBeenCalledWith(290);
+    expect(st.setPosition).toHaveBeenCalledWith(290);
+    expect(abs.playAudio).toHaveBeenCalled();
+    expect(st.setPlaying).toHaveBeenCalledWith(true);
+  });
+
+  it('clamps at the start of the book rather than seeking negative', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('10s'));
+    const st = state({ position: 4, playing: false });
+
+    await resumePlayback(st);
+
+    expect(abs.seekAudio).toHaveBeenCalledWith(0);
+    expect(st.setPosition).toHaveBeenCalledWith(0);
+  });
+
+  it('does not seek when the preference is Off', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('Off'));
+    const st = state({ position: 300, playing: false });
+
+    await resumePlayback(st);
+
+    expect(abs.seekAudio).not.toHaveBeenCalled();
+    expect(st.setPosition).not.toHaveBeenCalled();
+    expect(abs.playAudio).toHaveBeenCalled();
+  });
+
+  it('does not seek at position zero — there is nothing to re-hear', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('5s'));
+    const st = state({ position: 0, playing: false });
+
+    await resumePlayback(st);
+
+    expect(abs.seekAudio).not.toHaveBeenCalled();
+  });
+
+  it('leaves playing false when the engine refuses to resume', async () => {
+    abs.playAudio.mockRejectedValueOnce(new Error('LibVLC is unhappy'));
+    const st = state({ position: 300, playing: false });
+
+    await resumePlayback(st);
+
+    expect(st.setPlaying).toHaveBeenCalledWith(false);
+    expect(st.setPlaying).not.toHaveBeenCalledWith(true);
+  });
+});
+
+describe('togglePlayback', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('pauses without rewinding when currently playing', async () => {
+    const st = state({ position: 300, playing: true });
+
+    await togglePlayback(st);
+
+    expect(abs.pauseAudio).toHaveBeenCalled();
+    expect(st.setPlaying).toHaveBeenCalledWith(false);
+    expect(abs.seekAudio).not.toHaveBeenCalled();
+  });
+
+  it('routes the resume half through the rewind path', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('5s'));
+    const st = state({ position: 300, playing: false });
+
+    await togglePlayback(st);
+
+    expect(abs.seekAudio).toHaveBeenCalledWith(295);
   });
 });

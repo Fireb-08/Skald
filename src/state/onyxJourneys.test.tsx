@@ -178,6 +178,53 @@ describe('playback-state regression guards', () => {
     expect(tauri.calls.filter(call => call.cmd === 'seek_audio').length).toBeGreaterThan(before);
   });
 
+  // Auto-Rewind & Per-Book Speed roadmap, Phase 1. The Space handler carries its
+  // own inlined copy of resumePlayback's rewind logic (the hook has no assembled
+  // `st` to pass). Pin the shipped behaviour here so the adaptive upgrade cannot
+  // silently let the keyboard and the transport buttons drift apart.
+  it('applies the same auto-rewind on Space as the transport resume path', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('10s'));
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    act(() => {
+      result.current.setCurrentBookId('abs-book');
+      result.current.setPosition(300);
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', bubbles: true, cancelable: true,
+      }));
+    });
+
+    const seeks = tauri.calls.filter(call => call.cmd === 'seek_audio');
+    expect(seeks[seeks.length - 1]?.args).toMatchObject({ secs: 290 });
+    expect(result.current.position).toBe(290);
+    expect(tauri.calls.some(call => call.cmd === 'play_audio')).toBe(true);
+  });
+
+  it('does not rewind on Space when the preference is Off', async () => {
+    localStorage.setItem('onyx.playback.rewind', JSON.stringify('Off'));
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    act(() => {
+      result.current.setCurrentBookId('abs-book');
+      result.current.setPosition(300);
+    });
+    const before = tauri.calls.filter(call => call.cmd === 'seek_audio').length;
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', bubbles: true, cancelable: true,
+      }));
+    });
+
+    expect(tauri.calls.filter(call => call.cmd === 'seek_audio')).toHaveLength(before);
+    expect(result.current.position).toBe(300);
+  });
+
   it('surfaces offline-progress corruption discovered after the registry poll', async () => {
     let resolveFlush: ((value: number) => void) | undefined;
     const pendingFlush = new Promise<number>(resolve => { resolveFlush = resolve; });
