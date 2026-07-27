@@ -1,0 +1,46 @@
+name: Linux AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/linux-port
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build and playback dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libsecret-1-dev \
+            patchelf \
+            vlc \
+            libvlc-dev
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skald-linux-appimage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error

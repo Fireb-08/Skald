@@ -1,6 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "pnpm build:linux"
+  },
   "bundle": {
-    "targets": ["appimage"]
+    "targets": ["appimage"],
+    "resources": {
+      "linux-runtime/plugins/": "plugins/"
+    }
   }
 }

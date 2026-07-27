@@ -43,7 +43,7 @@ fn lifecycle_position(prev: f64, pos: f64, dur: f64, ended: bool) -> f64 {
     else { prev }
 }
 
-struct SyncClaim(Arc<AtomicBool>);
+pub(crate) struct SyncClaim(Arc<AtomicBool>);
 
 impl SyncClaim {
     fn acquire(flag: Arc<AtomicBool>) -> Option<Self> {
@@ -55,6 +55,22 @@ impl SyncClaim {
 
 impl Drop for SyncClaim {
     fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+}
+
+async fn wait_for_sync_claim(
+    flag: Arc<AtomicBool>,
+    timeout: Duration,
+) -> Result<SyncClaim, String> {
+    tokio::time::timeout(timeout, async move {
+        loop {
+            if let Some(claim) = SyncClaim::acquire(Arc::clone(&flag)) {
+                return claim;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .map_err(|_| "Timed out waiting for the active progress sync to finish".to_string())
 }
 
 /// Throttle state for the offline persist loop (play_local's tick task).
@@ -228,6 +244,15 @@ pub struct SessionManager {
 /// tail below this is captured by the loop-end / shutdown drains.
 const LISTEN_FLUSH_EVERY: f64 = 30.0;
 
+/// Acknowledge only the interval accepted by ABS. The server adds
+/// `timeListened` to the session on every sync, so this counter is pending
+/// time—not a cumulative session total. Subtraction preserves seconds accrued
+/// by the 1 Hz tick while the HTTP request was in flight.
+fn acknowledge_listened(counter: &Arc<Mutex<f64>>, sent: f64) {
+    let mut pending = counter.lock().unwrap_or_else(|e| e.into_inner());
+    *pending = (*pending - sent).max(0.0);
+}
+
 /// Drain the pending local listen-time counter into the catalog (listen_days +
 /// listen_sessions). Shared by the tick loop (periodic + loop-end flush) and
 /// lib.rs's ExitRequested handler (final flush — the tick task may never fire
@@ -388,7 +413,10 @@ impl SessionManager {
         // chapter position even if the server's currentTime differs slightly.
         let load_time = resolve_load_time(start_time, session.current_time);
         *self.current_time.lock().unwrap() = load_time;
-        *self.time_listened.lock().unwrap() = 0.0;
+        // Each session owns its pending listen-time counter. A slow response
+        // from the previous session must never acknowledge seconds accrued by
+        // the newly opened book.
+        self.time_listened = Arc::new(Mutex::new(0.0));
 
         // Load the audio track(s) into the player.
         // Token-in-URL pattern (CLAUDE.md critical lesson 2): LibVLC HTTP headers are
@@ -518,6 +546,7 @@ impl SessionManager {
                 let tl = *tl_sync.lock().unwrap_or_else(|e| e.into_inner());
                 match client_sync.sync_session(&session_id_sync, ct, tl).await {
                     Ok(()) => {
+                        acknowledge_listened(&tl_sync, tl);
                         last_queue_state = None;
                         let _ = app_sync.emit(
                             "session-sync-success",
@@ -770,7 +799,8 @@ impl SessionManager {
 
         // Reset progress counters for the new local playback session.
         *self.current_time.lock().unwrap() = start_time;
-        *self.time_listened.lock().unwrap() = 0.0;
+        // Detach from any old online sync task before local playback begins.
+        self.time_listened = Arc::new(Mutex::new(0.0));
 
         // ── Tick task: every 1 second ────────────────────────────────────────
         // Identical to start_session's tick task — emits playback-tick events so
@@ -986,6 +1016,7 @@ impl SessionManager {
         let listened = *self.time_listened.lock().unwrap_or_else(|e| e.into_inner());
         match self.client.sync_session(session_id, current_time, listened).await {
             Ok(()) => {
+                acknowledge_listened(&self.time_listened, listened);
                 let _ = app.emit("session-sync-success", serde_json::json!({
                     "currentTime": current_time, "reason": reason,
                     "at": chrono::Utc::now().timestamp_millis(),
@@ -1019,6 +1050,14 @@ impl SessionManager {
     /// so no further sync fires between the lock release and the HTTP request.
     pub fn cancel_tasks(&self) {
         self.active.store(false, Ordering::Relaxed);
+    }
+
+    /// Serialize a final close with any periodic/lifecycle sync already in
+    /// flight. ABS treats timeListened as an additive interval, so allowing
+    /// close to submit the same captured seconds concurrently would double
+    /// count them.
+    pub(crate) async fn claim_final_sync(&self, timeout: Duration) -> Result<SyncClaim, String> {
+        wait_for_sync_claim(Arc::clone(&self.sync_in_flight), timeout).await
     }
 
     /// Persist the current online position into the durable reconnect queue.
@@ -1064,6 +1103,7 @@ impl SessionManager {
     /// Called on shutdown (CLAUDE.md critical lesson 4).
     pub async fn close(&self) -> Result<(), String> {
         self.active.store(false, Ordering::Relaxed);
+        let _claim = self.claim_final_sync(Duration::from_secs(5)).await?;
         let sid = self
             .session_id
             .as_deref()
@@ -1096,7 +1136,7 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{commit_position, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, DownloadedProgressRevision, PersistState, SessionManager, SyncClaim};
+    use super::{acknowledge_listened, commit_position, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, PersistState, SessionManager, SyncClaim};
     use crate::api::AbsClient;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
@@ -1109,6 +1149,40 @@ mod tick_tests {
         assert_eq!(resolve_load_time(Some(0.0), 3000.0), 0.0);
         // Plain resume: fall back to the server's saved position.
         assert_eq!(resolve_load_time(None, 3000.0), 3000.0);
+    }
+
+    #[test]
+    fn successful_sync_acknowledges_only_the_captured_interval() {
+        let pending = Arc::new(Mutex::new(10.0));
+        // Two seconds arrive while the ten-second HTTP payload is in flight.
+        *pending.lock().unwrap() += 2.0;
+        acknowledge_listened(&pending, 10.0);
+        assert_eq!(*pending.lock().unwrap(), 2.0);
+
+        // Defensive saturation prevents floating-point drift from going negative.
+        acknowledge_listened(&pending, 3.0);
+        assert_eq!(*pending.lock().unwrap(), 0.0);
+    }
+
+    #[tokio::test]
+    async fn final_sync_waits_for_an_in_flight_periodic_sync() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let periodic = SyncClaim::acquire(Arc::clone(&flag)).expect("periodic claim");
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            drop(periodic);
+        });
+
+        let final_claim = wait_for_sync_claim(
+            Arc::clone(&flag),
+            std::time::Duration::from_secs(1),
+        )
+        .await
+        .expect("final sync acquires after periodic finishes");
+        assert!(flag.load(std::sync::atomic::Ordering::Acquire));
+        drop(final_claim);
+        assert!(!flag.load(std::sync::atomic::Ordering::Acquire));
+        release.await.unwrap();
     }
 
     #[test]

@@ -23,6 +23,7 @@ export interface TitlebarProps {
 }
 
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
+type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0];
 
 const BUTTONS = [
   { label: 'Minimize', kind: 'min' },
@@ -48,6 +49,20 @@ const HANDLERS: Record<string, () => void> = {
   close: () => { void getCurrentWindow().close(); },
 };
 
+const RESIZE_EDGES: Array<{
+  direction: ResizeDirection;
+  style: CSSProperties;
+}> = [
+  { direction: 'North', style: { top: 0, left: 8, right: 8, height: 5, cursor: 'ns-resize' } },
+  { direction: 'South', style: { bottom: 0, left: 8, right: 8, height: 5, cursor: 'ns-resize' } },
+  { direction: 'West', style: { top: 8, bottom: 8, left: 0, width: 5, cursor: 'ew-resize' } },
+  { direction: 'East', style: { top: 8, bottom: 8, right: 0, width: 5, cursor: 'ew-resize' } },
+  { direction: 'NorthWest', style: { top: 0, left: 0, width: 10, height: 10, cursor: 'nwse-resize' } },
+  { direction: 'NorthEast', style: { top: 0, right: 0, width: 10, height: 10, cursor: 'nesw-resize' } },
+  { direction: 'SouthWest', style: { bottom: 0, left: 0, width: 10, height: 10, cursor: 'nesw-resize' } },
+  { direction: 'SouthEast', style: { bottom: 0, right: 0, width: 10, height: 10, cursor: 'nwse-resize' } },
+];
+
 export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted, trailing }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
@@ -66,7 +81,42 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
   };
 
   return (
-    <div style={bar} data-tauri-drag-region>
+    <div
+      style={bar}
+      data-tauri-drag-region
+      onMouseDown={(event) => {
+        if (event.button !== 0) return;
+        const target = event.target as Element;
+        if (target.closest('button, input, textarea, select, a, [data-tauri-drag-region="false"]')) return;
+        // WebKitGTK does not consistently honor CSS/data drag regions for
+        // undecorated windows, so initiate the compositor move explicitly.
+        void getCurrentWindow().startDragging();
+      }}
+      onDoubleClick={(event) => {
+        const target = event.target as Element;
+        if (!target.closest('button, input, textarea, select, a, [data-tauri-drag-region="false"]')) {
+          void getCurrentWindow().toggleMaximize();
+        }
+      }}
+    >
+      {RESIZE_EDGES.map(({ direction, style }) => (
+        <div
+          key={direction}
+          aria-hidden="true"
+          data-tauri-drag-region="false"
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void getCurrentWindow().startResizeDragging(direction);
+          }}
+          style={{
+            position: 'fixed',
+            zIndex: 1000,
+            ...style,
+          }}
+        />
+      ))}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Lyre logo mark — transparent PNG sits cleanly against the dark titlebar */}
         <img

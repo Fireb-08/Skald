@@ -36,6 +36,21 @@ pub fn redact_url(url: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK's DMA-BUF renderer can produce a fully transparent/black
+    // webview with the proprietary NVIDIA driver even though the page loaded
+    // successfully. Apply WebKit's documented fallback before GTK/WebKit is
+    // initialized. Preserve an explicit user choice, and avoid disabling the
+    // accelerated path for Mesa users that do not need the workaround.
+    #[cfg(target_os = "linux")]
+    let disabled_dmabuf_for_nvidia = if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()
+        && std::path::Path::new("/proc/driver/nvidia/version").exists()
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        true
+    } else {
+        false
+    };
+
     // SessionManager is initialized without an AudioPlayer — libvlc.dll is
     // loaded lazily on the first start_session call, not at app startup.
     let session_mgr: Arc<Mutex<session::SessionManager>> = Arc::new(Mutex::new(
@@ -73,7 +88,18 @@ pub fn run() {
         commands::UploadCancelRegistry(Mutex::new(std::collections::HashMap::new()));
 
     tauri::Builder::default()
-        // Diagnostic logging — registered first so it captures startup and other
+        // This must be the first plugin registered so a second launch exits before
+        // any other plugin or application state is initialized.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        // Diagnostic logging — registered early so it captures startup and other
         // plugins. Rust `log::*` and the frontend @tauri-apps/plugin-log API both
         // write here: stdout (dev terminal) + a rotated file under app_log_dir
         // (skald.log). The feature category rides in the log target (e.g.
@@ -121,8 +147,16 @@ pub fn run() {
         .manage(cancel_registry) // per-download CancellationTokens — accessed by cancel_download
         .manage(staging_watcher) // Local Library staging-folder watcher slot
         .manage(upload_registry) // per-upload CancellationTokens — accessed by cancel_upload
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::Manager;
+
+            #[cfg(target_os = "linux")]
+            if disabled_dmabuf_for_nvidia {
+                log::info!(
+                    target: "skald::app",
+                    "disabled WebKit DMA-BUF rendering for NVIDIA compatibility"
+                );
+            }
 
             // Configure a bundled LibVLC plugin tree before the first lazy
             // Instance::new() call. Windows always ships this tree. Native Linux
@@ -160,7 +194,7 @@ pub fn run() {
                 }
 
                 #[cfg(not(windows))]
-                if plugins.is_dir() {
+                if plugins.join("access").is_dir() {
                     // Flatpak/AppImage may later bundle a validated plugin tree.
                     // Native packages have no such directory and retain system
                     // discovery by leaving the environment unchanged.
@@ -514,7 +548,7 @@ pub fn run() {
 
                         // Extract data while holding the lock, then drop it
                         // before the async HTTP call (MutexGuard is not Send).
-                        let (sid, item_id, episode_id, duration, ct, tl, client) = {
+                        let (sid, item_id, episode_id, duration, ct, tl, client, _sync_claim) = {
                             let guard = mgr.lock().await;
                             // Cancel the background tick and sync tasks before releasing
                             // the lock — prevents a racing 10-second sync from firing
@@ -589,6 +623,20 @@ pub fn run() {
                             match guard.session_id.clone() {
                                 None => return,
                                 Some(id) => {
+                                    let sync_claim = match guard
+                                        .claim_final_sync(std::time::Duration::from_secs(3))
+                                        .await
+                                    {
+                                        Ok(claim) => claim,
+                                        Err(error) => {
+                                            let queued = guard.queue_current_server_progress().is_ok();
+                                            log::warn!(
+                                                target: "skald::sync",
+                                                "final session close skipped because a sync remained in flight queued_locally={queued}: {error}"
+                                            );
+                                            return;
+                                        }
+                                    };
                                     let player_duration = guard
                                         .player
                                         .lock()
@@ -604,6 +652,7 @@ pub fn run() {
                                         *guard.current_time.lock().unwrap(),
                                         *guard.time_listened.lock().unwrap(),
                                         guard.client.clone(),
+                                        sync_claim,
                                     )
                                 }
                             }

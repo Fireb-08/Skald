@@ -91,10 +91,7 @@ pub fn get_downloads_dir() -> Result<String, String> {
 pub fn reveal_downloads_dir() -> Result<(), String> {
     let dir = downloads::downloads_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer")
-        .arg(&dir)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    tauri_plugin_opener::open_path(&dir, None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -115,12 +112,10 @@ pub fn reveal_download_location(item_id: String) -> Result<(), String> {
         })?;
 
     let result = match target {
-        DownloadRevealTarget::File(path) => std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .spawn(),
-        DownloadRevealTarget::Directory(path) => std::process::Command::new("explorer")
-            .arg(path)
-            .spawn(),
+        DownloadRevealTarget::File(path) => tauri_plugin_opener::reveal_item_in_dir(path),
+        DownloadRevealTarget::Directory(path) => {
+            tauri_plugin_opener::open_path(path, None::<&str>)
+        }
     };
     result.map_err(|e| format!("Failed to open download location: {e}"))?;
     log::info!(target: "skald::downloads",
@@ -145,12 +140,19 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Stri
     Ok(())
 }
 
-// Normalize a path for comparison: lowercased, forward slashes folded to back
-// slashes, trailing separators trimmed. Windows paths are case-insensitive, so
-// this lets us reliably detect "same folder" and "nested folder" regardless of
-// casing or a trailing slash from the OS folder picker.
-fn norm_path(p: &std::path::Path) -> String {
+#[cfg(windows)]
+fn comparable_path(p: &std::path::Path) -> std::path::PathBuf {
+    // Windows paths are case-insensitive and accept either separator.
+    std::path::PathBuf::from(
     p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    )
+}
+
+#[cfg(not(windows))]
+fn comparable_path(p: &std::path::Path) -> std::path::PathBuf {
+    // Linux paths are case-sensitive. Component normalization removes harmless
+    // `.` segments without changing the identity of differently-cased folders.
+    p.components().collect()
 }
 
 // Classify the relationship between a current root `old` and a requested `new`:
@@ -158,11 +160,11 @@ fn norm_path(p: &std::path::Path) -> String {
 // one is nested inside the other (moving would drop a directory into itself), and
 // Ok(false) when they are safely disjoint.
 fn relocation_same_or_reject(old: &std::path::Path, new: &std::path::Path) -> Result<bool, String> {
-    let (o, n) = (norm_path(old), norm_path(new));
+    let (o, n) = (comparable_path(old), comparable_path(new));
     if o == n {
         return Ok(true);
     }
-    if n.starts_with(&format!("{o}\\")) || o.starts_with(&format!("{n}\\")) {
+    if n.starts_with(&o) || o.starts_with(&n) {
         return Err("Pick a folder that isn't inside (or a parent of) the current one.".into());
     }
     Ok(false)
@@ -1083,6 +1085,24 @@ mod tests {
             duration: 1000.0, progress: 0.2, current_time: 200.0,
             is_finished: false, last_update,
         }
+    }
+
+    #[test]
+    fn relocation_rejects_nested_paths() {
+        let root = std::path::Path::new("/tmp/skald-downloads");
+        assert!(relocation_same_or_reject(root, root).unwrap());
+        assert!(relocation_same_or_reject(root, &root.join("nested")).is_err());
+        assert!(!relocation_same_or_reject(root, std::path::Path::new("/tmp/skald-other")).unwrap());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn relocation_keeps_linux_path_case_significant() {
+        assert!(!relocation_same_or_reject(
+            std::path::Path::new("/tmp/Books"),
+            std::path::Path::new("/tmp/books"),
+        )
+        .unwrap());
     }
 
     #[test]

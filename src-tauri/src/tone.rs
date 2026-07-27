@@ -23,6 +23,10 @@ pub fn set_tone_path(p: PathBuf) {
     let _ = TONE.set(p);
 }
 
+fn tone_bin() -> PathBuf {
+    TONE.get().cloned().unwrap_or_else(|| PathBuf::from("tone"))
+}
+
 const AUDIO_EXTS: &[&str] = &["m4b", "mp3", "aac", "ogg", "flac", "opus", "m4a", "wav"];
 
 fn is_audio(p: &Path) -> bool {
@@ -44,9 +48,7 @@ fn push(args: &mut Vec<String>, flag: &str, v: &Option<String>) {
 /// file; returns the first error (e.g. a file locked by playback). Errors if the
 /// tone binary isn't bundled — the caller then keeps the catalog-only metadata.
 pub fn write_book_tags(dir: &Path, meta: &Value) -> Result<(), String> {
-    let Some(tone) = TONE.get().cloned() else {
-        return Err("tone binary not available".to_string());
-    };
+    let tone = tone_bin();
 
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .map_err(|e| format!("read book dir: {e}"))?
@@ -158,9 +160,7 @@ fn fmt_ts(secs: f64) -> String {
 /// authoritative catalog edit and surfaces a soft warning. Caller must ensure the
 /// target is a single-file book — multi-file chapter write-back is ambiguous.
 pub fn write_chapters(file: &Path, chapters: &Value, total_duration: f64) -> Result<(), String> {
-    let Some(tone) = TONE.get().cloned() else {
-        return Err("tone binary not available".to_string());
-    };
+    let tone = tone_bin();
     let arr = chapters
         .as_array()
         .ok_or_else(|| "chapters must be an array".to_string())?;
