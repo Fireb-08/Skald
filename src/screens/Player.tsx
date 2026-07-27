@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   playAudio, pauseAudio,
-  seekAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume,
+  seekAudio, setVolume as setAudioVolume,
   createBookmark, getMe, fetchItem,
   recordStopPoint, getStopPoints,
   asPodcastItem, downloadEpisodes, downloadLocalEpisode, getLocalPodcastItems,
@@ -33,7 +33,7 @@ import MiniPlayer from '../components/player/MiniPlayer';
 // for consistent resume-from-saved-position and UI-sync behaviour.
 // togglePlayback is used by the local playback branch to pause/resume
 // without touching session state.
-import { playBook, playEpisode, togglePlayback, resumePlayback } from '../api/playbook';
+import { playBook, playEpisode, togglePlayback, resumePlayback, changeSpeed } from '../api/playbook';
 import { skipSeconds } from '../lib/playbackPrefs';
 // Presentational leaves split out per the God-File Decomposition roadmap
 // (review L3/L7) — pure moves, same behavior.
@@ -941,7 +941,7 @@ export default function Player({ st }: PlayerProps) {
               <div style={{ flex: '0 0 auto', minWidth: isCompact ? 0 : 160, display: isCompact ? 'none' : 'flex', gap: 6 }}>
                 {transportWidth >= 620 && !isCompact ? (
                   SPEEDS.map(s => (
-                    <button key={s} onClick={() => { st.setSpeed(s); setAudioSpeed(parseFloat(s)).catch(logErr); }} style={{
+                    <button key={s} onClick={() => { changeSpeed(st, st.currentBookId, s).catch(logErr); }} style={{
                       padding: '7px 12px', borderRadius: 6, fontFamily: MONO, fontSize: 11,
                       background: s === st.speed ? 'var(--onyx-accent-dim)' : 'transparent',
                       color: s === st.speed ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
@@ -953,7 +953,7 @@ export default function Player({ st }: PlayerProps) {
                 ) : (
                   <select
                     value={st.speed}
-                    onChange={e => { st.setSpeed(e.target.value); setAudioSpeed(parseFloat(e.target.value)).catch(logErr); }}
+                    onChange={e => { changeSpeed(st, st.currentBookId, e.target.value).catch(logErr); }}
                     style={{
                       height: 44,
                       borderRadius: 10,

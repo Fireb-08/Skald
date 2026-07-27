@@ -4,7 +4,8 @@ import { autoRewindCfg } from '../../lib/playbackPrefs';
 import { log } from '../../lib/log';
 import { SPEEDS } from '../../state/onyx';
 import type { OnyxState } from '../../state/onyx';
-import { SectionHead, Row, Toggle, useLocal, MONO, Panel, Seg, SegGroup } from './shared';
+import { SectionHead, Row, Toggle, useLocal, MONO, Panel, Pill, Seg, SegGroup } from './shared';
+import { clearAllPerBookSpeeds, rememberedSpeedCount } from '../../lib/speedMemory';
 import ListeningSessionsSection from './ListeningSessionsSection';
 
 // 'playback' shows the existing speed/skip/sleep controls.
@@ -42,6 +43,12 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
   const [rewindMax, setRewindMax]           = useLocal('onyx.playback.autoRewind.max', 30);
   const [rewindDelay, setRewindDelay]       = useLocal('onyx.playback.autoRewind.delay', 0);
   const [chapterBarrier, setChapterBarrier] = useLocal('onyx.playback.autoRewind.chapterBarrier', false);
+
+  // Per-book speed memory. Default on: the feature is only useful if it works
+  // before you go looking for it, and turning it off restores global-only
+  // behaviour without discarding what was already remembered.
+  const [perBookSpeed, setPerBookSpeed] = useLocal('onyx.playback.perBookSpeed', true);
+  const [rememberedCount, setRememberedCount] = useState(() => rememberedSpeedCount());
 
   // The backend owns the resume decision, so every change has to reach it. Runs
   // on mount too, which is harmless (App.tsx pushes the same values) and means
@@ -116,6 +123,35 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
               ))}
             </SegGroup>
           </Row>
+
+          <Row
+            label="Remember speed per book"
+            hint="Each book keeps the speed you last chose for it. Off means every book uses the default above."
+          >
+            <Toggle on={perBookSpeed} onChange={setPerBookSpeed} />
+          </Row>
+
+          {perBookSpeed && (
+            <Row
+              label="Saved book speeds"
+              hint={rememberedCount === 0
+                ? 'No book has its own speed yet.'
+                : `${rememberedCount} book${rememberedCount === 1 ? '' : 's'} play at their own speed.`}
+            >
+              <Pill
+                active={false}
+                onClick={() => {
+                  if (rememberedCount === 0) return;
+                  clearAllPerBookSpeeds();
+                  // Re-read rather than assume: the reset touches storage, and
+                  // the count is what tells the user it worked.
+                  setRememberedCount(rememberedSpeedCount());
+                }}
+              >
+                Reset all
+              </Pill>
+            </Row>
+          )}
 
           <Row label="Skip duration" hint="Used by the −/+ skip buttons and ←/→ keys.">
             <SegGroup>

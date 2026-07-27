@@ -4,8 +4,9 @@
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
 import { bookChapters, chapterAt, chapterStart } from '../state/bookHelpers';
+import { hasRememberedSpeed, rememberSpeed, speedForItem } from '../lib/speedMemory';
 import type { MediaProgress, PodcastEpisode } from './abs';
-import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
+import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
 import { log } from '../lib/log';
 
 // Shared boundary logger for fire-and-forget transport calls — routes through
@@ -307,6 +308,7 @@ export async function playBook(
     // 5. Start playback and optimistically mark the UI as playing — the
     //    playback-tick event from Rust confirms within ~1 second.
     try {
+      await applyItemSpeed(st, bookId);
       await playAudio();
       st.setPlaying(true);
     } catch (error) {
@@ -439,6 +441,8 @@ export async function playEpisode(
     st.setPosition(resumeTime);
 
     try {
+      // Keyed by the show, not the episode — see speedMemory.
+      await applyItemSpeed(st, podcastItemId);
       await playAudio();
       st.setPlaying(true);
     } catch (error) {
@@ -466,6 +470,32 @@ export async function unmuteAudio(st: OnyxState): Promise<void> {
   await setAudioVolume(Math.round(st.volume * 100)).catch(logErr);
   // Clear muted state in the UI
   st.setMuted(false);
+}
+
+// ── Playback speed ───────────────────────────────────────────────────────────
+// Both helpers live here rather than in the components so there is exactly one
+// place that decides a rate and one that records it. The auto-rewind logic used
+// to be duplicated across two call sites, and that is precisely how the keyboard
+// and the transport ended up able to disagree.
+
+/** Apply the rate this item should play at — its remembered one, or the global
+ *  default. Called at every playback start; without it the Settings "Default
+ *  playback speed" control persists a value nothing ever reads. */
+export async function applyItemSpeed(st: OnyxState, itemId: string): Promise<void> {
+  const rate = speedForItem(itemId);
+  const source = hasRememberedSpeed(itemId) ? 'per-book' : 'global';
+  log.debug('playback', 'applying speed', { itemId, rate, source });
+  st.setSpeed(String(rate));
+  await setAudioSpeed(rate).catch(logErr);
+}
+
+/** Record and apply a rate the listener just chose. Writes to the per-book map,
+ *  never to the global default — that belongs to the Settings control alone. */
+export async function changeSpeed(st: OnyxState, itemId: string | undefined, rate: string): Promise<void> {
+  st.setSpeed(rate);
+  const parsed = parseFloat(rate);
+  rememberSpeed(itemId, parsed);
+  await setAudioSpeed(parsed).catch(logErr);
 }
 
 // Shared playback toggle for an already-open session. Pairs the LibVLC

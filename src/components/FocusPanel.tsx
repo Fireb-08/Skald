@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { OnyxState, Chapter } from '../state/onyx';
-import { seekAudio, createBookmark, getMe, setSpeed as setAudioSpeed } from '../api/abs';
+import { seekAudio, createBookmark, getMe } from '../api/abs';
+import { changeSpeed } from '../api/playbook';
 // playBook: canonical entry point for starting a book from a stopped state.
 // togglePlayback: pairs the LibVLC command with st.setPlaying for correct
 // immediate state sync when resuming or pausing an already-open session.
@@ -195,9 +196,11 @@ function SpeedStat({ st }: { st: OnyxState }) {
             <button
               key={s}
               onClick={() => {
-                st.setSpeed(s);
                 setOpen(false);
-                setAudioSpeed(parseFloat(s)).catch(err => log.error('playback', 'set speed failed', { speed: s, err: String(err) }));
+                // changeSpeed records the rate against the current book, so it
+                // is still there next time this one is opened.
+                changeSpeed(st, st.currentBookId, s).catch(err =>
+                  log.error('playback', 'set speed failed', { speed: s, err: String(err) }));
               }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 6,

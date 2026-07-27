@@ -13,6 +13,7 @@ const abs = vi.hoisted(() => ({
   getLocalProgress: vi.fn(async () => null),
   getMe: vi.fn(),
   seekAudio: vi.fn(async () => {}),
+  setSpeed: vi.fn(async () => {}),
   resumeAudio: vi.fn(async () => ({ position: 0, rewound: 0 })),
 }));
 
@@ -23,7 +24,7 @@ vi.mock('../lib/log', () => ({
 
 import type { PodcastEpisode } from './abs';
 import type { OnyxState } from '../state/onyx';
-import { playBook, playEpisode, resumePlayback, togglePlayback } from './playbook';
+import { playBook, playEpisode, resumePlayback, togglePlayback, changeSpeed } from './playbook';
 
 function state(overrides: Partial<OnyxState> = {}): OnyxState {
   return {
@@ -44,6 +45,7 @@ function state(overrides: Partial<OnyxState> = {}): OnyxState {
     setCurrentBookId: vi.fn(),
     setFocusedBookId: vi.fn(),
     setPosition: vi.fn(),
+    setSpeed: vi.fn(),
     surfaceCorruptPersistenceNotices: vi.fn(async () => {}),
     ...overrides,
   } as unknown as OnyxState;
@@ -414,5 +416,70 @@ describe('togglePlayback', () => {
 
     expect(abs.resumeAudio).toHaveBeenCalledTimes(1);
     expect(st.setPosition).toHaveBeenCalledWith(295);
+  });
+});
+
+// ── Per-book speed (Auto-Rewind & Per-Book Speed roadmap, Phase 4) ───────────
+// speedMemory owns the resolution rules and is unit-tested separately. What
+// matters here is that playback start actually applies the result — before
+// this, the Settings "Default playback speed" control persisted a value that
+// nothing ever read.
+describe('playback start applies the resolved speed', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('sends the global default to the engine when the book has no saved speed', async () => {
+    localStorage.setItem('onyx.playback.speed', JSON.stringify('1.25'));
+    const st = state();
+
+    await playBook(st, 'book');
+
+    expect(abs.setSpeed).toHaveBeenCalledWith(1.25);
+    expect(st.setSpeed).toHaveBeenCalledWith('1.25');
+  });
+
+  it('prefers the speed saved for that specific book', async () => {
+    localStorage.setItem('onyx.playback.speed', JSON.stringify('1.0'));
+    localStorage.setItem('onyx.playback.speedByItem', JSON.stringify({ book: 1.5 }));
+    const st = state();
+
+    await playBook(st, 'book');
+
+    expect(abs.setSpeed).toHaveBeenCalledWith(1.5);
+  });
+
+  it('applies the speed before starting audio, not after', async () => {
+    // Ordering matters: applying afterwards makes the first moment of playback
+    // audibly run at the wrong rate.
+    localStorage.setItem('onyx.playback.speedByItem', JSON.stringify({ book: 2 }));
+    const order: string[] = [];
+    abs.setSpeed.mockImplementationOnce(async () => { order.push('speed'); });
+    abs.playAudio.mockImplementationOnce(async () => { order.push('play'); });
+
+    await playBook(state(), 'book');
+
+    expect(order).toEqual(['speed', 'play']);
+  });
+});
+
+describe('changeSpeed', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('records the rate against the book and applies it', async () => {
+    const st = state();
+
+    await changeSpeed(st, 'book', '1.5');
+
+    expect(abs.setSpeed).toHaveBeenCalledWith(1.5);
+    expect(st.setSpeed).toHaveBeenCalledWith('1.5');
+    expect(JSON.parse(localStorage.getItem('onyx.playback.speedByItem')!)).toEqual({ book: 1.5 });
+  });
+
+  it('never writes the global default', async () => {
+    localStorage.setItem('onyx.playback.speed', JSON.stringify('1.0'));
+
+    await changeSpeed(state(), 'book', '2.0');
+
+    // The Settings control owns that key exclusively.
+    expect(JSON.parse(localStorage.getItem('onyx.playback.speed')!)).toBe('1.0');
   });
 });
