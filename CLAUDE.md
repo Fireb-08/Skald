@@ -177,6 +177,17 @@ Apply these without rediscovering them. Each was a multi-hour debugging session.
 5. **The `author` field's JSON shape varies** (string vs object vs array) by endpoint and minified-vs-expanded response. Use `#[serde(untagged)]` enums.
 6. **Always verify endpoint paths and HTTP methods against the GitHub `server/routers/` source.** The docs site occasionally diverges from current server behavior.
 
+### Auth tokens (ABS 2.26+)
+
+Verified against `server/Auth.js` + `server/auth/TokenManager.js` on 2026-07-27; full notes in the *Auth Token Refresh Roadmap*.
+
+14. **`POST /auth/refresh` is at the server root, not under `/api/`** — same level as `/login`. A reverse proxy forwarding only `/api` will 404 it, which Skald then reads as "old server".
+15. **`/login` must send `x-return-tokens: true`** (literally the string `"true"` — the server compares it exactly). Without it the refresh token is set as an httpOnly cookie the client can never read.
+16. **Both tokens arrive under `user`**, not at the top level: `user.accessToken`, `user.refreshToken`. Refresh takes the token via the `x-refresh-token` header, and using the header is *also* what makes the rotated refresh token appear in the response body.
+17. **`/api/authorize` never returns tokens.** It is `getUserLoginResponsePayload` and nothing more — a server-settings source only (see lesson 3). Do not reintroduce a token fallback that reads it.
+18. **`user.token` is the pre-2.26 "old token" and can be `null`** for accounts created after the migration — it must deserialize as nullable. A current server returns it *alongside* `accessToken`, so the access token must take precedence.
+19. **Access tokens last 1 hour, refresh tokens 30 days, and refresh rotates.** The previous refresh token stays valid for a 10-minute grace window, but that is a race cushion — persist a rotated pair *before* using it, and keep refresh single-flight. Skald does both in `token_refresh.rs`; go through `AbsClient::authenticated()` rather than `auth::load_token()` + `with_token()` in new authenticated commands.
+
 ### Audio / LibVLC
 
 7. **LibVLC HTTP headers do not reliably forward.** Use the ABS token-in-URL pattern (`?token={JWT}`), not `:http-header=`.
