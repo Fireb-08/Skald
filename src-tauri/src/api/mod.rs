@@ -198,6 +198,9 @@ mod metadata;
 mod playback;
 mod podcasts;
 mod sessions;
+// The local-session flush is a small state machine in commands/offline.rs, so
+// it needs the outcome types by name — same reason RefreshError is re-exported.
+pub use sessions::{LocalSessionAck, LocalSessionError};
 mod sharing;
 mod upload;
 mod users;

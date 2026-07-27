@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tauri::Emitter; // .emit() on AppHandle is a trait method — must be in scope
 use tokio_util::sync::CancellationToken;
 
-use crate::{api::AbsClient, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, CustomMetadataProvider, LoggerData, NotificationSettings, NotificationsResponse, ServerSettings, TasksResponse}, paths, session::SessionManager, socket};
+use crate::{api::{self, AbsClient}, audio, auth, cover_cache, downloads, eq::EqSettings, models::{self, BackupsResponse, CustomMetadataProvider, LoggerData, NotificationSettings, NotificationsResponse, ServerSettings, TasksResponse}, offline_sessions, paths, session::SessionManager, socket};
 
 mod admin;
 mod app;

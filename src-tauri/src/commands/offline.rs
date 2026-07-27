@@ -395,6 +395,140 @@ async fn acknowledge_confirmed_progress(
     }
 }
 
+/// Sessions whose item still has a queued position are held back.
+///
+/// ABS mirrors a synced local session into media progress (`syncLocalSession` →
+/// `createUpdateMediaProgressFromPayload`), which moves the very `lastUpdate`
+/// revision the offline progress queue branched from. Sending one while a
+/// position is still queued for that item would make Skald's own write look like
+/// a foreign edit on the next flush — a manufactured conflict, complete with a
+/// stop point and a user-facing warning. Position is the authoritative channel;
+/// listening attribution waits its turn.
+fn sessions_clear_to_send(
+    sessions: Vec<offline_sessions::LocalSession>,
+    queue: &[downloads::OfflineProgressEntry],
+) -> (Vec<offline_sessions::LocalSession>, usize) {
+    let (ready, deferred): (Vec<_>, Vec<_>) = sessions.into_iter().partition(|session| {
+        !queue.iter().any(|entry| {
+            entry.item_id == session.library_item_id && entry.episode_id == session.episode_id
+        })
+    });
+    (ready, deferred.len())
+}
+
+/// Send acknowledged sessions and drop exactly those from the store.
+///
+/// Batch first (`/api/session/local-all`); a server without that route falls
+/// back to one `/api/session/local` per session. A server without *either* is
+/// pre-local-session ABS: the flag is recorded so later reconnects skip the
+/// route entirely, and position sync — which never used it — is untouched.
+async fn flush_offline_sessions(
+    client: &AbsClient,
+    server_url: &str,
+    dl_dir: &std::path::Path,
+    device_info: &serde_json::Value,
+) -> u32 {
+    if offline_sessions::is_unsupported(dl_dir, server_url) {
+        return 0;
+    }
+    let pending = offline_sessions::pending_sessions(dl_dir);
+    if pending.is_empty() {
+        return 0;
+    }
+    // Re-read the queue: the progress pass above has just emptied what it could,
+    // so this sees the freshest picture of which items are still unsettled.
+    let (ready, deferred) = sessions_clear_to_send(pending, &downloads::load_progress_queue(dl_dir));
+    if deferred > 0 {
+        log::info!(target: "skald::sync",
+            "offline listening flush deferred {deferred} session(s) whose position is still queued");
+    }
+    if ready.is_empty() {
+        return 0;
+    }
+
+    let acked: Vec<String> = match client.sync_local_sessions(&ready, device_info).await {
+        Ok(results) => {
+            for result in results.iter().filter(|result| !result.success) {
+                // Per-session rejection (deleted item, missing library). It stays
+                // queued: a restored item can still accept it, and the age cap in
+                // offline_sessions keeps a permanently-dead session from piling up.
+                log::warn!(target: "skald::sync", "offline listening session rejected id={} reason={}",
+                    result.id, result.error.as_deref().unwrap_or("unknown"));
+            }
+            results.into_iter().filter(|r| r.success).map(|r| r.id).collect()
+        }
+        Err(api::LocalSessionError::Transport(error)) => {
+            log::warn!(target: "skald::sync", "offline listening flush deferred: {error}");
+            return 0;
+        }
+        Err(api::LocalSessionError::Unsupported) => {
+            // No batch route — send them one at a time before concluding
+            // anything about the server.
+            let mut acked = Vec::new();
+            for session in &ready {
+                match client.sync_local_session(session, device_info).await {
+                    Ok(()) => acked.push(session.id.clone()),
+                    Err(api::LocalSessionError::Unsupported) => {
+                        // Neither route exists: this server predates local
+                        // sessions. Record it and stop — retrying every reconnect
+                        // would be noise, and progress sync is unaffected.
+                        if let Err(error) = offline_sessions::mark_unsupported(dl_dir, server_url) {
+                            log::warn!(target: "skald::sync", "could not record local-session support: {error}");
+                        }
+                        log::info!(target: "skald::sync",
+                            "server does not support local sessions — offline listening stays local, position sync unaffected");
+                        break;
+                    }
+                    Err(api::LocalSessionError::Transport(error)) => {
+                        log::warn!(target: "skald::sync", "offline listening session deferred id={}: {error}", session.id);
+                        break;
+                    }
+                }
+            }
+            acked
+        }
+    };
+
+    match offline_sessions::remove_pending(dl_dir, &acked) {
+        Ok(removed) => {
+            if removed > 0 {
+                log::info!(target: "skald::sync",
+                    "offline listening flush ok sessions={} acked={removed}", ready.len());
+            }
+            removed as u32
+        }
+        Err(error) => {
+            // Delivered but not forgotten. Re-sending is safe — ABS upserts by
+            // session id and timeListening is cumulative, so the next flush
+            // updates the same row rather than double-counting it.
+            log::warn!(target: "skald::sync", "offline listening flush delivered but not cleared: {error}");
+            0
+        }
+    }
+}
+
+/// Resolve this installation's device identity and flush. Kept apart from
+/// `flush_offline_sessions` so the flush itself stays injectable — the identity
+/// lives in the real app-data directory, which tests must never touch.
+async fn flush_offline_sessions_now(
+    client: &AbsClient,
+    server_url: &str,
+    dl_dir: &std::path::Path,
+) -> u32 {
+    match crate::session_ownership::device_id() {
+        Ok(device_id) => {
+            let device_info = offline_sessions::device_info(&device_id);
+            flush_offline_sessions(client, server_url, dl_dir, &device_info).await
+        }
+        Err(error) => {
+            // Sessions stay queued; a session with no device is worse than a
+            // late one, since ABS files it under an anonymous device row.
+            log::warn!(target: "skald::sync", "offline listening flush deferred, no device identity: {error}");
+            0
+        }
+    }
+}
+
 // Flush only after obtaining the authoritative ABS conflict snapshot. A
 // A genuinely later ABS position becomes a local recovery stop point. A later
 // local position is monotonic progress and is pushed instead of being discarded.
@@ -404,13 +538,16 @@ pub async fn flush_offline_progress(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<u32, String> {
-    let client = AbsClient::authenticated(server_url).await?;
+    let client = AbsClient::authenticated(server_url.clone()).await?;
     let dl_dir = downloads::downloads_dir()?;
     // Snapshot the queue before iterating so remove_progress_entry modifies the
     // file independently of our iteration — no borrow-checker conflict.
     let queue = downloads::load_progress_queue(&dl_dir);
     if queue.is_empty() {
-        let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": 0, "queued": 0 }));
+        // No positions to settle, but offline listening may still be waiting —
+        // it accrues on its own schedule and outlives the position it came with.
+        let sessions = flush_offline_sessions_now(&client, &server_url, &dl_dir).await;
+        let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": 0, "queued": 0, "sessions": sessions }));
         return Ok(0);
     }
     let server_progress = match require_server_progress(client.get_me().await) {
@@ -479,8 +616,11 @@ pub async fn flush_offline_progress(
             }
         }
     }
+    // Listening attribution goes last, on purpose: it reads the queue state this
+    // pass just settled (see sessions_clear_to_send).
+    let sessions = flush_offline_sessions_now(&client, &server_url, &dl_dir).await;
     let queued = downloads::load_progress_queue(&dl_dir).len() as u32;
-    let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": flushed, "queued": queued }));
+    let _ = app.emit("offline-progress-flushed", serde_json::json!({ "flushed": flushed, "queued": queued, "sessions": sessions }));
     Ok(flushed)
 }
 
@@ -1235,6 +1375,228 @@ mod tests {
         let error = resolve_download_reveal_target(root.path(), &records, "outside").unwrap_err();
 
         assert!(error.contains("outside the downloads folder"));
+    }
+
+    // ── Local-session flush (HTTP contract) ──────────────────────────────────
+    // The flush is a small state machine over two ABS routes, so these pin the
+    // exact paths/methods/bodies Skald sends and what it removes in response.
+    // `flush_offline_sessions` takes its directory and device identity as
+    // parameters precisely so this can run against a tempdir.
+
+    use wiremock::matchers::{body_json, method as http_method, path as http_path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_device() -> serde_json::Value {
+        offline_sessions::device_info("device-under-test")
+    }
+
+    /// Seed `count` retired sessions and return their ids in order.
+    fn seed_sessions(dir: &std::path::Path, count: usize) -> Vec<String> {
+        struct FrozenClock;
+        impl offline_sessions::Clock for FrozenClock {
+            fn now(&self) -> chrono::DateTime<chrono::Local> {
+                chrono::Local::now()
+            }
+        }
+        for index in 0..count {
+            let context = offline_sessions::SessionContext {
+                item_id: format!("li_{index}"),
+                episode_id: None,
+                media_type: "book".to_string(),
+                display_title: format!("Book {index}"),
+                display_author: "Author".to_string(),
+            };
+            offline_sessions::accrue(dir, &context, 60.0, 60.0, 3600.0, &FrozenClock).unwrap();
+        }
+        offline_sessions::retire_active(dir).unwrap();
+        offline_sessions::pending_sessions(dir).into_iter().map(|s| s.id).collect()
+    }
+
+    #[tokio::test]
+    async fn local_all_batch_flush_removes_acked_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let ids = seed_sessions(dir.path(), 2);
+        let server = MockServer::start().await;
+
+        // ABS answers 200 for the batch as a whole and reports per-session
+        // outcomes inside it — one placed, one whose item is gone.
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local-all"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [
+                    { "id": ids[0], "success": true, "progressSynced": true },
+                    { "id": ids[1], "success": false, "error": "Media item not found" },
+                ],
+            })))
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
+
+        assert_eq!(flushed, 1);
+        let left = offline_sessions::pending_sessions(dir.path());
+        assert_eq!(left.len(), 1, "a rejected session stays queued");
+        assert_eq!(left[0].id, ids[1]);
+    }
+
+    #[tokio::test]
+    async fn per_item_fallback_when_the_batch_route_is_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ids = seed_sessions(dir.path(), 2);
+        let server = MockServer::start().await;
+
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local-all"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        // The single-session route takes the session itself as the body, with
+        // deviceInfo alongside its fields (not wrapped in a `sessions` array).
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
+
+        assert_eq!(flushed, 2);
+        assert!(offline_sessions::pending_sessions(dir.path()).is_empty());
+        assert!(
+            !offline_sessions::is_unsupported(dir.path(), &server.uri()),
+            "a missing batch route alone must not condemn the server",
+        );
+        let _ = ids;
+    }
+
+    #[tokio::test]
+    async fn missing_routes_set_unsupported_and_stop_further_session_traffic() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_sessions(dir.path(), 1);
+        // A queued position must survive untouched: this feature failing has no
+        // bearing on where the user is in the book.
+        downloads::upsert_progress_entry(dir.path(), downloads::OfflineProgressEntry {
+            item_id: "li_untouched".to_string(), episode_id: None, current_time: 12.0,
+            duration: 100.0, progress: 0.12, is_finished: false, recorded_at: 1,
+            baseline_captured: false, server_last_update: None,
+            pending_confirmation_current_time: None,
+        }).unwrap();
+        let server = MockServer::start().await;
+
+        // Neither route exists — an ABS predating local sessions.
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local-all"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local"))
+            .respond_with(ResponseTemplate::new(404))
+            .expect(1) // exactly one probe, then Skald stops asking
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        assert_eq!(flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await, 0);
+        assert!(offline_sessions::is_unsupported(dir.path(), &server.uri()), "the verdict is recorded");
+
+        // A second flush must not touch the network at all — the `expect(1)`
+        // above fails on drop if this one probes again.
+        assert_eq!(flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await, 0);
+        assert_eq!(offline_sessions::pending_sessions(dir.path()).len(), 1, "sessions stay, unsent");
+        assert_eq!(downloads::load_progress_queue(dir.path()).len(), 1, "position sync is unaffected");
+    }
+
+    #[tokio::test]
+    async fn a_transport_failure_leaves_every_session_queued() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_sessions(dir.path(), 2);
+        let server = MockServer::start().await;
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local-all"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
+
+        assert_eq!(flushed, 0);
+        assert_eq!(offline_sessions::pending_sessions(dir.path()).len(), 2);
+        assert!(
+            !offline_sessions::is_unsupported(dir.path(), &server.uri()),
+            "a 5xx is a bad moment, not a server without the route",
+        );
+    }
+
+    /// The body ABS actually receives, pinned field by field. `timeListening` is
+    /// *assigned* server-side, so it has to be the cumulative total; `date` and
+    /// `updatedAt` have to agree, because the server re-derives the former from
+    /// the latter whenever it updates a session it already has.
+    #[tokio::test]
+    async fn the_batch_body_matches_the_verified_abs_shape() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_sessions(dir.path(), 1);
+        let session = offline_sessions::pending_sessions(dir.path()).remove(0);
+        let server = MockServer::start().await;
+
+        Mock::given(http_method("POST"))
+            .and(http_path("/api/session/local-all"))
+            .and(body_json(serde_json::json!({
+                "deviceInfo": test_device(),
+                "sessions": [{
+                    "id": session.id,
+                    "libraryItemId": "li_0",
+                    "mediaType": "book",
+                    "displayTitle": "Book 0",
+                    "displayAuthor": "Author",
+                    "duration": 3600.0,
+                    "playMethod": 3,
+                    "mediaPlayer": "vlc",
+                    "timeListening": 60.0,
+                    "startTime": 60.0,
+                    "currentTime": 60.0,
+                    "startedAt": session.started_at,
+                    "updatedAt": session.updated_at,
+                    "date": session.date,
+                    "dayOfWeek": session.day_of_week,
+                }],
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [{ "id": session.id, "success": true, "progressSynced": true }],
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        assert_eq!(flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await, 1);
+    }
+
+    /// Position is the authoritative channel. ABS mirrors a synced session into
+    /// media progress, so flushing one for an item whose position is still
+    /// queued would move the revision the queue branched from and manufacture a
+    /// conflict on the next pass.
+    #[test]
+    fn sessions_wait_for_their_items_position_to_settle() {
+        let dir = tempfile::tempdir().unwrap();
+        seed_sessions(dir.path(), 2);
+        let sessions = offline_sessions::pending_sessions(dir.path());
+        let queue = vec![downloads::OfflineProgressEntry {
+            item_id: "li_0".to_string(), episode_id: None, current_time: 60.0,
+            duration: 3600.0, progress: 0.016, is_finished: false, recorded_at: 1,
+            baseline_captured: true, server_last_update: Some(9),
+            pending_confirmation_current_time: None,
+        }];
+
+        let (ready, deferred) = sessions_clear_to_send(sessions, &queue);
+
+        assert_eq!(deferred, 1);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].library_item_id, "li_1", "only the settled item is sent");
     }
 
     #[test]

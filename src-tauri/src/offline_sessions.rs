@@ -336,6 +336,39 @@ pub fn remove_pending(downloads_dir: &Path, acked_ids: &[String]) -> Result<usiz
     Ok(removed)
 }
 
+/// The `deviceInfo` ABS files these sessions under.
+///
+/// Only `deviceId`, `clientName`, `clientVersion`, `manufacturer`, `model` and
+/// `sdkVersion` are read from the client (`server/objects/DeviceInfo.js` →
+/// `setData`); everything else the server derives, and `deviceName` it composes
+/// itself as `"{manufacturer} {model}"`. The session list shows
+/// `deviceDescription`, which is `"{model} / v{clientVersion}"` **only when a
+/// model is present** — with none it falls back to the User-Agent, and reqwest
+/// sends no User-Agent, so an ABS admin would see a row of nulls. Hence a model.
+/// `clientName` is sent explicitly because ABS otherwise defaults a
+/// model-bearing client to "Abs iOS".
+pub fn device_info(device_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "deviceId": device_id,
+        "clientName": "Skald",
+        "clientVersion": env!("CARGO_PKG_VERSION"),
+        // Reads as "Linux Skald Desktop" / "Windows Skald Desktop" in the UI.
+        "manufacturer": os_label(),
+        "model": "Skald Desktop",
+    })
+}
+
+/// Human-facing OS name. `std::env::consts::OS` is lowercase ("linux"), which
+/// looks wrong beside ABS's own device rows.
+fn os_label() -> &'static str {
+    match std::env::consts::OS {
+        "windows" => "Windows",
+        "linux" => "Linux",
+        "macos" => "macOS",
+        other => other,
+    }
+}
+
 // ── Old-server detection ──────────────────────────────────────────────────────
 
 /// Servers known not to implement the local-session routes, keyed by server URL
@@ -528,6 +561,34 @@ mod tests {
                 .any(|n| n.contains("offline listening sessions")),
             "the reset is surfaced, not silent",
         );
+    }
+
+    /// The anti-restamp invariant, and the single most important behaviour in
+    /// this module. A session's timestamps are captured when the listening
+    /// happens and must reach the wire untouched no matter how much later the
+    /// flush runs — restamping is exactly what collapses days of offline
+    /// listening onto the reconnect date. It matters twice over because ABS
+    /// re-derives `date`/`dayOfWeek` from `updatedAt` whenever it updates an
+    /// existing session.
+    #[test]
+    fn flush_serializes_verbatim_timestamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = FixedClock::at(2026, 7, 20, 21, 30);
+        accrue(dir.path(), &ctx("li_abc"), 1_800.0, 1_800.0, 7_200.0, &clock).unwrap();
+        retire_active(dir.path()).unwrap();
+        let accrued = pending_sessions(dir.path()).remove(0);
+
+        // A week passes before the device is online again.
+        clock.advance(7 * 24 * 60);
+        accrue(dir.path(), &ctx("li_other"), 60.0, 60.0, 3600.0, &clock).unwrap();
+
+        let body = serde_json::to_value(&pending_sessions(dir.path())[0]).unwrap();
+        assert_eq!(body["startedAt"], accrued.started_at, "minted-at survives the wait");
+        assert_eq!(body["updatedAt"], accrued.updated_at, "last-accrual survives the wait");
+        assert_eq!(body["date"], "2026-07-20", "the listening keeps its own day");
+        assert_eq!(body["dayOfWeek"], "Monday");
+        assert_eq!(body["timeListening"], 1_800.0, "cumulative, as ABS assigns it directly");
+        assert_eq!(body["playMethod"], 3);
     }
 
     #[test]

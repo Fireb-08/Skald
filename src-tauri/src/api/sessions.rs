@@ -149,4 +149,114 @@ impl AbsClient {
         let body: Wrapper = resp.json().await.map_err(|e| e.to_string())?;
         Ok(body.open_sessions) // return the session list directly
     }
+
+    /// POST /api/session/local-all — batch-sync client-built offline sessions
+    /// (`SessionController.syncLocalSessions` → `syncLocalSessionsRequest`,
+    /// verified against ApiRouter.js).
+    ///
+    /// Body: `{ deviceInfo, sessions: [...] }`. The response is always 200 with
+    /// a per-session result array — a session ABS could not place (deleted item,
+    /// missing library) fails *individually* without failing the batch, which is
+    /// why the caller removes only what came back `success: true`.
+    pub async fn sync_local_sessions(
+        &self,
+        sessions: &[crate::offline_sessions::LocalSession],
+        device_info: &serde_json::Value,
+    ) -> Result<Vec<LocalSessionAck>, LocalSessionError> {
+        #[derive(serde::Deserialize)]
+        struct Results {
+            #[serde(default)]
+            results: Vec<LocalSessionAck>,
+        }
+
+        let resp = self
+            .http
+            .post(format!("{}/api/session/local-all", self.root()))
+            .header("Authorization", self.auth_header().map_err(LocalSessionError::Transport)?)
+            .json(&serde_json::json!({ "deviceInfo": device_info, "sessions": sessions }))
+            .send_refreshing(self)
+            .await
+            .map_err(LocalSessionError::Transport)?;
+
+        if let Some(unsupported) = LocalSessionError::route_missing(resp.status()) {
+            return Err(unsupported);
+        }
+        if !resp.status().is_success() {
+            return Err(LocalSessionError::Transport(format!(
+                "sync_local_sessions failed: HTTP {}",
+                resp.status()
+            )));
+        }
+
+        let body: Results = resp.json().await.map_err(|e| LocalSessionError::Transport(e.to_string()))?;
+        Ok(body.results)
+    }
+
+    /// POST /api/session/local — sync one session (`SessionController.syncLocal`).
+    /// The body *is* the session, with `deviceInfo` alongside its fields. Unlike
+    /// the batch route this answers 500 with the error text when ABS cannot
+    /// place the session, so a failure here is per-session, not per-server.
+    pub async fn sync_local_session(
+        &self,
+        session: &crate::offline_sessions::LocalSession,
+        device_info: &serde_json::Value,
+    ) -> Result<(), LocalSessionError> {
+        let mut body = serde_json::to_value(session)
+            .map_err(|e| LocalSessionError::Transport(format!("Serialize error: {e}")))?;
+        body["deviceInfo"] = device_info.clone();
+
+        let resp = self
+            .http
+            .post(format!("{}/api/session/local", self.root()))
+            .header("Authorization", self.auth_header().map_err(LocalSessionError::Transport)?)
+            .json(&body)
+            .send_refreshing(self)
+            .await
+            .map_err(LocalSessionError::Transport)?;
+
+        if let Some(unsupported) = LocalSessionError::route_missing(resp.status()) {
+            return Err(unsupported);
+        }
+        if !resp.status().is_success() {
+            return Err(LocalSessionError::Transport(format!(
+                "sync_local_session failed: HTTP {}",
+                resp.status()
+            )));
+        }
+        Ok(())
+    }
+}
+
+/// One entry of the `/api/session/local-all` result array. ABS returns
+/// `{ id, success: true, progressSynced }` on success and
+/// `{ id, success: false, error }` when it could not place the session.
+#[derive(serde::Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalSessionAck {
+    pub id: String,
+    #[serde(default)]
+    pub success: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Why a local-session flush could not be delivered.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalSessionError {
+    /// The server has no such route — an ABS predating local sessions, or a
+    /// reverse proxy that does not forward it. Permanent for that server, so the
+    /// caller records it instead of retrying on every reconnect.
+    Unsupported,
+    /// Anything else — offline, 5xx, auth. The sessions stay queued.
+    Transport(String),
+}
+
+impl LocalSessionError {
+    /// 404/501 is how a server without the route answers. Every other status is
+    /// the server *having* the route and disagreeing about the request.
+    fn route_missing(status: reqwest::StatusCode) -> Option<Self> {
+        (status == reqwest::StatusCode::NOT_FOUND
+            || status == reqwest::StatusCode::NOT_IMPLEMENTED)
+            .then_some(Self::Unsupported)
+    }
 }
