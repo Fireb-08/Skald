@@ -95,8 +95,10 @@ export default function Login({ st }: LoginProps) {
       const { user: loggedInUser, serverSettings } = await login(serverUrl, user.trim(), pass);
       // Capture server settings returned with the login payload
       if (serverSettings) st.setServerSettings(serverSettings);
-      // Persist the token to the OS keyring via the Rust save_token command
-      await saveToken(loggedInUser.token);
+      // No saveToken here: the login command already wrote the full credential
+      // set (access + refresh + legacy) to the keyring. Re-saving the single
+      // bearer token from this side would overwrite that with a legacy-only
+      // entry and throw the refresh token away.
       localStorage.setItem('skald.lastServerUrl', serverUrl);
       // Write all auth/server state into global OnyxState so App.tsx gate opens
       st.setAuthToken(loggedInUser.token);

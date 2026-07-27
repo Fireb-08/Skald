@@ -24,12 +24,27 @@ pub struct Server {
     pub token: String,
 }
 
+/// Deserialize a possibly-`null` JSON string into an empty `String`.
+///
+/// `#[serde(default)]` alone only covers an *absent* key; an explicit `null`
+/// still fails a bare `String` field and would take the whole response down.
+pub fn null_as_empty_string<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
 /// User record from /api/me or /login.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct User {
     pub id: String,
     pub username: String,
+    /// The pre-2.26 non-expiring token (ABS calls it "old token" in-source). It
+    /// is `null` for accounts created after the token migration, so it must
+    /// tolerate null or those users cannot sign in at all.
+    #[serde(default, deserialize_with = "null_as_empty_string")]
     pub token: String,
     pub email: Option<String>,
     pub is_active: bool,

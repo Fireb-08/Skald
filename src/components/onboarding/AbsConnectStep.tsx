@@ -76,7 +76,8 @@ export default function AbsConnectStep({ st, onConnected }: AbsConnectStepProps)
     try {
       const { user: loggedInUser, serverSettings } = await login(serverUrl, user.trim(), pass);
       if (serverSettings) st.setServerSettings(serverSettings);
-      await saveToken(loggedInUser.token);
+      // See Login.tsx: the login command owns keyring persistence for the
+      // password path, and re-saving here would discard the refresh token.
       localStorage.setItem('skald.lastServerUrl', serverUrl);
       st.setAuthToken(loggedInUser.token);
       st.setServerUrl(serverUrl);

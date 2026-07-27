@@ -20,47 +20,58 @@ pub async fn login(
     password: String,
 ) -> Result<LoginResult, String> {
     let abs_client = AbsClient::new(server_url.clone());
-    let (mut user, server_settings) = abs_client.login(&username, &password).await?;
-    let legacy_token = user.token.clone();
+    let outcome = abs_client.login(&username, &password).await?;
+    let mut user = outcome.user;
+    let tokens = outcome.tokens;
 
-    // After /login, call POST /api/authorize with the legacy token to obtain a
-    // proper JWT access token (with exp field) that the socket validator accepts.
-    // The legacy token from /login works for HTTP Bearer auth but is rejected by
-    // the ABS socket middleware which expects a signed JWT.
-    // Note: /api/authorize is a POST route in ABS — a GET request returns 404.
-    let http = crate::api::bounded_client();
-    let server_root = server_url.trim_end_matches('/');
-    let auth_resp = http
-        .post(format!("{server_root}/api/authorize"))
-        .header("Authorization", format!("Bearer {legacy_token}"))
-        .send()
-        .await
-        .map_err(|e| format!("Authorize failed: {e}"))?;
-
-    // Parse as generic JSON — avoid hard struct failures if the response shape
-    // differs between ABS versions. Null signals a parse problem.
-    let auth_json: serde_json::Value = auth_resp
-        .json::<serde_json::Value>()
-        .await
-        .unwrap_or(serde_json::Value::Null);
-
-    // Prefer the top-level accessToken (JWT with exp). Fall back to
-    // user.token inside the authorize response, then the legacy token.
-    let token = auth_json["accessToken"]
-        .as_str()
-        .filter(|t| !t.is_empty())
-        .or_else(|| auth_json["user"]["token"].as_str().filter(|t| !t.is_empty()))
-        .unwrap_or(&legacy_token)
+    let token = tokens
+        .effective()
+        .ok_or_else(|| "ABS server did not return a session token".to_string())?
         .to_string();
 
-    // If /login didn't include serverSettings, try extracting it from the
-    // authorize response (ABS may return it there instead).
-    let resolved_settings = server_settings.or_else(|| {
-        let raw = auth_json.get("serverSettings")?;
-        serde_json::from_value::<ServerSettings>(raw.clone()).ok()
-    });
+    // /login already carries serverSettings (ABS builds the body from
+    // getUserLoginResponsePayload), so authorize is only a fallback for servers
+    // that omit it. It is *not* a token source: MiscController.authorize returns
+    // the same payload with no accessToken attached, so the old
+    // `auth_json["accessToken"]` fallback here never once fired. The real access
+    // JWT now comes from /login itself via x-return-tokens.
+    // Note: /api/authorize is a POST route in ABS — a GET request returns 404.
+    let resolved_settings = match outcome.server_settings {
+        Some(settings) => Some(settings),
+        None => {
+            let server_root = server_url.trim_end_matches('/');
+            let auth_json = crate::api::bounded_client()
+                .post(format!("{server_root}/api/authorize"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .map_err(|e| format!("Authorize failed: {e}"))?
+                .json::<serde_json::Value>()
+                .await
+                .unwrap_or(serde_json::Value::Null);
+            auth_json
+                .get("serverSettings")
+                .and_then(|raw| serde_json::from_value::<ServerSettings>(raw.clone()).ok())
+        }
+    };
 
-    auth::save_token(&token)?;
+    // Persist the whole set, not just the bearer token — dropping the refresh
+    // token here would leave the session unable to survive its first hour.
+    auth::save_tokens(&tokens)?;
+    log::info!(
+        target: "skald::auth",
+        "password sign-in succeeded (credential kind: {}, refreshable: {})",
+        tokens.kind(),
+        tokens.can_refresh()
+    );
+    if tokens.is_legacy() {
+        log::warn!(
+            target: "skald::auth",
+            "server issued no access token — falling back to the legacy non-expiring token; \
+             refresh is unavailable until the server is upgraded to 2.26+"
+        );
+    }
+
     user.token = token;
     Ok(LoginResult { user, server_settings: resolved_settings })
 }
@@ -149,6 +160,15 @@ pub async fn login_with_api_key(
     // are silently ignored by serde.
     let user: models::User = serde_json::from_value(body_json)
         .map_err(|e| format!("Failed to parse user: {e}"))?;
+
+    // API keys authenticate on their own path (TokenManager.validateApiKey) and
+    // have no refresh route, so this session is legacy by construction — it never
+    // expires and never rotates. Callers persist it via the save_token command,
+    // which stores it as a legacy token.
+    log::info!(
+        target: "skald::auth",
+        "api-key sign-in succeeded (credential kind: legacy, refreshable: false)"
+    );
 
     // /api/me does not include serverSettings. Call POST /api/authorize with the
     // resolved token to retrieve them (same endpoint used by the password login path).

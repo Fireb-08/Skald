@@ -3,21 +3,67 @@
 // auth_header() helpers, and shared imports come from the parent (mod.rs).
 use super::*;
 
+/// Everything a successful `/login` (or `/auth/refresh`) hands back. The two
+/// endpoints return the identical payload shape — ABS builds both from
+/// `getUserLoginResponsePayload` — so one parser and one outcome type serve both.
+pub struct LoginOutcome {
+    pub user: User,
+    pub server_settings: Option<ServerSettings>,
+    pub tokens: crate::auth::AuthTokens,
+}
+
+/// The `user` object of a login/refresh payload: the profile fields Skald models
+/// plus the two token fields ABS attaches to it after authentication. Both tokens
+/// live *under* `user`, not at the top level (verified against `Auth.js`
+/// `handleLoginSuccess`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthedUser {
+    #[serde(flatten)]
+    profile: User,
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthPayload {
+    user: AuthedUser,
+    #[serde(default)]
+    server_settings: Option<ServerSettings>,
+}
+
+impl AuthPayload {
+    fn into_outcome(self) -> LoginOutcome {
+        let nonempty = |t: Option<String>| t.filter(|s| !s.is_empty());
+        let tokens = crate::auth::AuthTokens {
+            access: nonempty(self.user.access_token),
+            refresh: nonempty(self.user.refresh_token),
+            legacy: nonempty(Some(self.user.profile.token.clone())),
+        };
+        LoginOutcome {
+            user: self.user.profile,
+            server_settings: self.server_settings,
+            tokens,
+        }
+    }
+}
+
 impl AbsClient {
     /// POST /login — at the server root, not under /api/ (see CLAUDE.md critical lesson 1).
-    /// Returns (User, Option<ServerSettings>) — serverSettings may be absent on older ABS versions.
-    pub async fn login(&self, username: &str, password: &str) -> Result<(User, Option<ServerSettings>), String> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct LoginResponse {
-            user: User,
-            #[serde(default)]
-            server_settings: Option<ServerSettings>,
-        }
-
+    ///
+    /// Sends `x-return-tokens: true`, which is what makes ABS 2.26+ put the
+    /// refresh token in the response body instead of an httpOnly cookie we can
+    /// never read. The header must be exactly the string "true" — the server
+    /// compares it literally. Older servers ignore it and return only the legacy
+    /// `user.token`, which is how `AuthTokens::is_legacy` detects them.
+    pub async fn login(&self, username: &str, password: &str) -> Result<LoginOutcome, String> {
         let resp = self
             .http
             .post(format!("{}/login", self.root()))
+            .header("x-return-tokens", "true")
             .json(&serde_json::json!({ "username": username, "password": password }))
             .send()
             .await
@@ -27,8 +73,45 @@ impl AbsClient {
             return Err(format!("login failed: HTTP {}", resp.status()));
         }
 
-        let body: LoginResponse = resp.json().await.map_err(|e| e.to_string())?;
-        Ok((body.user, body.server_settings))
+        let body: AuthPayload = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.into_outcome())
+    }
+
+    /// POST /auth/refresh — exchanges a refresh token for a fresh pair.
+    ///
+    /// Lives at the server root next to `/login`, not under `/api/`, and takes no
+    /// `Authorization` header: the refresh token *is* the credential. Passing it
+    /// via `x-refresh-token` (rather than the `refresh_token` cookie) is also what
+    /// makes ABS return the **rotated** refresh token in the body — with the
+    /// cookie form it would only be re-set as a cookie.
+    ///
+    /// A 404 means the server predates 2.26 and has no refresh route; callers use
+    /// that to stop trying. A 401 means the refresh token is spent, expired, or
+    /// revoked, and the session is over.
+    pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<LoginOutcome, String> {
+        let resp = self
+            .http
+            .post(format!("{}/auth/refresh", self.root()))
+            .header("x-refresh-token", refresh_token)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            // The server puts a reason in `{ "error": "..." }`; surfacing it makes
+            // "spent token" distinguishable from "user deactivated" in the log.
+            let detail = resp
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|b| b.get("error")?.as_str().map(str::to_string))
+                .unwrap_or_default();
+            return Err(format!("refresh failed: HTTP {status} {detail}").trim_end().to_string());
+        }
+
+        let body: AuthPayload = resp.json().await.map_err(|e| e.to_string())?;
+        Ok(body.into_outcome())
     }
 
     /// GET /api/me
@@ -85,5 +168,91 @@ impl AbsClient {
         }
 
         resp.json().await.map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `user` object as ABS builds it, minus the fields Skald ignores.
+    fn user_json(extra: serde_json::Value) -> serde_json::Value {
+        let mut base = serde_json::json!({
+            "id": "u1",
+            "username": "listener",
+            "type": "user",
+            "isActive": true,
+            "email": null,
+        });
+        let (base_map, extra_map) = (base.as_object_mut().unwrap(), extra.as_object().unwrap());
+        for (k, v) in extra_map {
+            base_map.insert(k.clone(), v.clone());
+        }
+        base
+    }
+
+    fn parse(user: serde_json::Value) -> LoginOutcome {
+        serde_json::from_value::<AuthPayload>(serde_json::json!({ "user": user }))
+            .expect("payload should parse")
+            .into_outcome()
+    }
+
+    #[test]
+    fn auth_payload_captures_the_token_pair_from_the_user_object() {
+        // ABS 2.26+ with x-return-tokens: both new tokens hang off `user`, and
+        // the legacy `token` field is still emitted alongside them.
+        let outcome = parse(user_json(serde_json::json!({
+            "token": "legacy-tok",
+            "accessToken": "access-tok",
+            "refreshToken": "refresh-tok",
+        })));
+
+        assert_eq!(outcome.tokens.access.as_deref(), Some("access-tok"));
+        assert_eq!(outcome.tokens.refresh.as_deref(), Some("refresh-tok"));
+        assert_eq!(outcome.tokens.legacy.as_deref(), Some("legacy-tok"));
+        assert_eq!(outcome.tokens.effective(), Some("access-tok"));
+        assert!(!outcome.tokens.is_legacy());
+        assert_eq!(outcome.user.id, "u1");
+    }
+
+    #[test]
+    fn auth_payload_without_access_token_is_a_legacy_session() {
+        // A pre-2.26 server ignores x-return-tokens and sends only the old token.
+        let outcome = parse(user_json(serde_json::json!({ "token": "legacy-tok" })));
+
+        assert!(outcome.tokens.is_legacy());
+        assert!(!outcome.tokens.can_refresh());
+        assert_eq!(outcome.tokens.effective(), Some("legacy-tok"));
+    }
+
+    #[test]
+    fn auth_payload_tolerates_a_null_legacy_token() {
+        // Accounts created after the migration have no old token. A bare String
+        // field would fail the whole parse and lock those users out entirely.
+        let outcome = parse(user_json(serde_json::json!({
+            "token": null,
+            "accessToken": "access-tok",
+            "refreshToken": "refresh-tok",
+        })));
+
+        assert_eq!(outcome.user.token, "");
+        assert_eq!(outcome.tokens.legacy, None);
+        assert_eq!(outcome.tokens.effective(), Some("access-tok"));
+    }
+
+    #[test]
+    fn refresh_only_payload_omits_the_refresh_token_when_the_cookie_form_was_used() {
+        // Without x-refresh-token the server nulls refreshToken in the body and
+        // sets a cookie instead. Capture that as "no refresh token" rather than
+        // an empty string that would later be sent as a credential.
+        let outcome = parse(user_json(serde_json::json!({
+            "token": "legacy-tok",
+            "accessToken": "access-tok",
+            "refreshToken": null,
+        })));
+
+        assert_eq!(outcome.tokens.refresh, None);
+        assert!(!outcome.tokens.can_refresh());
+        assert_eq!(outcome.tokens.kind(), "access-only");
     }
 }
