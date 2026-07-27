@@ -24,6 +24,93 @@ use tokio::sync::Mutex;
 pub type SocketState = Arc<Mutex<Option<Client>>>;
 
 // ---------------------------------------------------------------------------
+// Forwarded event table
+// ---------------------------------------------------------------------------
+
+/// Every ABS socket event Skald re-emits to the frontend, paired with the Tauri
+/// event name it arrives under. All of them are forwarded the same way — take
+/// the first JSON value off the Socket.IO message and hand it over as a string —
+/// so they live in a table rather than sixteen identical closures. The frontend
+/// owns interpretation; nothing here parses a payload.
+///
+/// Verified against the ABS source at v2.36.0 (`96d4021`, 2026-07-27) by
+/// enumerating every `SocketAuthority.*Emitter(...)` call site under `server/`.
+/// The payload/audience notes below are from that pass — the full catalog,
+/// including the events deliberately left unforwarded, is in the Socket Event
+/// Coverage roadmap. Audience matters to consumers: an event the server sends
+/// only to admins or only to the owning user cannot be relied on as a general
+/// cache-invalidation signal.
+pub const FORWARDED_EVENTS: &[(&str, &str)] = &[
+    // ── Presence ────────────────────────────────────────────────────────────
+    // Any user on the server connecting/disconnecting their last socket.
+    // Payload is the public user object; drives the presence dots.
+    ("user_online", "presence-user-online"),
+    ("user_offline", "presence-user-offline"),
+    // ── This user's media progress ──────────────────────────────────────────
+    // Fires for progress written from ANY device (phone, web, another Skald).
+    // The frontend owns de-wrapping and self-echo detection.
+    ("user_item_progress_updated", "progress-updated"),
+    // ── Single library items ────────────────────────────────────────────────
+    // `libraryItemEmitter` — full `toOldJSONExpanded()`, sent only to clients
+    // that may access the item, so no permission check is needed downstream.
+    ("item_added", "library-item-added"),
+    ("item_updated", "library-item-updated"),
+    // `item_removed` carries at minimum `{ id, libraryId }`.
+    ("item_removed", "library-item-removed"),
+    // ── Batched library items ───────────────────────────────────────────────
+    // `libraryItemsEmitter` — an **array** of exactly the single-item shape,
+    // access-filtered per recipient. Emitted by library scans and by any edit
+    // that touches many items at once (author rename, batch update), so these
+    // arrive in bursts and are the reason invalidation is coalesced.
+    ("items_added", "library-items-added"),
+    ("items_updated", "library-items-updated"),
+    // ── Collections ─────────────────────────────────────────────────────────
+    // Broadcast to every client; payload is the full expanded collection on all
+    // three, `_removed` included (so a consumer can name what disappeared).
+    ("collection_added", "collection-added"),
+    ("collection_updated", "collection-updated"),
+    ("collection_removed", "collection-removed"),
+    // ── Playlists ───────────────────────────────────────────────────────────
+    // `clientEmitter` — sent ONLY to the playlist's owner. A playlist belongs to
+    // one user, so this is same-user multi-device sync, never cross-user.
+    // Payload is the full expanded playlist on all three.
+    ("playlist_added", "playlist-added"),
+    ("playlist_updated", "playlist-updated"),
+    ("playlist_removed", "playlist-removed"),
+    // ── Series ──────────────────────────────────────────────────────────────
+    // `_added`/`_updated` carry the full series; `_removed` is thin —
+    // `{ id, libraryId }` only.
+    ("series_added", "series-added"),
+    ("series_updated", "series-updated"),
+    ("series_removed", "series-removed"),
+    // ── Authors ─────────────────────────────────────────────────────────────
+    // `_updated` carries the expanded author including `numBooks`. `_removed`
+    // has TWO shapes depending on the call site — the full author from
+    // AuthorController, but `{ id, libraryId }` from ApiRouter and the scanner —
+    // so `id` is the only field a consumer may depend on.
+    ("author_added", "author-added"),
+    ("author_updated", "author-updated"),
+    ("author_removed", "author-removed"),
+    // ── Long-running tasks ──────────────────────────────────────────────────
+    // Start/finish payloads are the full `task.toJSON()`. (Backups are NOT
+    // tasks — they report via `backup_applied` — so they never appear here.)
+    ("task_started", "task-started"),
+    ("task_finished", "task-finished"),
+    // `task_progress` is **admin-only** and, despite its name, is NOT a Task:
+    // the payload is `{ libraryItemId, progress }`. It joins the task buffer on
+    // `task.data.libraryItemId`, since it carries no task id.
+    ("task_progress", "task-progress"),
+    // ── This user's account ─────────────────────────────────────────────────
+    // `clientEmitter` to the affected user only — permissions, library access,
+    // and preference changes all land here as the browser-shaped user object.
+    ("user_updated", "user-updated"),
+    // ── Server logs ─────────────────────────────────────────────────────────
+    // Only streamed after the client registers via `set_log_listener` (below),
+    // which ABS enforces as admin-only.
+    ("log", "server-log"),
+];
+
+// ---------------------------------------------------------------------------
 // connect
 // ---------------------------------------------------------------------------
 
@@ -39,7 +126,7 @@ pub async fn connect(
     // sockets from a previous session or server change don't accumulate.
     disconnect(state.clone()).await;
 
-    let client = ClientBuilder::new(server_url.clone())
+    let mut builder = ClientBuilder::new(server_url.clone())
         // Force WebSocket transport — skip HTTP long-polling.
         .transport_type(TransportType::Websocket)
         // "init" is the ABS server's acknowledgement that the auth event was
@@ -65,161 +152,39 @@ pub async fn connect(
                 .boxed()
             }
         })
-        // "user_online" fires when any user on the server connects a socket.
-        // Forward the payload (user object) to the frontend so the presence
-        // dots can be updated without a full HTTP round-trip.
-        .on("user_online", {
+        ;
+
+    // Register every verbatim-forwarded event from the table above. One closure
+    // shape covers all of them, so a new event is a table row rather than
+    // another forty lines that must be kept identical by hand.
+    for (abs_event, tauri_event) in FORWARDED_EVENTS {
+        builder = builder.on(*abs_event, {
             let app = app.clone();
+            let abs_event: &'static str = abs_event;
+            let tauri_event: &'static str = tauri_event;
             move |payload: Payload, _: Client| {
                 let app = app.clone();
                 async move {
-                    // Extract the first JSON value from the Socket.IO message
-                    // and re-emit it as a Tauri event for the frontend to consume.
+                    // Extract the first JSON value from the Socket.IO message and
+                    // re-emit it as a Tauri event for the frontend to consume.
                     if let Payload::Text(values) = payload {
                         if let Some(first) = values.first() {
-                            let _ = app.emit("presence-user-online", first.to_string());
+                            // Debug, not info: a library scan emits `items_updated`
+                            // in bursts, and this line is meant for diagnosing a
+                            // surface that failed to update — not for the normal log.
+                            log::debug!(target: "skald::sync", "socket event forwarded abs={abs_event} tauri={tauri_event}");
+                            let _ = app.emit(tauri_event, first.to_string());
                         }
                     }
                 }
                 .boxed()
             }
-        })
-        // "user_offline" fires when a user disconnects all their sockets.
-        // Same forwarding pattern as user_online.
-        .on("user_offline", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("presence-user-offline", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "user_item_progress_updated" fires when any of the authenticated user's
-        // media progress records change — from any device (phone, web, another
-        // Skald instance). Forward the raw payload to the frontend which
-        // reconciles it into the local mediaProgress array.
-        .on("user_item_progress_updated", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    // Extract the first JSON value and re-emit it as a Tauri event.
-                    // The frontend handles de-wrapping and self-echo detection.
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("progress-updated", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "item_added" fires when a new library item is created on the server.
-        // Forward the full item payload so the frontend can append it to the
-        // shelf without fetching the entire library again.
-        .on("item_added", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("library-item-added", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "item_updated" fires when metadata, cover, or chapters change for
-        // an existing item. The payload contains the full updated item object.
-        .on("item_updated", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("library-item-updated", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "item_removed" fires when a book is deleted from the library.
-        // The payload contains at minimum the item id and libraryId.
-        .on("item_removed", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("library-item-removed", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "task_started" fires when ABS adds a background task (library scan,
-        // metadata embed, m4b encode, …). Payload is the full task.toJSON().
-        // Forwarded so the Scheduled Tasks monitor updates live regardless of
-        // which settings pane is open. (Backups are NOT tasks — they report via
-        // a separate backup_applied event — so they never appear here.)
-        .on("task_started", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("task-started", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "task_finished" fires when a task completes or fails; same payload shape.
-        .on("task_finished", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("task-finished", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
-        // "log" fires for each new server log line, but only after the client has
-        // registered as a log listener via set_log_listener (see below). Payload
-        // is a LogEntry. Forwarded so the Logs panel can tail the server live.
-        .on("log", {
-            let app = app.clone();
-            move |payload: Payload, _: Client| {
-                let app = app.clone();
-                async move {
-                    if let Payload::Text(values) = payload {
-                        if let Some(first) = values.first() {
-                            let _ = app.emit("server-log", first.to_string());
-                        }
-                    }
-                }
-                .boxed()
-            }
-        })
+        });
+    }
+    log::info!(target: "skald::sync",
+        "socket live-sync registered {} forwarded events", FORWARDED_EVENTS.len());
+
+    let client = builder
         // "reconnect" fires when the socket library re-establishes the transport
         // after a drop (network loss, sleep/wake, server restart). The server
         // assigns a new socket ID on each reconnect, so the auth event must be
@@ -408,5 +373,89 @@ pub async fn remove_log_listener(state: SocketState) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string()),
         None => Ok(()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::FORWARDED_EVENTS;
+
+    /// The forwarding table is the whole contract between ABS and the frontend:
+    /// a typo on either side is a surface that silently never updates, with no
+    /// error anywhere to find it by. So the names are checked mechanically —
+    /// spelling against the verified catalog, shape against the convention, and
+    /// uniqueness so no event can quietly shadow another's registration.
+    #[test]
+    fn event_name_mapping_table_is_complete_and_consistent() {
+        // Every ABS event name verified against the server source at v2.36.0
+        // (`96d4021`). Dropping one from the table fails here rather than in the
+        // field, where the only symptom is a stale pane.
+        let required = [
+            "user_online",
+            "user_offline",
+            "user_item_progress_updated",
+            "item_added",
+            "item_updated",
+            "item_removed",
+            "items_added",
+            "items_updated",
+            "collection_added",
+            "collection_updated",
+            "collection_removed",
+            "playlist_added",
+            "playlist_updated",
+            "playlist_removed",
+            "series_added",
+            "series_updated",
+            "series_removed",
+            "author_added",
+            "author_updated",
+            "author_removed",
+            "task_started",
+            "task_finished",
+            "task_progress",
+            "user_updated",
+            "log",
+        ];
+        for name in required {
+            assert!(
+                FORWARDED_EVENTS.iter().any(|(abs, _)| *abs == name),
+                "verified ABS event `{name}` is not forwarded",
+            );
+        }
+        assert_eq!(
+            FORWARDED_EVENTS.len(),
+            required.len(),
+            "an event was forwarded without being added to the verified list",
+        );
+
+        for (abs, tauri) in FORWARDED_EVENTS {
+            // ABS names are snake_case. The server is inconsistent about this —
+            // `ereader-devices-updated` is hyphenated — so anything hyphenated
+            // here is far more likely a Tauri name pasted into the wrong column
+            // than a real ABS event, and is worth failing over.
+            assert!(
+                abs.chars().all(|c| c.is_ascii_lowercase() || c == '_') && !abs.is_empty(),
+                "ABS event `{abs}` is not snake_case — is it in the right column?",
+            );
+            // Tauri names are kebab-case, matching the `task-started` precedent
+            // every frontend listener already follows.
+            assert!(
+                tauri.chars().all(|c| c.is_ascii_lowercase() || c == '-') && !tauri.is_empty(),
+                "Tauri event `{tauri}` is not kebab-case",
+            );
+        }
+
+        // A duplicate ABS name silently replaces an earlier registration; a
+        // duplicate Tauri name delivers two different events to one listener.
+        for (index, (abs, tauri)) in FORWARDED_EVENTS.iter().enumerate() {
+            let rest = &FORWARDED_EVENTS[index + 1..];
+            assert!(!rest.iter().any(|(other, _)| other == abs), "duplicate ABS event `{abs}`");
+            assert!(!rest.iter().any(|(_, other)| other == tauri), "duplicate Tauri event `{tauri}`");
+        }
     }
 }
