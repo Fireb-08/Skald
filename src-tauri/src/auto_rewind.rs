@@ -36,9 +36,6 @@ pub struct AutoRewindCfg {
     pub activation_delay_secs: f64,
     /// Never rewind past the start of the chapter you are in.
     pub chapter_barrier: bool,
-    /// Also apply the curve when opening a book afresh, based on how long it has
-    /// been since you last listened.
-    pub session_start_rewind: bool,
 }
 
 impl Default for AutoRewindCfg {
@@ -53,7 +50,6 @@ impl Default for AutoRewindCfg {
             max_secs: 30.0,
             activation_delay_secs: 0.0,
             chapter_barrier: false,
-            session_start_rewind: false,
         }
     }
 }

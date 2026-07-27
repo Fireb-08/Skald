@@ -71,6 +71,5 @@ export function autoRewindCfg(): AutoRewindCfg {
     maxSecs: localNumber('onyx.playback.autoRewind.max', 30),
     activationDelaySecs: localNumber('onyx.playback.autoRewind.delay', 0),
     chapterBarrier: localBool('onyx.playback.autoRewind.chapterBarrier', false),
-    sessionStartRewind: localBool('onyx.playback.autoRewind.sessionStart', false),
   };
 }

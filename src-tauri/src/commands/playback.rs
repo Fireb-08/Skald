@@ -238,9 +238,9 @@ pub async fn set_auto_rewind_cfg(
 ) -> Result<(), String> {
     log::info!(
         target: "skald::playback",
-        "auto-rewind config: adaptive={} fixed={:.0}s min={:.0}s max={:.0}s delay={:.0}s barrier={} sessionStart={}",
-        cfg.adaptive, cfg.fixed_secs, cfg.min_secs, cfg.max_secs, cfg.activation_delay_secs,
-        cfg.chapter_barrier, cfg.session_start_rewind
+        "auto-rewind config: adaptive={} fixed={:.0}s min={:.0}s max={:.0}s delay={:.0}s barrier={}",
+        cfg.adaptive, cfg.fixed_secs, cfg.min_secs, cfg.max_secs,
+        cfg.activation_delay_secs, cfg.chapter_barrier
     );
     state.lock().await.auto_rewind = cfg;
     Ok(())

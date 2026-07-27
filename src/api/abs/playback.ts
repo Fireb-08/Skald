@@ -61,7 +61,6 @@ export interface AutoRewindCfg {
   maxSecs: number;
   activationDelaySecs: number;
   chapterBarrier: boolean;
-  sessionStartRewind: boolean;
 }
 
 export function seekAudio(secs: number): Promise<void> {

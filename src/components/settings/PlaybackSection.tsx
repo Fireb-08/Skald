@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { setAutoRewindCfg } from '../../api/abs';
+import { autoRewindCfg } from '../../lib/playbackPrefs';
+import { log } from '../../lib/log';
 import { SPEEDS } from '../../state/onyx';
 import type { OnyxState } from '../../state/onyx';
 import { SectionHead, Row, Toggle, useLocal, MONO, Panel, Seg, SegGroup } from './shared';
@@ -31,9 +34,31 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
   const [autoPlayNext, setAutoPlayNext] = useLocal('onyx.playback.autoPlayNext', true);
   const [sleepDefault, setSleepDefault] = useLocal('onyx.playback.sleepDefault', 'End of chapter');
 
+  // Adaptive auto-rewind. `onyx.playback.rewind` above stays the fixed step —
+  // these are additions beside it, never a reinterpretation of it, so turning
+  // scaling back off restores exactly the behaviour the user had before.
+  const [adaptive, setAdaptive]             = useLocal('onyx.playback.autoRewind.adaptive', false);
+  const [rewindMin, setRewindMin]           = useLocal('onyx.playback.autoRewind.min', 1);
+  const [rewindMax, setRewindMax]           = useLocal('onyx.playback.autoRewind.max', 30);
+  const [rewindDelay, setRewindDelay]       = useLocal('onyx.playback.autoRewind.delay', 0);
+  const [chapterBarrier, setChapterBarrier] = useLocal('onyx.playback.autoRewind.chapterBarrier', false);
+
+  // The backend owns the resume decision, so every change has to reach it. Runs
+  // on mount too, which is harmless (App.tsx pushes the same values) and means
+  // the panel cannot leave the backend stale if it is opened before that.
+  useEffect(() => {
+    setAutoRewindCfg(autoRewindCfg()).catch(e =>
+      log.warn('playback', 'auto-rewind config push failed', { err: String(e) }),
+    );
+  }, [adaptive, rewindMin, rewindMax, rewindDelay, chapterBarrier, rewindOnResume]);
+
   const SKIP   = ['10s', '15s', '30s', '60s'];
   const REWIND = ['Off', '2s', '5s', '10s'];
   const SLEEP  = ['Off', '15m', '30m', '1h', 'End of chapter'];
+  // Kept short and log-spaced: these are "feel" choices, not dial-in numbers.
+  const MIN_STEPS = [1, 2, 5, 10];
+  const MAX_STEPS = [15, 30, 60, 120];
+  const DELAYS    = [0, 5, 15, 60];
 
   return (
     <div>
@@ -103,6 +128,50 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
               {REWIND.map(v => <Seg key={v} active={v === rewindOnResume} onClick={() => setRewindOnResume(v)}>{v}</Seg>)}
             </SegGroup>
           </Row>
+
+          <Row
+            label="Scale rewind with time away"
+            hint="Rewind further after a long break than after a short one. Replaces the fixed step above."
+          >
+            <Toggle on={adaptive} onChange={setAdaptive} />
+          </Row>
+
+          {/* The advanced controls only make sense once scaling is on — showing
+              them inert would suggest the fixed step respects them, which it
+              does not. */}
+          {adaptive && (
+            <>
+              <Row label="Shortest rewind" hint="Applied after a brief pause.">
+                <SegGroup>
+                  {MIN_STEPS.map(v => (
+                    <Seg key={v} active={v === rewindMin} onClick={() => setRewindMin(v)}>{v}s</Seg>
+                  ))}
+                </SegGroup>
+              </Row>
+
+              <Row label="Longest rewind" hint="Applied after several hours away.">
+                <SegGroup>
+                  {MAX_STEPS.map(v => (
+                    <Seg key={v} active={v === rewindMax} onClick={() => setRewindMax(v)}>{v}s</Seg>
+                  ))}
+                </SegGroup>
+              </Row>
+
+              <Row label="Ignore pauses shorter than" hint="Skip the rewind entirely for a quick interruption.">
+                <SegGroup>
+                  {DELAYS.map(v => (
+                    <Seg key={v} active={v === rewindDelay} onClick={() => setRewindDelay(v)}>
+                      {v === 0 ? 'Off' : `${v}s`}
+                    </Seg>
+                  ))}
+                </SegGroup>
+              </Row>
+
+              <Row label="Stay within the chapter" hint="Never rewind past the start of the chapter you are in.">
+                <Toggle on={chapterBarrier} onChange={setChapterBarrier} />
+              </Row>
+            </>
+          )}
 
           <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends.">
             <Toggle on={autoPlayNext} onChange={setAutoPlayNext} />
