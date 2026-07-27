@@ -9,13 +9,12 @@
 // LiveSyncDeps — that was already their design inside onyx.ts (so socket
 // listeners never re-subscribe on every position tick), which is what makes
 // this seam clean: the hook needs the refs and stable setters, nothing else.
-import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library } from '../api/abs';
 import { getMe, getOfflineProgressCount, markServerDeleted } from '../api/abs';
 import { log } from '../lib/log';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
-import { FOCUS_RECONCILE_MINIMUM_MS } from '../lib/syncCadence';
 import { patchLibraryItems } from './bookHelpers';
 
 export interface LiveSyncDeps {
@@ -28,7 +27,6 @@ export interface LiveSyncDeps {
   currentBookIdRef: RefObject<string>;
   currentEpisodeIdRef: RefObject<string | null>;
   playingRef: RefObject<boolean>;
-  positionRef: RefObject<number>;
   sessionIdRef: RefObject<string>;
   sessionReadyRef: RefObject<boolean>;
   currentLibraryIdRef: RefObject<string>;
@@ -74,7 +72,6 @@ export function useLiveSync({
   currentBookIdRef,
   currentEpisodeIdRef,
   playingRef,
-  positionRef,
   sessionIdRef,
   sessionReadyRef,
   currentLibraryIdRef,
@@ -96,9 +93,6 @@ export function useLiveSync({
   refreshLibrary,
   applyServerProgress,
 }: LiveSyncDeps): void {
-  const lastSuccessfulServerSyncRef = useRef<number | null>(null);
-  const lastFocusReconcileRef = useRef(0);
-
   const refreshQueuedCount = () => {
     getOfflineProgressCount()
       .then(queuedUpdates => setSyncHealth(previous => ({ ...previous, queuedUpdates })))
@@ -205,68 +199,6 @@ export function useLiveSync({
     return () => { disposed = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSyncEnabled, serverUrl, authToken]);
-
-  // Socket events are not replayed after sleep, network loss, or another
-  // device updating progress while live sync is disabled. Reconcile directly
-  // from ABS when Skald becomes visible again, with a throttle for focus churn.
-  useEffect(() => {
-    if (!serverUrl || !authToken) return;
-    let disposed = false;
-
-    const reconcile = async () => {
-      const now = Date.now();
-      if (now - lastFocusReconcileRef.current < FOCUS_RECONCILE_MINIMUM_MS) return;
-      lastFocusReconcileRef.current = now;
-      try {
-        const me = await getMe(serverUrl);
-        if (disposed) return;
-        applyServerProgress(me.mediaProgress);
-
-        const itemId = currentBookIdRef.current;
-        if (!itemId || !sessionReadyRef.current) return;
-        const episodeId = currentEpisodeIdRef.current ?? null;
-        const remote = me.mediaProgress.find(progress =>
-          progress.libraryItemId === itemId &&
-          (progress.episodeId ?? null) === episodeId);
-        if (!remote) return;
-
-        const changedAfterOurLastWrite = lastSuccessfulServerSyncRef.current !== null
-          && remote.lastUpdate > lastSuccessfulServerSyncRef.current;
-        const materiallyDifferent = Math.abs(remote.currentTime - positionRef.current) >= 5;
-        if (changedAfterOurLastWrite && materiallyDifferent) {
-          log.info('sync', 'focus reconciliation found newer ABS progress', {
-            itemId,
-            episodeId,
-            localCurrentTime: positionRef.current,
-            serverCurrentTime: remote.currentTime,
-            serverLastUpdate: remote.lastUpdate,
-          });
-          setSyncConflict({
-            libraryItemId: itemId,
-            episodeId,
-            currentTime: remote.currentTime,
-            deviceDescription: 'another device',
-            sessionId: 'focus-reconcile',
-            receivedAt: Date.now(),
-          });
-        }
-      } catch (error) {
-        log.warn('sync', 'focus reconciliation failed', { err: String(error) });
-      }
-    };
-
-    const onFocus = () => { if (document.visibilityState === 'visible') void reconcile(); };
-    const onVisibility = () => { if (document.visibilityState === 'visible') void reconcile(); };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      disposed = true;
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  // Stable refs/setters keep lifecycle listeners independent of playback ticks.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverUrl, authToken]);
 
   // ── Live library sync ──────────────────────────────────────────────────────
   // Subscribe to library item events forwarded from the Rust socket layer.
@@ -449,7 +381,6 @@ export function useLiveSync({
     refreshQueuedCount();
 
     listen<{ at: number; currentTime: number; reason: string }>('session-sync-success', event => {
-      lastSuccessfulServerSyncRef.current = event.payload.at;
       setSyncHealth(previous => ({
         ...previous,
         lastSuccessfulServerSync: event.payload.at,
@@ -495,8 +426,16 @@ export function useLiveSync({
       setSyncHealth(previous => ({ ...previous, queuedUpdates: event.payload.queued }));
     }).then(fn => { if (disposed) fn(); else unlistenFlushed = fn; });
 
-    listen<{ itemId: string; localCurrentTime: number; serverCurrentTime: number | null }>('offline-sync-conflict', event => {
+    listen<{
+      itemId: string;
+      episodeId?: string | null;
+      localCurrentTime: number;
+      serverCurrentTime: number | null;
+    }>('offline-sync-conflict', event => {
       log.warn('sync', 'offline progress conflict preserved ABS position', event.payload);
+      // Reconciliation is bookkeeping only. It must never seek the loaded
+      // transport: playback position changes are reserved for session startup
+      // or an explicit user choice in the cross-device conflict dialog.
       setToast({
         message: 'ABS had newer progress. Skald kept the server position and saved the local stop point as a backup.',
         type: 'info',

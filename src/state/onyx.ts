@@ -1362,7 +1362,6 @@ export function useOnyxState(): OnyxState {
     currentBookIdRef,
     currentEpisodeIdRef,
     playingRef,
-    positionRef,
     sessionIdRef,
     sessionReadyRef,
     currentLibraryIdRef,

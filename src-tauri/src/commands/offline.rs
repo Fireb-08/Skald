@@ -282,6 +282,20 @@ fn offline_flush_decision(entry: &downloads::OfflineProgressEntry, server: Optio
                 return OfflineFlushDecision::AcknowledgeOwnWrite;
             }
         }
+        if let Some(progress) = server {
+            // ABS may still expose the position from before this local playback
+            // branch while Skald is waiting to flush its next 30-second batch.
+            // Progress is monotonic unless the user explicitly seeks, so a
+            // later unfinished local position is safe to publish even when the
+            // captured ABS revision changed. Never let that stale revision win
+            // and pull active playback backwards.
+            if entry.pending_confirmation_current_time.is_none()
+                && !progress.is_finished
+                && (entry.is_finished || entry.current_time > progress.current_time + 0.5)
+            {
+                return OfflineFlushDecision::Write;
+            }
+        }
         return OfflineFlushDecision::PreserveServer;
     }
     if let (Some(pending), Some(progress)) = (entry.pending_confirmation_current_time, server) {
@@ -290,7 +304,12 @@ fn offline_flush_decision(entry: &downloads::OfflineProgressEntry, server: Optio
         }
     }
     match server {
-        Some(progress) if progress.last_update >= entry.recorded_at => OfflineFlushDecision::PreserveServer,
+        Some(progress) if progress.last_update >= entry.recorded_at
+            && (progress.is_finished
+                || entry.current_time <= progress.current_time + 0.5) =>
+        {
+            OfflineFlushDecision::PreserveServer
+        }
         _ => OfflineFlushDecision::Write,
     }
 }
@@ -375,7 +394,8 @@ async fn acknowledge_confirmed_progress(
 }
 
 // Flush only after obtaining the authoritative ABS conflict snapshot. A
-// conflict becomes a local recovery stop point and never overwrites ABS.
+// A genuinely later ABS position becomes a local recovery stop point. A later
+// local position is monotonic progress and is pushed instead of being discarded.
 #[tauri::command]
 pub async fn flush_offline_progress(
     server_url: String,
@@ -1097,6 +1117,18 @@ mod tests {
         assert_eq!(offline_flush_decision(&entry, Some(&server(100))), OfflineFlushDecision::Write);
         assert_eq!(offline_flush_decision(&entry, Some(&server(101))), OfflineFlushDecision::PreserveServer);
         assert_eq!(offline_flush_decision(&entry, None), OfflineFlushDecision::PreserveServer);
+    }
+
+    #[test]
+    fn offline_flush_keeps_later_local_progress_despite_a_newer_server_revision() {
+        let mut entry = queued(true, Some(100));
+        entry.current_time = 240.0;
+        let stale_server = server(101);
+
+        assert_eq!(
+            offline_flush_decision(&entry, Some(&stale_server)),
+            OfflineFlushDecision::Write,
+        );
     }
 
     #[test]
