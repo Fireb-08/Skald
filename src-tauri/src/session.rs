@@ -212,6 +212,13 @@ pub struct SessionManager {
     // ABS library item ID of the locally-playing book. Set by play_local() and
     // used by the shutdown handler to write a final offline progress entry on exit.
     pub local_item_id: Option<String>,
+    // When the player was last paused, for the adaptive rewind-on-resume curve.
+    // Wall-clock elapsed time is the input, so this is the one thing that must
+    // survive between the pause command and the resume command. Cleared on
+    // resume so a second resume without an intervening pause rewinds nothing.
+    pub paused_at: Option<std::time::Instant>,
+    // Adaptive rewind settings, pushed down from Settings → Playback.
+    pub auto_rewind: crate::auto_rewind::AutoRewindCfg,
     // True when the locally-playing item is a *local-library* item (no server
     // counterpart) rather than a downloaded ABS book. Local-library progress goes
     // to the SQLite catalog; downloaded-book progress goes to the offline queue
@@ -318,6 +325,8 @@ impl SessionManager {
             seek_sync_generation: Arc::new(AtomicU64::new(0)),
             is_local: false,
             local_item_id: None,
+            paused_at: None,
+            auto_rewind: crate::auto_rewind::AutoRewindCfg::default(),
             is_local_library: false,
             local_episode_id: None,
             local_downloaded_revision: None,

@@ -4,7 +4,8 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
-import { cleanupOwnedPlaybackSessions, closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
+import { cleanupOwnedPlaybackSessions, closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, setAutoRewindCfg, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
+import { autoRewindCfg } from './lib/playbackPrefs';
 import { log } from './lib/log';
 import Toast from './components/ui/Toast';
 import ActivityCenter from './components/ActivityCenter';
@@ -43,6 +44,16 @@ export default function App() {
 
   // Register global keyboard shortcuts (Ctrl+Alt+Space etc.) once on mount
   useGlobalShortcuts(st);
+
+  // The backend decides every resume, so it needs the rewind settings before the
+  // first one can happen. Pushed on mount; Settings → Playback re-pushes on each
+  // change. Without this a user who picked a non-default step would silently get
+  // the backend's default instead.
+  useEffect(() => {
+    setAutoRewindCfg(autoRewindCfg()).catch(e =>
+      log.warn('playback', 'auto-rewind config push failed — backend keeps its defaults', { err: String(e) }),
+    );
+  }, []);
 
   // ── Live sync auto-connect ──────────────────────────────────────────────
   // Fires whenever the auth token changes (login, logout, or initial mount

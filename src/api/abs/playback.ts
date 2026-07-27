@@ -28,6 +28,42 @@ export function pauseAudio(): Promise<void> {
   return invoke('pause_audio');
 }
 
+/** What resumeAudio actually did — the caller uses it to bring the UI into line. */
+export interface ResumeOutcome {
+  /** Where playback resumed from, after any rewind. */
+  position: number;
+  /** Seconds stepped back; 0 when no rewind applied. */
+  rewound: number;
+}
+
+/** Resume the current book, applying the auto-rewind the backend is configured
+ *  for (fixed or adaptive). This is the ONLY paused→playing transition — the
+ *  rewind must not be recomputed by callers, or the transport and the keyboard
+ *  drift apart, which is what this replaced.
+ *
+ *  `chapterStart` is the start of the chapter the listener is in, needed only
+ *  when the chapter barrier is enabled; the backend has no chapter list. */
+export function resumeAudio(chapterStart?: number): Promise<ResumeOutcome> {
+  return invoke('resume_audio', { chapterStart: chapterStart ?? null });
+}
+
+/** Push Settings → Playback's auto-rewind configuration down to the backend. */
+export function setAutoRewindCfg(cfg: AutoRewindCfg): Promise<void> {
+  return invoke('set_auto_rewind_cfg', { cfg });
+}
+
+/** Mirrors the Rust AutoRewindCfg. Describes both rewind modes, because one
+ *  backend path decides every resume. */
+export interface AutoRewindCfg {
+  adaptive: boolean;
+  fixedSecs: number;
+  minSecs: number;
+  maxSecs: number;
+  activationDelaySecs: number;
+  chapterBarrier: boolean;
+  sessionStartRewind: boolean;
+}
+
 export function seekAudio(secs: number): Promise<void> {
   return invoke('seek_audio', { secs });
 }

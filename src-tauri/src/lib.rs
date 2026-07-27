@@ -21,6 +21,7 @@ pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
 pub mod sync_config; // Shared Rust/React playback-sync cadence definition
 pub mod session_ownership; // Stable ABS device identity + Skald-owned session journal
 pub mod token_refresh; // ABS 2.26+ access-token refresh (single-flight, persist-before-use)
+pub mod auto_rewind;   // Adaptive rewind-on-resume curve + chapter-barrier clamp (pure)
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -331,6 +332,8 @@ pub fn run() {
             commands::cleanup_owned_playback_sessions,
             commands::play_audio,
             commands::pause_audio,
+            commands::resume_audio,
+            commands::set_auto_rewind_cfg,
             commands::seek_audio,
             commands::sync_active_session,
             commands::set_speed,

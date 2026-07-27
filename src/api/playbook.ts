@@ -3,10 +3,10 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
+import { bookChapters, chapterAt, chapterStart } from '../state/bookHelpers';
 import type { MediaProgress, PodcastEpisode } from './abs';
-import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
+import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
 import { log } from '../lib/log';
-import { rewindSeconds } from '../lib/playbackPrefs';
 
 // Shared boundary logger for fire-and-forget transport calls — routes through
 // the structured framework (Skald log viewer) instead of the raw console.
@@ -490,19 +490,28 @@ export async function togglePlayback(st: OnyxState): Promise<void> {
 // applied uniformly and exactly once. Do NOT use this to cold-start a different
 // book — playBook resolves its own resume position and must not be rewound.
 export async function resumePlayback(st: OnyxState): Promise<void> {
-  const rewind = rewindSeconds();
-  if (rewind > 0 && st.position > 0) {
-    // Step back a few seconds so the listener re-hears the lead-up to where they
-    // paused. Clamp at 0; seekAudio moves LibVLC, setPosition keeps the UI in sync.
-    const target = Math.max(0, st.position - rewind);
-    await seekAudio(target).catch(logErr);
-    st.setPosition(target);
-  }
   try {
-    await playAudio();
+    // The backend owns the rewind decision — it is the only side that knows how
+    // long the pause actually lasted, and keeping the choice in one place is what
+    // stops the transport controls and the Space key from diverging.
+    const { position, rewound } = await resumeAudio(currentChapterStart(st));
+    if (rewound > 0) st.setPosition(position);
     st.setPlaying(true);
   } catch (error) {
     logErr(error);
     st.setPlaying(false);
   }
+}
+
+/** Start of the chapter the listener is currently in, for the chapter barrier.
+ *  Undefined when the book has no chapters — the backend then simply has no
+ *  barrier to clamp against. Computed unconditionally rather than gated on the
+ *  setting: it is a cheap array walk, and reading the toggle here would put a
+ *  second copy of the policy on this side of the bridge. */
+function currentChapterStart(st: OnyxState): number | undefined {
+  const book = st.library.find(b => b.id === st.currentBookId);
+  if (!book) return undefined;
+  const chapters = bookChapters(book);
+  if (chapters.length === 0) return undefined;
+  return chapterStart(chapters, chapterAt(chapters, st.position).idx);
 }

@@ -140,9 +140,110 @@ pub async fn pause_audio(
         None => Err("No audio player initialized".to_string()),
     };
     if pause_result.is_ok() {
+        // Start the clock the adaptive rewind curve reads on resume.
+        state.lock().await.paused_at = Some(std::time::Instant::now());
         spawn_session_sync(app, Arc::clone(state.inner()), "pause");
     }
     pause_result
+}
+
+/// What `resume_audio` did, so the caller can bring the UI into line without a
+/// second round-trip.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeOutcome {
+    /// Where playback actually resumed from.
+    pub position: f64,
+    /// Seconds stepped back. Zero when adaptive rewind is off or did not apply.
+    pub rewound: f64,
+}
+
+/// Resume the current book, applying the adaptive rewind curve first.
+///
+/// This is the *single* place a paused→playing transition is decided, so the
+/// transport buttons and the Space key cannot drift apart — the previous design
+/// had the rewind computed independently in two frontend call sites.
+///
+/// `chapter_start` is the beginning of the chapter the listener is in, or `None`
+/// when the chapter barrier is off or the book has no chapters. Skald's chapter
+/// list lives on the frontend, so the caller supplies it rather than the backend
+/// looking it up.
+#[tauri::command]
+pub async fn resume_audio(
+    chapter_start: Option<f64>,
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<ResumeOutcome, String> {
+    use crate::auto_rewind::{rewind_amount, rewind_target};
+
+    // Take the pause timestamp: resuming consumes it, so a second resume with no
+    // pause in between rewinds nothing.
+    let (cfg, paused_for, player_arc) = {
+        let mut manager = state.lock().await;
+        let paused_for = manager.paused_at.take().map(|at| at.elapsed().as_secs_f64());
+        (manager.auto_rewind, paused_for, Arc::clone(&manager.player))
+    };
+
+    let position = player_arc
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|p| p.position())
+        .unwrap_or(0.0);
+
+    let amount = rewind_amount(paused_for, &cfg);
+    let barrier = if cfg.chapter_barrier { chapter_start } else { None };
+    let target = rewind_target(position, amount, barrier);
+    let rewound = (position - target).max(0.0);
+
+    if rewound > 0.0 {
+        // Seek before starting playback, not after — a seek landing on top of a
+        // running tick is what makes the playhead visibly jump. This is also
+        // local intent and must win over any in-flight background sync position.
+        let seek_result = match player_arc.lock().unwrap().as_ref() {
+            Some(p) => p.seek(target),
+            None => Err("No audio player initialized".to_string()),
+        };
+        if let Err(e) = seek_result {
+            // A failed rewind is not a reason to refuse to resume playback.
+            log::warn!(target: "skald::playback", "auto-rewind seek failed, resuming in place: {e}");
+            return resume_after_rewind(state, position, 0.0).await;
+        }
+        log::debug!(
+            target: "skald::playback",
+            "auto-rewind applied: pausedFor={:.1}s amount={:.1}s barrierClamped={}",
+            paused_for.unwrap_or(0.0),
+            rewound,
+            barrier.is_some_and(|b| (target - b).abs() < f64::EPSILON)
+        );
+    }
+
+    resume_after_rewind(state, target, rewound).await
+}
+
+/// Shared tail of `resume_audio`: start playback and report where we landed.
+async fn resume_after_rewind(
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+    position: f64,
+    rewound: f64,
+) -> Result<ResumeOutcome, String> {
+    play_audio(state).await?;
+    Ok(ResumeOutcome { position, rewound })
+}
+
+/// Push the adaptive-rewind settings down from Settings → Playback.
+#[tauri::command]
+pub async fn set_auto_rewind_cfg(
+    cfg: crate::auto_rewind::AutoRewindCfg,
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<(), String> {
+    log::info!(
+        target: "skald::playback",
+        "auto-rewind config: adaptive={} fixed={:.0}s min={:.0}s max={:.0}s delay={:.0}s barrier={} sessionStart={}",
+        cfg.adaptive, cfg.fixed_secs, cfg.min_secs, cfg.max_secs, cfg.activation_delay_secs,
+        cfg.chapter_barrier, cfg.session_start_rewind
+    );
+    state.lock().await.auto_rewind = cfg;
+    Ok(())
 }
 
 #[tauri::command]

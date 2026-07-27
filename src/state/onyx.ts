@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, UserPermissions, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, playAudio, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, pauseAudio, resumeAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
-import { skipSeconds, rewindSeconds } from '../lib/playbackPrefs';
+import { skipSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
 import { useLiveSync, type PlaybackSyncConflict, type SyncHealth } from './useLiveSync';
@@ -30,7 +30,7 @@ export type { DownloadRecord };
 // ─── Pure book/chapter/time helpers (split to bookHelpers.ts) ────────────────
 // Re-exported so consumers keep importing from '../state/onyx' unchanged.
 export * from './bookHelpers';
-import { Chapter, patchLibraryItems, mergeProgress, bookChapters, bookAuthor } from './bookHelpers';
+import { Chapter, patchLibraryItems, mergeProgress, bookChapters, bookAuthor, chapterAt, chapterStart } from './bookHelpers';
 
 // ─── Local-only interfaces ────────────────────────────────────────────────────
 
@@ -1401,6 +1401,17 @@ export function useOnyxState(): OnyxState {
   });
 
   useEffect(() => {
+    // Start of the chapter the listener is in, for the auto-rewind chapter
+    // barrier. Reads refs rather than state: this effect registers once, so
+    // captured values would be frozen at mount.
+    const chapterStartHere = (): number | undefined => {
+      const book = libraryItemsRef.current.find(b => b.id === currentBookIdRef.current);
+      if (!book) return undefined;
+      const chapters = bookChapters(book);
+      if (chapters.length === 0) return undefined;
+      return chapterStart(chapters, chapterAt(chapters, positionRef.current).idx);
+    };
+
     const onKey = (e: KeyboardEvent) => {
       // Component-level controls (scrubbers, menus, sliders) own keys they
       // prevent. Respect that contract even if a handler only prevents the
@@ -1413,16 +1424,13 @@ export function useOnyxState(): OnyxState {
         e.preventDefault();
         if (playingRef.current) { pauseAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) })); setPlaying(false); }
         else {
-          // Resume: apply the auto-rewind-on-resume preference, mirroring
-          // resumePlayback() in playbook.ts (this handler lives inside the hook
-          // and has no assembled `st` to pass, so the small logic is inlined).
-          const rw = rewindSeconds();
-          if (rw > 0 && positionRef.current > 0) {
-            const target = Math.max(0, positionRef.current - rw);
-            setPosition(target);
-            seekAudio(target).catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
-          }
-          playAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
+          // Resume through the same backend command the transport buttons use.
+          // This handler used to inline its own copy of the rewind maths, which
+          // is exactly how the keyboard and the transport would drift apart the
+          // moment either changed.
+          resumeAudio(chapterStartHere())
+            .then(({ position, rewound }) => { if (rewound > 0) setPosition(position); })
+            .catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
           setPlaying(true);
         }
       }

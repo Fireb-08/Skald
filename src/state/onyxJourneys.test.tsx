@@ -178,12 +178,12 @@ describe('playback-state regression guards', () => {
     expect(tauri.calls.filter(call => call.cmd === 'seek_audio').length).toBeGreaterThan(before);
   });
 
-  // Auto-Rewind & Per-Book Speed roadmap, Phase 1. The Space handler carries its
-  // own inlined copy of resumePlayback's rewind logic (the hook has no assembled
-  // `st` to pass). Pin the shipped behaviour here so the adaptive upgrade cannot
-  // silently let the keyboard and the transport buttons drift apart.
-  it('applies the same auto-rewind on Space as the transport resume path', async () => {
-    localStorage.setItem('onyx.playback.rewind', JSON.stringify('10s'));
+  // Auto-Rewind & Per-Book Speed roadmap. The Space handler used to carry its
+  // own inlined copy of the rewind maths; it now delegates to the same
+  // resume_audio command the transport buttons use, which is the whole point —
+  // the keyboard and the transport cannot drift apart if there is one decision.
+  it('resumes via the shared backend command rather than its own rewind maths', async () => {
+    tauri.handlers.set('resume_audio', () => ({ position: 290, rewound: 10 }));
     const { result } = renderHook(() => useOnyxState());
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));
 
@@ -191,38 +191,38 @@ describe('playback-state regression guards', () => {
       result.current.setCurrentBookId('abs-book');
       result.current.setPosition(300);
     });
+    const seeksBefore = tauri.calls.filter(call => call.cmd === 'seek_audio').length;
 
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', {
         key: ' ', code: 'Space', bubbles: true, cancelable: true,
       }));
     });
 
-    const seeks = tauri.calls.filter(call => call.cmd === 'seek_audio');
-    expect(seeks[seeks.length - 1]?.args).toMatchObject({ secs: 290 });
+    expect(tauri.calls.some(call => call.cmd === 'resume_audio')).toBe(true);
+    // No frontend-side seek: the backend already moved the playhead.
+    expect(tauri.calls.filter(call => call.cmd === 'seek_audio')).toHaveLength(seeksBefore);
     expect(result.current.position).toBe(290);
-    expect(tauri.calls.some(call => call.cmd === 'play_audio')).toBe(true);
   });
 
-  it('does not rewind on Space when the preference is Off', async () => {
-    localStorage.setItem('onyx.playback.rewind', JSON.stringify('Off'));
+  it('pauses on Space while playing, without resuming', async () => {
     const { result } = renderHook(() => useOnyxState());
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));
 
     act(() => {
       result.current.setCurrentBookId('abs-book');
-      result.current.setPosition(300);
+      result.current.setPlaying(true);
     });
-    const before = tauri.calls.filter(call => call.cmd === 'seek_audio').length;
 
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', {
         key: ' ', code: 'Space', bubbles: true, cancelable: true,
       }));
     });
 
-    expect(tauri.calls.filter(call => call.cmd === 'seek_audio')).toHaveLength(before);
-    expect(result.current.position).toBe(300);
+    expect(tauri.calls.some(call => call.cmd === 'pause_audio')).toBe(true);
+    expect(tauri.calls.some(call => call.cmd === 'resume_audio')).toBe(false);
+    expect(result.current.playing).toBe(false);
   });
 
   it('surfaces offline-progress corruption discovered after the registry poll', async () => {
