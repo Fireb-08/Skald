@@ -12,7 +12,7 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library } from '../api/abs';
-import { getMe, getOfflineProgressCount, markServerDeleted, seekAudio } from '../api/abs';
+import { getMe, getOfflineProgressCount, markServerDeleted } from '../api/abs';
 import { log } from '../lib/log';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
 import { patchLibraryItems } from './bookHelpers';
@@ -27,7 +27,6 @@ export interface LiveSyncDeps {
   currentBookIdRef: RefObject<string>;
   currentEpisodeIdRef: RefObject<string | null>;
   playingRef: RefObject<boolean>;
-  isLocalPlaybackRef: RefObject<boolean>;
   sessionIdRef: RefObject<string>;
   sessionReadyRef: RefObject<boolean>;
   currentLibraryIdRef: RefObject<string>;
@@ -73,7 +72,6 @@ export function useLiveSync({
   currentBookIdRef,
   currentEpisodeIdRef,
   playingRef,
-  isLocalPlaybackRef,
   sessionIdRef,
   sessionReadyRef,
   currentLibraryIdRef,
@@ -435,22 +433,9 @@ export function useLiveSync({
       serverCurrentTime: number | null;
     }>('offline-sync-conflict', event => {
       log.warn('sync', 'offline progress conflict preserved ABS position', event.payload);
-      const isLoadedLocalItem =
-        isLocalPlaybackRef.current &&
-        event.payload.itemId === currentBookIdRef.current &&
-        (event.payload.episodeId ?? null) === (currentEpisodeIdRef.current ?? null);
-      if (isLoadedLocalItem && event.payload.serverCurrentTime !== null) {
-        // The reconciliation worker has chosen ABS as authoritative and removed
-        // the stale local queue entry. Move the already-loaded local transport
-        // too; otherwise a later Play merely resumes LibVLC from the discarded
-        // local stop point and immediately recreates the conflict.
-        setPosition(event.payload.serverCurrentTime);
-        seekAudio(event.payload.serverCurrentTime).catch(error =>
-          log.error('sync', 'offline conflict transport seek failed', {
-            itemId: event.payload.itemId,
-            err: String(error),
-          }));
-      }
+      // Reconciliation is bookkeeping only. It must never seek the loaded
+      // transport: playback position changes are reserved for session startup
+      // or an explicit user choice in the cross-device conflict dialog.
       setToast({
         message: 'ABS had newer progress. Skald kept the server position and saved the local stop point as a backup.',
         type: 'info',
