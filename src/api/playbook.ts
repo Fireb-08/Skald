@@ -3,7 +3,7 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import { bookChapters, chapterAt, chapterStart } from '../state/bookHelpers';
+import { chapterStartAt } from '../state/bookHelpers';
 import { hasRememberedSpeed, rememberSpeed, speedForItem } from '../lib/speedMemory';
 import type { MediaProgress, PodcastEpisode } from './abs';
 import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
@@ -211,9 +211,12 @@ export async function playBook(
       const serverLastUpdate = offlineProgress?.baselineCaptured
         ? offlineProgress.serverLastUpdate
         : serverCheck.progress?.lastUpdate ?? savedServerProgress?.lastUpdate;
+      // The rate travels with the command: play_local_file starts LibVLC itself,
+      // so a separate setSpeed would only take hold after the book had begun
+      // playing at whatever rate the previous item left behind.
       await playLocalFile(
         localFilePath, bookId, startTime, isLocalLibrary, undefined,
-        baselineCaptured, serverLastUpdate ?? undefined,
+        baselineCaptured, serverLastUpdate ?? undefined, resolveItemSpeed(st, bookId),
       );
 
       // Signal to the frontend that we are in local playback mode so transport
@@ -372,7 +375,12 @@ export async function playEpisode(
           startTime = lp && !lp.isFinished ? lp.currentTime : 0;
         } catch { startTime = 0; }
       }
-      await playLocalFile(localPath, podcastItemId, startTime, true, episodeId);
+      // Keyed by the show, not the episode — see speedMemory. As in playBook,
+      // the rate rides along with the command that starts playback.
+      await playLocalFile(
+        localPath, podcastItemId, startTime, true, episodeId,
+        false, undefined, resolveItemSpeed(st, podcastItemId),
+      );
       st.setIsLocalPlayback(true);
       st.setPosition(startTime);
       st.setCurrentEpisodeId(episodeId);
@@ -478,15 +486,24 @@ export async function unmuteAudio(st: OnyxState): Promise<void> {
 // to be duplicated across two call sites, and that is precisely how the keyboard
 // and the transport ended up able to disagree.
 
-/** Apply the rate this item should play at — its remembered one, or the global
- *  default. Called at every playback start; without it the Settings "Default
- *  playback speed" control persists a value nothing ever reads. */
-export async function applyItemSpeed(st: OnyxState, itemId: string): Promise<void> {
+/** The rate this item should play at — its remembered one, or the global
+ *  default — with the UI brought into line. Returns it so a caller that starts
+ *  audio through a command of its own (local playback) can hand the rate to
+ *  that command instead of racing it with a separate setSpeed. */
+export function resolveItemSpeed(st: OnyxState, itemId: string): number {
   const rate = speedForItem(itemId);
   const source = hasRememberedSpeed(itemId) ? 'per-book' : 'global';
   log.debug('playback', 'applying speed', { itemId, rate, source });
   st.setSpeed(String(rate));
-  await setAudioSpeed(rate).catch(logErr);
+  return rate;
+}
+
+/** Apply the rate this item should play at to the engine. Called at every
+ *  playback start that starts audio with a separate play command; without it the
+ *  Settings "Default playback speed" control persists a value nothing ever
+ *  reads, and the previous book's rate carries into this one. */
+export async function applyItemSpeed(st: OnyxState, itemId: string): Promise<void> {
+  await setAudioSpeed(resolveItemSpeed(st, itemId)).catch(logErr);
 }
 
 /** Record and apply a rate the listener just chose. Writes to the per-book map,
@@ -520,28 +537,39 @@ export async function togglePlayback(st: OnyxState): Promise<void> {
 // applied uniformly and exactly once. Do NOT use this to cold-start a different
 // book — playBook resolves its own resume position and must not be rewound.
 export async function resumePlayback(st: OnyxState): Promise<void> {
+  await resumeWithRewind(currentChapterStart(st), st.setPosition, st.setPlaying);
+}
+
+/** The paused→playing transition itself, over plain setters so the window
+ *  Space-key handler — which lives inside useOnyxState and has no assembled
+ *  OnyxState to hand around — runs the *same* code as the transport buttons
+ *  rather than a copy that can drift. The failure branch is the reason this is
+ *  shared: a resume that rejects must leave the UI paused, which is exactly what
+ *  the Space handler's own version got wrong. */
+export async function resumeWithRewind(
+  chapterStart: number | undefined,
+  setPosition: (secs: number) => void,
+  setPlaying: (playing: boolean) => void,
+): Promise<void> {
   try {
     // The backend owns the rewind decision — it is the only side that knows how
     // long the pause actually lasted, and keeping the choice in one place is what
     // stops the transport controls and the Space key from diverging.
-    const { position, rewound } = await resumeAudio(currentChapterStart(st));
-    if (rewound > 0) st.setPosition(position);
-    st.setPlaying(true);
+    const { position, rewound } = await resumeAudio(chapterStart);
+    if (rewound > 0) setPosition(position);
+    setPlaying(true);
   } catch (error) {
     logErr(error);
-    st.setPlaying(false);
+    setPlaying(false);
   }
 }
 
 /** Start of the chapter the listener is currently in, for the chapter barrier.
- *  Undefined when the book has no chapters — the backend then simply has no
- *  barrier to clamp against. Computed unconditionally rather than gated on the
- *  setting: it is a cheap array walk, and reading the toggle here would put a
- *  second copy of the policy on this side of the bridge. */
+ *  The playing book is resolved the same way the rest of the app resolves it —
+ *  shelf first, then the now-playing snapshot — because it leaves `st.library`
+ *  the moment the user switches libraries, and a barrier that quietly vanishes
+ *  there would let auto-rewind cross into the previous chapter. */
 function currentChapterStart(st: OnyxState): number | undefined {
-  const book = st.library.find(b => b.id === st.currentBookId);
-  if (!book) return undefined;
-  const chapters = bookChapters(book);
-  if (chapters.length === 0) return undefined;
-  return chapterStart(chapters, chapterAt(chapters, st.position).idx);
+  const book = st.library.find(b => b.id === st.currentBookId) ?? st.playingItem;
+  return chapterStartAt(book, st.position);
 }

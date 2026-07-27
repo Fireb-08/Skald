@@ -477,6 +477,11 @@ pub async fn play_local_file(
     // from. Local-library playback ignores both values.
     baseline_captured: Option<bool>,
     server_last_update: Option<i64>,
+    // The item's resolved playback rate (per-book memory or the global default).
+    // Local playback starts inside this command, so the rate has to travel with
+    // it — a separate set_speed call would only take effect after the first
+    // moment of audio had already played at the previous item's rate.
+    speed: Option<f32>,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
@@ -489,6 +494,7 @@ pub async fn play_local_file(
         episode_id.as_deref(),
         baseline_captured.unwrap_or(false),
         server_last_update,
+        speed,
         app,
     ).await
 }

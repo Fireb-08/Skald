@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   bookAuthor, bookTitle, bookPalette, bookTpl, bookChapters,
-  fmtTime, fmtRemaining, chapterAt, chapterStart,
+  fmtTime, fmtRemaining, chapterAt, chapterStart, chapterStartAt,
   mergeProgress, patchLibraryItems, mergeUserStats, computeLocalLibraryStats,
   type Chapter,
 } from './bookHelpers';
@@ -100,6 +100,20 @@ describe('chapter math', () => {
   it('chapterStart accumulates prior durations', () => {
     expect(chapterStart(chapters, 0)).toBe(0);
     expect(chapterStart(chapters, 2)).toBe(300);
+  });
+
+  // The auto-rewind chapter barrier. Both resume callers go through this one
+  // helper, so the keyboard and the transport cannot clamp differently.
+  it('chapterStartAt gives the start of the chapter the position falls in', () => {
+    const b = item({}, { chapters: [{ title: 'One', start: 0, end: 100 }, { title: 'Two', start: 100, end: 300 }] });
+    expect(chapterStartAt(b, 0)).toBe(0);
+    expect(chapterStartAt(b, 150)).toBe(100);
+  });
+
+  it('chapterStartAt has no barrier without an item or chapters', () => {
+    // Undefined is meaningful: it tells the backend there is nothing to clamp to.
+    expect(chapterStartAt(undefined, 150)).toBeUndefined();
+    expect(chapterStartAt(item({}, { chapters: [] }), 150)).toBeUndefined();
   });
 });
 

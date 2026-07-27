@@ -149,7 +149,10 @@ export function closeActiveSessionWithoutSync(): Promise<void> {
  *  the Rust layer resolves the correct first file in the latter case.
  *  Starts the 1-second playback-tick loop so all transport controls remain live.
  *  itemId is the ABS library item ID — stored so progress can be queued offline.
- *  Does NOT open a server session — no network access is required. */
+ *  Does NOT open a server session — no network access is required.
+ *  `speed` is the item's resolved rate: this command starts playback itself, so
+ *  the rate must travel with it rather than arriving in a later setSpeed call
+ *  that the first seconds of audio would already have outrun. */
 export function playLocalFile(
   filePath: string,
   itemId: string,
@@ -158,11 +161,13 @@ export function playLocalFile(
   episodeId?: string,
   baselineCaptured = false,
   serverLastUpdate?: number,
+  speed?: number,
 ): Promise<void> {
   return invoke('play_local_file', {
     filePath, itemId, startTime, localLibrary,
     episodeId: episodeId ?? null,
     baselineCaptured,
     serverLastUpdate: serverLastUpdate ?? null,
+    speed: speed ?? null,
   });
 }

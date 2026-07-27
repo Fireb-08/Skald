@@ -205,6 +205,76 @@ describe('playback-state regression guards', () => {
     expect(result.current.position).toBe(290);
   });
 
+  // The half the Space handler used to get wrong: it marked the UI playing
+  // outside the promise, so a resume the engine refused left a paused player
+  // behind a playing transport, with nothing to put it back.
+  it('stays paused when the engine refuses the Space resume', async () => {
+    tauri.handlers.set('resume_audio', () => { throw new Error('LibVLC is unhappy'); });
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    act(() => { result.current.setCurrentBookId('abs-book'); });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', bubbles: true, cancelable: true,
+      }));
+    });
+
+    expect(tauri.calls.some(call => call.cmd === 'resume_audio')).toBe(true);
+    expect(result.current.playing).toBe(false);
+  });
+
+  // The playing book leaves `library` on a library switch — it survives only as
+  // the now-playing snapshot. The barrier must survive with it, or an enabled
+  // chapter barrier silently stops clamping and a long pause rewinds into the
+  // previous chapter.
+  it('still sends the chapter barrier after the shelf moves off the playing book', async () => {
+    tauri.handlers.set('get_local_library_items', () => [{
+      id: 'local-book',
+      localPath: 'C:/Books/Local Book',
+      media: {
+        metadata: { title: 'Local Book' },
+        chapters: [
+          { id: 0, start: 0, end: 30, title: 'One' },
+          { id: 1, start: 30, end: 100, title: 'Two' },
+        ],
+      },
+    } as unknown as LibraryItem]);
+    tauri.handlers.set('close_active_session', () => undefined);
+    tauri.handlers.set('play_local_file', () => undefined);
+    tauri.handlers.set('pause_audio', () => undefined);
+    tauri.handlers.set('resume_audio', () => ({ position: 42, rewound: 0 }));
+    tauri.handlers.set('get_local_progress', () => ({
+      id: 'lp-1', libraryItemId: 'local-book', currentTime: 42, duration: 100,
+      progress: 0.42, isFinished: false,
+    }));
+
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    await act(async () => { await playBook(result.current, 'local-book'); });
+    // Switch to the ABS library: the playing book is no longer on the shelf.
+    await act(async () => { await result.current.setActiveLibrary('abs-lib'); });
+    expect(result.current.library.some(b => b.id === 'local-book')).toBe(false);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', bubbles: true, cancelable: true,
+      }));
+    });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', bubbles: true, cancelable: true,
+      }));
+    });
+
+    // Position 42 sits in the second chapter, which starts at 30.
+    const resumes = tauri.calls.filter(call => call.cmd === 'resume_audio');
+    const resume = resumes[resumes.length - 1];
+    expect(resume?.args).toEqual({ chapterStart: 30 });
+  });
+
   it('pauses on Space while playing, without resuming', async () => {
     const { result } = renderHook(() => useOnyxState());
     await waitFor(() => expect(result.current.libraryLoading).toBe(false));

@@ -335,6 +335,17 @@ impl SessionManager {
         }
     }
 
+    /// Drop transient state that belongs to the media being replaced rather than
+    /// to the manager. `paused_at` is the whole of it today: it is written by
+    /// `pause_audio` and read exactly once by `resume_audio`, so a pause measured
+    /// on the *previous* item must not survive into the next one — otherwise a new
+    /// book whose first resume beats a fresh pause (a failed start, an early
+    /// resume) is rewound for time the listener spent paused on something else.
+    /// Called at the top of both load paths, online and local.
+    fn begin_media_load(&mut self) {
+        self.paused_at = None;
+    }
+
     /// Open a playback session for `item_id`, spawn the 1-second tick loop
     /// (position updates + `playback-tick` events) and the 10-second sync loop.
     /// Returns the server's `currentTime` so the caller can seek after play starts.
@@ -352,6 +363,8 @@ impl SessionManager {
     ) -> Result<f64, String> {
         // Stop any tasks from a previous session (online or local).
         self.active.store(false, Ordering::Relaxed);
+        // New media — the previous item's pause clock does not carry over.
+        self.begin_media_load();
         // Clear the local flag — this is an online session, sync is required.
         self.is_local = false;
         self.is_local_library = false;
@@ -672,11 +685,18 @@ impl SessionManager {
         episode_id: Option<&str>,
         baseline_captured: bool,
         server_last_update: Option<i64>,
+        // The rate this item should play at (its remembered speed, or the global
+        // default). Applied here rather than by a separate frontend call because
+        // this method starts playback itself — see the apply site below. `None`
+        // leaves whatever rate the player already had.
+        speed: Option<f32>,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
         // Kill any background tasks from a previous online or local session so
         // stale sync or tick loops do not race with the new local playback.
         self.active.store(false, Ordering::Relaxed);
+        // New media — the previous item's pause clock does not carry over.
+        self.begin_media_load();
 
         // No server session — clear the ID so the shutdown handler and
         // close_active_session both exit early without an HTTP call.
@@ -797,6 +817,17 @@ impl SessionManager {
                         None => format!("file:///{}", file_path.replace('\\', "/")),
                     };
                     p.load(&uri, start_time)?;
+                }
+                // Apply the resolved rate while the media is loaded but before
+                // play() at the end of this method. A local item is the one case
+                // the frontend cannot handle on its own: it does not call
+                // play_audio here, so a separate set_speed would land *after*
+                // playback had already started at the previous item's rate.
+                if let Some(rate) = speed.filter(|r| r.is_finite() && *r > 0.0) {
+                    if let Err(error) = p.set_speed(rate) {
+                        // A wrong rate is not worth refusing to play over.
+                        log::warn!(target: "skald::playback", "could not apply local playback rate {rate}: {error}");
+                    }
                 }
             }
         }
@@ -1238,6 +1269,20 @@ mod tick_tests {
         let second = manager.next_seek_sync_generation();
         assert!(!manager.seek_sync_is_current(first));
         assert!(manager.seek_sync_is_current(second));
+    }
+
+    #[test]
+    fn loading_new_media_forgets_the_previous_item_s_pause() {
+        // The pause clock is per-item transient state: an hour spent paused on
+        // book A must not buy book B an adaptive rewind on its first resume.
+        // With no pause recorded, resume_audio measures none and the curve
+        // rewinds nothing (auto_rewind::adaptive_without_a_measured_pause_*).
+        let mut manager = SessionManager::new(AbsClient::new("http://abs.invalid".to_string()));
+        manager.paused_at = Some(std::time::Instant::now());
+
+        manager.begin_media_load();
+
+        assert!(manager.paused_at.is_none());
     }
 
     #[test]

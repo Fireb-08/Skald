@@ -239,3 +239,16 @@ export function chapterStart(chapters: Chapter[], idx: number): number {
   for (let i = 0; i < idx; i++) acc += chapters[i].dur;
   return acc;
 }
+
+/** Start of the chapter `pos` falls in, or undefined when there is no item or it
+ *  has no chapters. This is the auto-rewind chapter barrier: the backend clamps
+ *  the rewind to it, and `undefined` simply means there is nothing to clamp to.
+ *  One implementation because both callers (the transport's resumePlayback and
+ *  the window Space-key handler) must compute the same barrier — the point of
+ *  the feature is that those two cannot disagree. */
+export function chapterStartAt(b: LibraryItem | undefined, pos: number): number | undefined {
+  if (!b) return undefined;
+  const chapters = bookChapters(b);
+  if (chapters.length === 0) return undefined;
+  return chapterStart(chapters, chapterAt(chapters, pos).idx);
+}

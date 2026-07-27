@@ -53,6 +53,9 @@ function state(overrides: Partial<OnyxState> = {}): OnyxState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Speed resolution reads localStorage on every playback start, so no test may
+  // inherit another's remembered rate.
+  localStorage.clear();
   abs.getMe.mockResolvedValue({
     id: 'user-123',
     username: 'listener',
@@ -222,6 +225,7 @@ describe('downloaded ABS playback resume', () => {
       undefined,
       true,
       900,
+      1,
     );
     expect(st.setPosition).toHaveBeenCalledWith(420);
   });
@@ -264,6 +268,7 @@ describe('downloaded ABS playback resume', () => {
       undefined,
       true,
       800,
+      1,
     );
   });
 
@@ -293,6 +298,7 @@ describe('downloaded ABS playback resume', () => {
       undefined,
       false,
       undefined,
+      1,
     );
     expect(st.setPosition).toHaveBeenCalledWith(75);
   });
@@ -445,6 +451,69 @@ describe('playback start applies the resolved speed', () => {
     await playBook(st, 'book');
 
     expect(abs.setSpeed).toHaveBeenCalledWith(1.5);
+  });
+
+  // Local playback starts inside play_local_file, so there is no play_audio to
+  // sit behind: the rate has to be part of the same command or the opening
+  // seconds run at whatever the previous item left the engine on. These four
+  // pin the paths that had no speed at all before — the case the earlier suite
+  // missed by only exercising streamed starts.
+  it('hands a downloaded book its remembered rate as part of the start command', async () => {
+    localStorage.setItem('onyx.playback.speedByItem', JSON.stringify({ book: 1.75 }));
+    abs.getOfflineProgress.mockResolvedValue(null);
+    const st = state({ downloads: [{ itemId: 'book', filePath: '/books/book.m4b' }] as OnyxState['downloads'] });
+
+    await playBook(st, 'book');
+
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      '/books/book.m4b', 'book', 0, false, undefined, true, undefined, 1.75,
+    );
+    expect(st.setSpeed).toHaveBeenCalledWith('1.75');
+  });
+
+  it('hands a local-library book the global default when it has no remembered rate', async () => {
+    localStorage.setItem('onyx.playback.speed', JSON.stringify('1.25'));
+    const st = state({
+      library: [{ id: 'local-book', localPath: '/books/local', media: {} }] as unknown as OnyxState['library'],
+    });
+
+    await playBook(st, 'local-book');
+
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      '/books/local', 'local-book', 0, true, undefined, false, undefined, 1.25,
+    );
+  });
+
+  it('does not let the previous book\'s rate carry into the next local one', async () => {
+    // The engine keeps its rate across media, so an unset rate is not 1.0 — it
+    // is whatever was playing last.
+    localStorage.setItem('onyx.playback.speedByItem', JSON.stringify({ fast: 2 }));
+    abs.getOfflineProgress.mockResolvedValue(null);
+    const st = state({
+      downloads: [
+        { itemId: 'fast', filePath: '/books/fast.m4b' },
+        { itemId: 'plain', filePath: '/books/plain.m4b' },
+      ] as OnyxState['downloads'],
+    });
+
+    await playBook(st, 'fast');
+    await playBook(st, 'plain');
+
+    expect(abs.playLocalFile).toHaveBeenLastCalledWith(
+      '/books/plain.m4b', 'plain', 0, false, undefined, true, undefined, 1,
+    );
+  });
+
+  it('starts a local podcast episode at the show\'s rate, not the episode\'s id', async () => {
+    localStorage.setItem('onyx.playback.speedByItem', JSON.stringify({ podcast: 1.5, episode: 3 }));
+    const st = state({ activeLibrary: { id: 'local-lib', source: 'local' } as OnyxState['activeLibrary'] });
+    const episode = { id: 'episode', title: 'Episode', localPath: '/pods/ep1.mp3' } as unknown as PodcastEpisode;
+
+    await playEpisode(st, 'podcast', episode);
+
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      '/pods/ep1.mp3', 'podcast', 0, true, 'episode', false, undefined, 1.5,
+    );
   });
 
   it('applies the speed before starting audio, not after', async () => {

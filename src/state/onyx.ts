@@ -2,8 +2,12 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, UserPermissions, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, pauseAudio, resumeAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
+// The one paused→playing coordinator, shared with the transport controls. Safe
+// to import here: playbook.ts takes only the OnyxState *type* back, so nothing
+// of this module is needed at its runtime.
+import { resumeWithRewind } from '../api/playbook';
 import { skipSeconds } from '../lib/playbackPrefs';
 import { nextInSeries } from '../lib/series';
 import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLibrariesLoadResult } from '../lib/allLibraries';
@@ -30,7 +34,7 @@ export type { DownloadRecord };
 // ─── Pure book/chapter/time helpers (split to bookHelpers.ts) ────────────────
 // Re-exported so consumers keep importing from '../state/onyx' unchanged.
 export * from './bookHelpers';
-import { Chapter, patchLibraryItems, mergeProgress, bookChapters, bookAuthor, chapterAt, chapterStart } from './bookHelpers';
+import { Chapter, patchLibraryItems, mergeProgress, bookChapters, bookAuthor, chapterStartAt } from './bookHelpers';
 
 // ─── Local-only interfaces ────────────────────────────────────────────────────
 
@@ -1248,6 +1252,9 @@ export function useOnyxState(): OnyxState {
   // Live refs for the book-finished observer (auto-download-next / remove-on-finish),
   // which fires from the once-registered playback-tick listener below.
   const libraryItemsRef     = useRef(library);
+  // The now-playing snapshot, for the same handler: after a library switch the
+  // playing book is no longer in `library`, and the chapter barrier still needs it.
+  const playingItemRef      = useRef(playingItem);
   const downloadsRef        = useRef(downloads);
   const serverUrlRef        = useRef(serverUrl);
   // The item id whose finish we've already acted on, so the observer fires once
@@ -1264,6 +1271,7 @@ export function useOnyxState(): OnyxState {
     isLocalPlaybackRef.current  = isLocalPlayback;
     positionRef.current         = position;
     libraryItemsRef.current     = library;
+    playingItemRef.current      = playingItem;
     downloadsRef.current        = downloads;
     serverUrlRef.current        = serverUrl;
   });
@@ -1403,14 +1411,14 @@ export function useOnyxState(): OnyxState {
   useEffect(() => {
     // Start of the chapter the listener is in, for the auto-rewind chapter
     // barrier. Reads refs rather than state: this effect registers once, so
-    // captured values would be frozen at mount.
-    const chapterStartHere = (): number | undefined => {
-      const book = libraryItemsRef.current.find(b => b.id === currentBookIdRef.current);
-      if (!book) return undefined;
-      const chapters = bookChapters(book);
-      if (chapters.length === 0) return undefined;
-      return chapterStart(chapters, chapterAt(chapters, positionRef.current).idx);
-    };
+    // captured values would be frozen at mount. Falls back to the now-playing
+    // snapshot because the book leaves `library` when the user switches
+    // libraries — and a barrier that silently disappears there is worse than no
+    // barrier, since the setting still reads as on.
+    const chapterStartHere = (): number | undefined => chapterStartAt(
+      libraryItemsRef.current.find(b => b.id === currentBookIdRef.current) ?? playingItemRef.current,
+      positionRef.current,
+    );
 
     const onKey = (e: KeyboardEvent) => {
       // Component-level controls (scrubbers, menus, sliders) own keys they
@@ -1424,14 +1432,12 @@ export function useOnyxState(): OnyxState {
         e.preventDefault();
         if (playingRef.current) { pauseAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) })); setPlaying(false); }
         else {
-          // Resume through the same backend command the transport buttons use.
-          // This handler used to inline its own copy of the rewind maths, which
-          // is exactly how the keyboard and the transport would drift apart the
-          // moment either changed.
-          resumeAudio(chapterStartHere())
-            .then(({ position, rewound }) => { if (rewound > 0) setPosition(position); })
-            .catch(e => log.error('playback', 'transport command failed', { err: String(e) }));
-          setPlaying(true);
+          // Resume through the same coordinator the transport buttons use — not
+          // merely the same command. This handler used to own its half of the
+          // sequence, and had already drifted: it marked the UI playing outside
+          // the promise, so a rejected resume left a paused player showing a
+          // playing transport.
+          void resumeWithRewind(chapterStartHere(), setPosition, setPlaying);
         }
       }
       // Arrow seek: move the audio engine too, not just the UI. Without the
