@@ -1130,6 +1130,27 @@ impl SessionManager {
         }
         result
     }
+
+    /// Close an active ABS session without publishing its local position.
+    /// Used only after a fresh preflight proves another device is ahead: sending
+    /// this session's older `currentTime` would replace the progress we are
+    /// about to resume from. ABS still saves the listening-session history it
+    /// already received through periodic syncs.
+    pub async fn close_without_sync(&self) -> Result<(), String> {
+        self.active.store(false, Ordering::Relaxed);
+        let _claim = self.claim_final_sync(Duration::from_secs(5)).await?;
+        let sid = self
+            .session_id
+            .as_deref()
+            .ok_or_else(|| "No active session".to_string())?;
+        let result = self.client.close_session_without_sync(sid).await;
+        if result.is_ok() {
+            if let Err(error) = crate::session_ownership::remove_owned(sid) {
+                log::warn!(target: "skald::sync", "closed stale session without sync but journal removal deferred session_id={sid}: {error}");
+            }
+        }
+        result
+    }
 }
 
 // Unit tests for the pure tick decisions (Test Seams roadmap) — no LibVLC, no

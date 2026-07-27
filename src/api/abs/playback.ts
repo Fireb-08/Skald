@@ -104,6 +104,11 @@ export function closeActiveSession(): Promise<void> {
   return invoke('close_active_session');
 }
 
+/** Close a stale loaded session without publishing its position over newer ABS progress. */
+export function closeActiveSessionWithoutSync(): Promise<void> {
+  return invoke('close_active_session_without_sync');
+}
+
 /** Phase D — opens a local audio file in LibVLC for offline playback.
  *  filePath may point to a single audio file or a directory (multi-file book);
  *  the Rust layer resolves the correct first file in the latter case.

@@ -355,6 +355,7 @@ pub fn run() {
             // Flag a downloaded book as no longer present on the server
             commands::mark_server_deleted,
             commands::close_active_session,
+            commands::close_active_session_without_sync,
             commands::delete_item,
             commands::rescan_item,
             commands::get_collections,

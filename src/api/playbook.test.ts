@@ -3,6 +3,7 @@ import type { OfflineProgressEntry } from './abs';
 
 const abs = vi.hoisted(() => ({
   closeActiveSession: vi.fn(async () => {}),
+  closeActiveSessionWithoutSync: vi.fn(async () => {}),
   openPlaybackSession: vi.fn(),
   playAudio: vi.fn(async () => {}),
   pauseAudio: vi.fn(async () => {}),
@@ -83,6 +84,46 @@ describe('server-backed playback resume', () => {
 
     expect(abs.seekAudio).toHaveBeenCalledWith(480);
     expect(st.setPosition).toHaveBeenCalledWith(480);
+  });
+
+  it('captures phone-ahead progress before closing the stale loaded session', async () => {
+    const st = state({
+      sessionReady: true,
+      currentBookId: 'book',
+      currentEpisodeId: null,
+      position: 120,
+      mediaProgress: [{
+        libraryItemId: 'book',
+        currentTime: 120,
+        isFinished: false,
+        lastUpdate: 100,
+      } as OnyxState['mediaProgress'][number]],
+    });
+    abs.getMe.mockResolvedValue({
+      id: 'user-123',
+      username: 'listener',
+      token: '',
+      mediaProgress: [{
+        libraryItemId: 'book',
+        episodeId: null,
+        currentTime: 420,
+        isFinished: false,
+        lastUpdate: 900,
+      }],
+      bookmarks: [],
+    });
+    // The session-open response models the regression: a stale close would
+    // have replaced ABS immediately before POST /play.
+    abs.openPlaybackSession.mockResolvedValue({ sessionId: 'session-book', currentTime: 120 });
+
+    await playBook(st, 'book');
+
+    expect(abs.closeActiveSessionWithoutSync).toHaveBeenCalledOnce();
+    expect(abs.closeActiveSession).not.toHaveBeenCalled();
+    expect(abs.getMe.mock.invocationCallOrder[0])
+      .toBeLessThan(abs.closeActiveSessionWithoutSync.mock.invocationCallOrder[0]);
+    expect(abs.seekAudio).toHaveBeenCalledWith(420);
+    expect(st.setPosition).toHaveBeenCalledWith(420);
   });
 
   it('preserves an explicit chapter or bookmark jump for a book', async () => {
@@ -167,6 +208,8 @@ describe('downloaded ABS playback resume', () => {
     await playBook(st, 'book');
 
     expect(abs.getMe).toHaveBeenCalledWith('http://abs.local');
+    expect(abs.getMe.mock.invocationCallOrder[0])
+      .toBeLessThan(abs.closeActiveSession.mock.invocationCallOrder[0]);
     expect(abs.openPlaybackSession).not.toHaveBeenCalled();
     expect(abs.playLocalFile).toHaveBeenCalledWith(
       'C:\\Books\\book.m4b',

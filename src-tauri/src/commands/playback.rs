@@ -343,6 +343,26 @@ pub async fn close_active_session(
     result
 }
 
+/// Close a loaded session without sending its position. The frontend uses this
+/// only when a pre-close `/api/me` snapshot proves another device is ahead.
+#[tauri::command]
+pub async fn close_active_session_without_sync(
+    state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
+) -> Result<(), String> {
+    let mut mgr = state.lock().await;
+    if mgr.session_id.is_none() {
+        return Ok(());
+    }
+    let result = mgr.close_without_sync().await;
+    if let Err(error) = &result {
+        log::warn!(target: "skald::sync", "conflict-safe session close failed: {error}");
+    } else {
+        log::info!(target: "skald::sync", "closed stale playback session without replacing newer ABS progress");
+    }
+    mgr.clear_server_identity();
+    result
+}
+
 /// Opens a local audio file in LibVLC for offline playback.
 /// Uses the same AudioPlayer state as the online path — all existing
 /// transport controls (pause, seek, speed) work identically because they all
