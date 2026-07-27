@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OfflineProgressEntry } from './abs';
 
 const abs = vi.hoisted(() => ({
   closeActiveSession: vi.fn(async () => {}),
@@ -7,8 +8,9 @@ const abs = vi.hoisted(() => ({
   pauseAudio: vi.fn(async () => {}),
   setVolume: vi.fn(async () => {}),
   playLocalFile: vi.fn(async () => {}),
-  getOfflineProgress: vi.fn(async () => null),
+  getOfflineProgress: vi.fn<(itemId: string) => Promise<OfflineProgressEntry | null>>(async () => null),
   getLocalProgress: vi.fn(async () => null),
+  getMe: vi.fn(),
   seekAudio: vi.fn(async () => {}),
 }));
 
@@ -28,6 +30,7 @@ function state(overrides: Partial<OnyxState> = {}): OnyxState {
     downloads: [],
     library: [],
     mediaProgress: [],
+    isOffline: false,
     activeLibrary: undefined,
     setPlayingItem: vi.fn(),
     setCurrentEpisodeId: vi.fn(),
@@ -46,6 +49,13 @@ function state(overrides: Partial<OnyxState> = {}): OnyxState {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  abs.getMe.mockResolvedValue({
+    id: 'user-123',
+    username: 'listener',
+    token: '',
+    mediaProgress: [],
+    bookmarks: [],
+  });
 });
 
 describe('server-backed playback resume', () => {
@@ -117,5 +127,149 @@ describe('server-backed playback resume', () => {
     await playEpisode(st, 'podcast', episode);
 
     expect(st.setPlaying).toHaveBeenLastCalledWith(false);
+  });
+});
+
+describe('downloaded ABS playback resume', () => {
+  it('uses fresh ABS progress while keeping the local file transport', async () => {
+    const st = state({
+      downloads: [{ itemId: 'book', filePath: 'C:\\Books\\book.m4b' }] as OnyxState['downloads'],
+      mediaProgress: [{
+        libraryItemId: 'book',
+        currentTime: 30,
+        isFinished: false,
+        lastUpdate: 100,
+      } as OnyxState['mediaProgress'][number]],
+    });
+    abs.getOfflineProgress.mockResolvedValue({
+      itemId: 'book',
+      currentTime: 60,
+      duration: 1_000,
+      progress: 0.06,
+      isFinished: false,
+      recordedAt: 200,
+      baselineCaptured: false,
+    });
+    abs.getMe.mockResolvedValue({
+      id: 'user-123',
+      username: 'listener',
+      token: '',
+      mediaProgress: [{
+        libraryItemId: 'book',
+        episodeId: null,
+        currentTime: 420,
+        isFinished: false,
+        lastUpdate: 900,
+      }],
+      bookmarks: [],
+    });
+
+    await playBook(st, 'book');
+
+    expect(abs.getMe).toHaveBeenCalledWith('http://abs.local');
+    expect(abs.openPlaybackSession).not.toHaveBeenCalled();
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      'C:\\Books\\book.m4b',
+      'book',
+      420,
+      false,
+      undefined,
+      true,
+      900,
+    );
+    expect(st.setPosition).toHaveBeenCalledWith(420);
+  });
+
+  it('preserves a later unsynced stop point than the fresh ABS position', async () => {
+    const st = state({
+      downloads: [{ itemId: 'book', filePath: '/books/book.m4b' }] as OnyxState['downloads'],
+    });
+    abs.getOfflineProgress.mockResolvedValue({
+      itemId: 'book',
+      currentTime: 480,
+      duration: 1_000,
+      progress: 0.48,
+      isFinished: false,
+      recordedAt: 950,
+      baselineCaptured: true,
+      serverLastUpdate: 800,
+    });
+    abs.getMe.mockResolvedValue({
+      id: 'user-123',
+      username: 'listener',
+      token: '',
+      mediaProgress: [{
+        libraryItemId: 'book',
+        episodeId: null,
+        currentTime: 420,
+        isFinished: false,
+        lastUpdate: 900,
+      }],
+      bookmarks: [],
+    });
+
+    await playBook(st, 'book');
+
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      '/books/book.m4b',
+      'book',
+      480,
+      false,
+      undefined,
+      true,
+      800,
+    );
+  });
+
+  it('falls back to durable offline progress when ABS is unreachable', async () => {
+    const st = state({
+      downloads: [{ itemId: 'book', filePath: '/books/book.m4b' }] as OnyxState['downloads'],
+    });
+    abs.getOfflineProgress.mockResolvedValue({
+      itemId: 'book',
+      currentTime: 75,
+      duration: 1_000,
+      progress: 0.075,
+      isFinished: false,
+      recordedAt: 300,
+      baselineCaptured: false,
+    });
+    abs.getMe.mockRejectedValue(new Error('network unavailable'));
+
+    await playBook(st, 'book');
+
+    expect(abs.getMe).toHaveBeenCalledWith('http://abs.local');
+    expect(abs.playLocalFile).toHaveBeenCalledWith(
+      '/books/book.m4b',
+      'book',
+      75,
+      false,
+      undefined,
+      false,
+      undefined,
+    );
+    expect(st.setPosition).toHaveBeenCalledWith(75);
+  });
+
+  it('does not contact ABS when Skald is already offline', async () => {
+    const st = state({
+      isOffline: true,
+      downloads: [{ itemId: 'book', filePath: '/books/book.m4b' }] as OnyxState['downloads'],
+    });
+    abs.getOfflineProgress.mockResolvedValue({
+      itemId: 'book',
+      currentTime: 90,
+      duration: 1_000,
+      progress: 0.09,
+      isFinished: false,
+      recordedAt: 800,
+      baselineCaptured: true,
+      serverLastUpdate: 700,
+    });
+
+    await playBook(st, 'book');
+
+    expect(abs.getMe).not.toHaveBeenCalled();
+    expect(st.setPosition).toHaveBeenCalledWith(90);
   });
 });

@@ -4,7 +4,7 @@
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
 import type { PodcastEpisode } from './abs';
-import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, seekAudio } from './abs';
+import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
 import { log } from '../lib/log';
 import { rewindSeconds } from '../lib/playbackPrefs';
 
@@ -80,9 +80,38 @@ export async function playBook(
         }
       }
 
-      // Resolve start position: explicit override > server progress > offline queue > 0.
-      // When offline, st.mediaProgress may be empty since it requires a server fetch.
-      // Fall back to the offline progress queue which persists locally between launches.
+      // A completed download changes only the audio transport. When ABS is
+      // reachable it remains the progress authority, exactly as it is for a
+      // streamed book; otherwise the durable offline queue is the fallback.
+      // This preflight is intentionally platform-neutral so an existing
+      // Windows download and an AppImage download make the same resume choice.
+      let checkedServerProgress = false;
+      let currentServerProgress: OnyxState['mediaProgress'][number] | undefined;
+      if (!isLocalLibrary && !st.isOffline && st.serverUrl) {
+        try {
+          const me = await getMe(st.serverUrl);
+          checkedServerProgress = true;
+          currentServerProgress = me.mediaProgress.find(progress =>
+            progress.libraryItemId === bookId && (progress.episodeId ?? null) === null);
+          log.info('sync', 'checked ABS progress before downloaded playback', {
+            bookId,
+            serverCurrentTime: currentServerProgress?.currentTime ?? 0,
+            serverLastUpdate: currentServerProgress?.lastUpdate ?? null,
+          });
+        } catch (error) {
+          // Connectivity can disappear between the app health check and the
+          // play click. Local playback must remain available in that window.
+          log.warn('sync', 'ABS progress preflight failed; using downloaded fallback', {
+            bookId,
+            err: String(error),
+          });
+        }
+      }
+
+      // Resolve start position: explicit override > newest known ordinary
+      // progress > 0. A pending offline stop point is legitimate progress that
+      // ABS may not have accepted yet, so—as in streamed playback—the later of
+      // the fresh server position and local position wins.
       let startTime = startTimeOverride;
       if (startTime === undefined) {
         if (isLocalLibrary) {
@@ -98,6 +127,14 @@ export async function playBook(
           } catch {
             startTime = 0;
           }
+        } else if (checkedServerProgress) {
+          const serverTime = currentServerProgress && !currentServerProgress.isFinished
+            ? currentServerProgress.currentTime
+            : 0;
+          const offlineTime = offlineProgress && !offlineProgress.isFinished
+            ? offlineProgress.currentTime
+            : 0;
+          startTime = Math.max(serverTime, offlineTime);
         } else {
           const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
           if (saved) {
@@ -122,10 +159,10 @@ export async function playBook(
       // branched. Reopening an existing offline branch must not silently adopt
       // a newer server revision and later overwrite another device's progress.
       const baselineCaptured = !isLocalLibrary
-        && (offlineProgress?.baselineCaptured ?? !st.isOffline);
+        && (!!offlineProgress?.baselineCaptured || checkedServerProgress);
       const serverLastUpdate = offlineProgress?.baselineCaptured
         ? offlineProgress.serverLastUpdate
-        : savedServerProgress?.lastUpdate;
+        : currentServerProgress?.lastUpdate ?? savedServerProgress?.lastUpdate;
       await playLocalFile(
         localFilePath, bookId, startTime, isLocalLibrary, undefined,
         baselineCaptured, serverLastUpdate ?? undefined,
