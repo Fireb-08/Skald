@@ -251,23 +251,32 @@ pub async fn connect(
                         }
                     };
 
-                    match token {
-                        Some(token) => {
-                            if let Err(e) = socket.emit("auth", token).await {
+                    // Emitting `auth` is what makes the new socket ID usable. If it
+                    // fails — or there was no token to send — the transport is up
+                    // but the socket is deaf, and saying otherwise is worse than
+                    // saying nothing: `socket-reconnected` flips the Sync panel to
+                    // "connected" *and* kicks off a resync, so a green indicator
+                    // would sit over a socket that receives no events.
+                    let reauthed = match token {
+                        Some(token) => match socket.emit("auth", token).await {
+                            Ok(()) => true,
+                            Err(e) => {
                                 log::warn!(target: "skald::sync", "socket re-auth emit failed after reconnect: {e}");
+                                false
                             }
-                            // Signal the frontend to pull a fresh snapshot of
-                            // library and progress so no missed events leave the
-                            // UI stale. Only worth doing once auth was sent —
-                            // an unauthenticated socket receives no events to
-                            // catch up on.
-                            let _ = app.emit("socket-reconnected", ());
-                        }
-                        None => {
-                            // Without a usable token the socket is connected but
-                            // deaf. Say so rather than reporting a healthy resync.
-                            let _ = app.emit("socket-disconnected", ());
-                        }
+                        },
+                        None => false,
+                    };
+
+                    if reauthed {
+                        // Pull a fresh snapshot of library and progress so no
+                        // missed events leave the UI stale. This says "auth was
+                        // sent", not "auth was accepted" — the server's own `init`
+                        // reply (→ socket-authenticated) remains the authoritative
+                        // confirmation, and SyncSection treats this as the fallback.
+                        let _ = app.emit("socket-reconnected", ());
+                    } else {
+                        let _ = app.emit("socket-disconnected", ());
                     }
                 }
                 .boxed()
