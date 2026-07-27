@@ -14,9 +14,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/items/{item_id}?expanded=1&include=share", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_item_share failed: HTTP {}", resp.status()));
@@ -89,9 +88,8 @@ impl AbsClient {
                 "expiresAt": expires_at,
                 "isDownloadable": is_downloadable,
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -108,9 +106,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/share/mediaitem/{share_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_share failed: HTTP {}", resp.status()));
@@ -145,9 +142,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/feeds", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_feeds failed: HTTP {}", resp.status()));
@@ -178,9 +174,8 @@ impl AbsClient {
                 "serverAddress": server_address,
                 "slug": slug,
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -198,9 +193,8 @@ impl AbsClient {
             .http
             .post(format!("{}/api/feeds/{feed_id}/close", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("close_feed failed: HTTP {}", resp.status()));

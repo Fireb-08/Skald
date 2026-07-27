@@ -10,9 +10,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/users/{user_id}/listening-stats", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_listening_stats failed: HTTP {}", resp.status()));
@@ -29,9 +28,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/me/listening-stats", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_user_stats failed: HTTP {}", resp.status()));
@@ -47,9 +45,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/stats", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_library_stats failed: HTTP {}", resp.status()));
@@ -96,9 +93,8 @@ impl AbsClient {
             .http
             .get(url)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_listening_sessions failed: HTTP {}", resp.status()));
@@ -115,9 +111,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/sessions/{session_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_session failed: HTTP {}", resp.status()));
@@ -143,9 +138,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/users/online", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_online_open_sessions failed: HTTP {}", resp.status()));

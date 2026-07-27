@@ -111,50 +111,86 @@ impl AbsClient {
             .ok_or_else(|| "No auth token configured".to_string())
     }
 
-    /// Send an authenticated request, refreshing and retrying **once** if the
-    /// server rejects the token.
-    ///
-    /// `build` is called with the bearer token and must produce the request from
-    /// scratch each time; that is what lets the retry carry the new token rather
-    /// than trying to rewrite a header on an already-built request.
+    /// Send a request, refreshing and retrying **once** if the server rejects the
+    /// token.
     ///
     /// The retry is a safety net, not the main mechanism — `authenticated()`
     /// normally refreshes before a token can go stale. It exists for the cases
     /// expiry maths cannot predict: a session revoked server-side, a password
     /// changed on another device, or a clock that disagrees with the server's.
+    /// Its real value is that a 401 those produce now ends in `auth-expired` and
+    /// a trip to Login, instead of a generic error on a screen that looks signed
+    /// in but no longer works.
+    ///
     /// It never loops: one refresh, one retry, then the caller sees the 401.
-    pub async fn send_authed<F>(&self, build: F) -> Result<reqwest::Response, String>
-    where
-        F: Fn(&str) -> reqwest::RequestBuilder,
-    {
-        let token = self
-            .token
-            .clone()
-            .ok_or_else(|| "No auth token configured".to_string())?;
+    async fn execute_refreshing(
+        &self,
+        builder: reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, String> {
+        // Snapshot for the retry before the body is consumed. `try_clone` returns
+        // None for streaming bodies (the multipart uploads), which simply means
+        // those do not get retried — re-reading a consumed stream is not possible.
+        let retry = builder.try_clone();
 
-        let resp = build(&token).send().await.map_err(|e| e.to_string())?;
+        let resp = builder.send().await.map_err(|e| e.to_string())?;
         if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
             return Ok(resp);
         }
 
+        let Some(retry) = retry else { return Ok(resp) };
+
+        let sent_with = self.token.clone().unwrap_or_default();
+        // A terminal rejection propagates: force_refresh has already emitted
+        // auth-expired, and surfacing its message beats a bare 401.
         let refreshed = crate::token_refresh::force_refresh(&self.base_url).await?;
         let new_token = match refreshed.effective() {
-            // Unchanged token means there was nothing to refresh (legacy session,
-            // old server). Retrying with it would just reproduce the same 401.
-            Some(t) if t != token => t.to_string(),
+            // An unchanged token means there was nothing to refresh (legacy
+            // session, old server). Retrying would reproduce the same 401.
+            Some(t) if t != sent_with => t.to_string(),
             _ => return Ok(resp),
         };
 
-        log::info!(target: "skald::auth", "retrying request after 401 with a refreshed token");
-        build(&new_token).send().await.map_err(|e| e.to_string())
-    }
+        // Rebuild rather than re-running the caller's chain: `insert` replaces the
+        // stale Authorization header, where RequestBuilder::header would append a
+        // second one and send both.
+        let mut request = retry.build().map_err(|e| e.to_string())?;
+        request.headers_mut().insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&format!("Bearer {new_token}"))
+                .map_err(|e| e.to_string())?,
+        );
 
+        log::info!(target: "skald::auth", "retrying request after 401 with a refreshed token");
+        self.http.execute(request).await.map_err(|e| e.to_string())
+    }
+}
+
+/// Lets an endpoint method end its builder chain with `.send_refreshing(self)`
+/// in place of `.send().await.map_err(...)`.
+///
+/// A free-standing adapter rather than an inherent method so the 105 endpoint
+/// methods keep reading as one uninterrupted builder chain. That matters: the
+/// retry is only useful if it is the path of least resistance, and a form that
+/// required rewriting each method to wrap its chain in a call is a form that
+/// would get skipped.
+pub trait SendRefreshing {
+    fn send_refreshing(
+        self,
+        client: &AbsClient,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response, String>> + Send + '_;
+}
+
+impl SendRefreshing for reqwest::RequestBuilder {
+    async fn send_refreshing(self, client: &AbsClient) -> Result<reqwest::Response, String> {
+        client.execute_refreshing(self).await
+    }
 }
 
 // AbsClient's endpoint methods live in one impl block per feature domain —
 // inherent impls resolve crate-wide, so callers still just use crate::api::AbsClient.
 mod admin;
 mod auth;
+pub use auth::RefreshError;
 mod collections;
 mod files;
 mod library;

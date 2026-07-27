@@ -17,9 +17,8 @@ impl AbsClient {
             .http
             .get(url)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("fetch_cover failed: HTTP {}", resp.status()));
@@ -49,9 +48,8 @@ impl AbsClient {
             .get(format!("{}/api/search/covers", self.root()))
             .query(&[("title", title), ("author", author), ("provider", provider)])
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("find_covers failed: HTTP {}", resp.status()));
@@ -68,9 +66,8 @@ impl AbsClient {
             .post(format!("{}/api/items/{item_id}/cover", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "url": url }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("set_cover_url failed: HTTP {}", resp.status()));
@@ -103,9 +100,8 @@ impl AbsClient {
             .post(format!("{}/api/items/{item_id}/cover", self.root()))
             .header("Authorization", self.auth_header()?)
             .multipart(form)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("upload_cover failed: HTTP {}", resp.status()));
@@ -119,9 +115,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/items/{item_id}/cover", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("remove_cover failed: HTTP {}", resp.status()));
@@ -143,9 +138,8 @@ impl AbsClient {
             .patch(format!("{}/api/items/{item_id}/media", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_media failed: HTTP {}", resp.status()));
@@ -167,9 +161,8 @@ impl AbsClient {
             .post(format!("{}/api/items/{item_id}/chapters", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "chapters": chapters }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_chapters failed: HTTP {}", resp.status()));
@@ -190,9 +183,8 @@ impl AbsClient {
             .get(format!("{}/api/search/books", self.root()))
             .header("Authorization", self.auth_header()?)
             .query(&[("title", title), ("author", author), ("provider", provider)])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("search_books failed: HTTP {}", resp.status()));
@@ -209,9 +201,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/search/providers", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("search_providers failed: HTTP {}", resp.status()));

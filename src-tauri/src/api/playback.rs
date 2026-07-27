@@ -17,9 +17,8 @@ impl AbsClient {
             .post(format!("{}/api/me/item/{item_id}/bookmark", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "time": time, "title": title }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_bookmark failed: HTTP {}", resp.status()));
@@ -55,9 +54,8 @@ impl AbsClient {
                 "duration": duration,
                 "isFinished": is_finished,
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_progress failed: HTTP {}", resp.status()));
@@ -72,9 +70,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/me/progress/{item_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_progress failed: HTTP {}", resp.status()));
@@ -98,9 +95,8 @@ impl AbsClient {
                 "currentTime": current_time,
                 "timeListened": time_listened,
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("sync_session failed: HTTP {}", resp.status()));
@@ -154,9 +150,8 @@ impl AbsClient {
             .post(url)
             .header("Authorization", self.auth_header()?)
             .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("open_session failed: HTTP {}", resp.status()));
@@ -186,9 +181,8 @@ impl AbsClient {
                 "currentTime": current_time,
                 "timeListened": time_listened,
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         // Close is intentionally idempotent: the frontend safety net and Rust
         // ExitRequested handler may race, and ABS also closes same-device
@@ -216,9 +210,8 @@ impl AbsClient {
             .http
             .get(path)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_media_progress failed: HTTP {}", resp.status()));
         }
@@ -233,9 +226,8 @@ impl AbsClient {
             .post(format!("{}/api/session/{session_id}/close", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({}))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() && resp.status() != reqwest::StatusCode::NOT_FOUND {
             return Err(format!("owned session close failed: HTTP {}", resp.status()));

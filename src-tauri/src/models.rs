@@ -367,6 +367,9 @@ pub struct MediaProgress {
 pub struct MeResponse {
     pub id: String,
     pub username: String,
+    /// Same deprecated "old token" as `User::token`, and nullable for the same
+    /// reason — `/api/me` is `toOldJSONForBrowser()` too.
+    #[serde(default, deserialize_with = "null_as_empty_string")]
     pub token: String,
     #[serde(default)]
     pub media_progress: Vec<MediaProgress>,

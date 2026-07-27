@@ -227,25 +227,48 @@ pub async fn connect(
         // application events.
         .on("reconnect", {
             let app = app.clone();
+            let server_url = server_url.clone();
             move |_: Payload, socket: Client| {
                 let app = app.clone();
+                let server_url = server_url.clone();
                 async move {
                     // Wait for the socket handshake to settle before re-auth;
                     // mirrors the 500 ms delay used on initial connect.
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    // Read the token now rather than replaying the one captured at
-                    // connect. Access tokens rotate roughly hourly, and the drops
-                    // this handler exists for — sleep/wake, a long network outage —
-                    // are exactly the ones likely to outlive the original token.
-                    let token = crate::auth::load_token().ok().flatten().unwrap_or_default();
-                    // Re-emit auth on the fresh socket ID. Failure is unusual
-                    // (same valid token, same established transport) so we
-                    // proceed to notify the frontend regardless — the resync HTTP
-                    // calls use their own auth headers and will succeed either way.
-                    let _ = socket.emit("auth", token).await;
-                    // Signal the frontend to pull a fresh snapshot of library and
-                    // progress so no missed events leave the UI in a stale state.
-                    let _ = app.emit("socket-reconnected", ());
+
+                    // Refresh, don't just re-read. The drops this handler exists
+                    // for — sleep/wake, a long outage — are precisely the ones
+                    // that outlive an hour-long access token, and while they last
+                    // no HTTP command runs to refresh it proactively. Re-reading
+                    // the keyring would faithfully reload an expired token and the
+                    // socket would come back unauthenticated.
+                    let token = match crate::token_refresh::fresh_tokens(&server_url).await {
+                        Ok(tokens) => tokens.effective().map(str::to_string),
+                        Err(e) => {
+                            // Session is gone (auth-expired has been emitted).
+                            log::warn!(target: "skald::sync", "socket re-auth after reconnect abandoned: {e}");
+                            None
+                        }
+                    };
+
+                    match token {
+                        Some(token) => {
+                            if let Err(e) = socket.emit("auth", token).await {
+                                log::warn!(target: "skald::sync", "socket re-auth emit failed after reconnect: {e}");
+                            }
+                            // Signal the frontend to pull a fresh snapshot of
+                            // library and progress so no missed events leave the
+                            // UI stale. Only worth doing once auth was sent —
+                            // an unauthenticated socket receives no events to
+                            // catch up on.
+                            let _ = app.emit("socket-reconnected", ());
+                        }
+                        None => {
+                            // Without a usable token the socket is connected but
+                            // deaf. Say so rather than reporting a healthy resync.
+                            let _ = app.emit("socket-disconnected", ());
+                        }
+                    }
                 }
                 .boxed()
             }

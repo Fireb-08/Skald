@@ -10,9 +10,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/collections", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_collections failed: HTTP {}", resp.status()));
@@ -38,9 +37,8 @@ impl AbsClient {
                 "name": name,
                 "books": [book_id],
             }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_collection failed: HTTP {}", resp.status()));
@@ -60,9 +58,8 @@ impl AbsClient {
             .post(format!("{}/api/collections/{collection_id}/book", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "id": book_id }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("add_book_to_collection failed: HTTP {}", resp.status()));
@@ -83,9 +80,8 @@ impl AbsClient {
             .patch(format!("{}/api/collections/{collection_id}", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_collection failed: HTTP {}", resp.status()));
@@ -105,9 +101,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/collections/{collection_id}/book/{book_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("remove_book_from_collection failed: HTTP {}", resp.status()));
@@ -128,9 +123,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/playlists", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_playlists failed: HTTP {}", resp.status()));
@@ -146,9 +140,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/playlists/{playlist_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_playlist failed: HTTP {}", resp.status()));
@@ -183,9 +176,8 @@ impl AbsClient {
             .post(format!("{}/api/playlists", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_playlist failed: HTTP {}", resp.status()));
@@ -220,9 +212,8 @@ impl AbsClient {
             .patch(format!("{}/api/playlists/{playlist_id}", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_playlist failed: HTTP {}", resp.status()));
@@ -237,9 +228,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/playlists/{playlist_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_playlist failed: HTTP {}", resp.status()));
@@ -262,9 +252,8 @@ impl AbsClient {
             .post(format!("{}/api/playlists/{playlist_id}/batch/add", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "items": items_val }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("batch_add_to_playlist failed: HTTP {}", resp.status()));
@@ -287,9 +276,8 @@ impl AbsClient {
             .post(format!("{}/api/playlists/{playlist_id}/batch/remove", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "items": items_val }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("batch_remove_from_playlist failed: HTTP {}", resp.status()));
@@ -308,9 +296,8 @@ impl AbsClient {
             .http
             .post(format!("{}/api/playlists/collection/{collection_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_playlist_from_collection failed: HTTP {}", resp.status()));

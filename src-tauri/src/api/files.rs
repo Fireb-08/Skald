@@ -33,9 +33,8 @@ impl AbsClient {
             .http
             .get(url)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_item_expanded failed: HTTP {}", resp.status()));
         }
@@ -52,9 +51,8 @@ impl AbsClient {
             .http
             .get(self.item_route(item_id, &["ffprobe", file_id])?)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_audio_file_probe failed: HTTP {}", resp.status()));
         }
@@ -68,9 +66,8 @@ impl AbsClient {
             .http
             .delete(self.item_route(item_id, &["file", file_id])?)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("delete_library_file failed: HTTP {}", resp.status()));
         }
@@ -89,9 +86,8 @@ impl AbsClient {
             .patch(self.item_route(item_id, &["tracks"])?)
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "orderedFileData": ordered_file_data }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("update_item_tracks failed: HTTP {}", resp.status()));
         }
@@ -111,9 +107,8 @@ impl AbsClient {
             .http
             .get(self.item_route(item_id, &["file", file_id, "download"])?)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("download_library_file failed: HTTP {}", resp.status()));
         }

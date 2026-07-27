@@ -13,9 +13,8 @@ impl AbsClient {
             .http
             .post(format!("{}/api/authorize", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("fetch_server_settings failed: HTTP {}", resp.status()));
@@ -42,9 +41,8 @@ impl AbsClient {
             .patch(format!("{}/api/settings", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_server_settings failed: HTTP {}", resp.status()));
@@ -69,9 +67,8 @@ impl AbsClient {
             .patch(format!("{}/api/sorting-prefixes", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "sortingPrefixes": prefixes }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_sorting_prefixes failed: HTTP {}", resp.status()));
@@ -91,9 +88,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/notifications", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_notifications failed: HTTP {}", resp.status()));
@@ -114,9 +110,8 @@ impl AbsClient {
             .patch(format!("{}/api/notifications", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_notification_settings failed: HTTP {}", resp.status()));
@@ -138,9 +133,8 @@ impl AbsClient {
             .post(format!("{}/api/notifications", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_notification failed: HTTP {}", resp.status()));
@@ -160,9 +154,8 @@ impl AbsClient {
             .patch(format!("{}/api/notifications/{}", self.root(), id))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("update_notification failed: HTTP {}", resp.status()));
@@ -177,9 +170,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/notifications/{}", self.root(), id))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_notification failed: HTTP {}", resp.status()));
@@ -196,9 +188,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/notifications/{}/test", self.root(), id))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("test_notification failed: HTTP {}", resp.status()));
@@ -213,9 +204,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/notifications/test", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("fire_test_event failed: HTTP {}", resp.status()));
@@ -231,9 +221,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/backups", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_backups failed: HTTP {}", resp.status()));
@@ -250,9 +239,8 @@ impl AbsClient {
             .http
             .post(format!("{}/api/backups", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_backup failed: HTTP {}", resp.status()));
@@ -267,9 +255,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/backups/{}", self.root(), id))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_backup failed: HTTP {}", resp.status()));
@@ -283,6 +270,11 @@ impl AbsClient {
     /// HTTP connection may drop before/without a clean response. Treat any
     /// transport error after a sent request as "restore started" — the caller
     /// warns the user the server is restarting.
+    ///
+    /// Deliberately does *not* use `send_refreshing`: this is the one endpoint
+    /// that reads a transport error as success, and the refresh wrapper reports a
+    /// dead session as `Err` too. Conflating the two would tell the user a restore
+    /// had started when authentication had actually failed.
     pub async fn apply_backup(&self, id: &str) -> Result<(), String> {
         let resp = self
             .http
@@ -310,9 +302,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/tasks", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_tasks failed: HTTP {}", resp.status()));
@@ -327,9 +318,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/logger-data", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_logger_data failed: HTTP {}", resp.status()));
@@ -347,9 +337,8 @@ impl AbsClient {
             .post(format!("{}/api/validate-cron", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "expression": expression }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         match resp.status().as_u16() {
             200 => Ok(true),
@@ -367,9 +356,8 @@ impl AbsClient {
             .get(format!("{}/api/filesystem", self.root()))
             .header("Authorization", self.auth_header()?)
             .query(&[("path", path)])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_filesystem failed: HTTP {}", resp.status()));
@@ -389,9 +377,8 @@ impl AbsClient {
             .post(format!("{}/api/libraries", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -414,9 +401,8 @@ impl AbsClient {
             .patch(format!("{}/api/libraries/{library_id}", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -437,9 +423,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/libraries/{library_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -465,9 +450,8 @@ impl AbsClient {
             .http
             .post(url)
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("scan_library failed: HTTP {}", resp.status()));
@@ -487,9 +471,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/custom-metadata-providers", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_custom_metadata_providers failed: HTTP {}", resp.status()));
@@ -512,9 +495,8 @@ impl AbsClient {
             .post(format!("{}/api/custom-metadata-providers", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_custom_metadata_provider failed: HTTP {}", resp.status()));
@@ -529,9 +511,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/custom-metadata-providers/{id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_custom_metadata_provider failed: HTTP {}", resp.status()));

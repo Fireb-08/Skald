@@ -19,9 +19,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/users", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_all_users failed: HTTP {}", resp.status()));
@@ -78,9 +77,8 @@ impl AbsClient {
             .post(format!("{}/api/users", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("create_user failed: HTTP {}", resp.status()));
@@ -116,9 +114,8 @@ impl AbsClient {
             .patch(format!("{}/api/users/{user_id}", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -150,9 +147,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/users/online", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_online_users failed: HTTP {}", resp.status()));
@@ -169,9 +165,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/users/{user_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_user failed: HTTP {}", resp.status()));
@@ -190,9 +185,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/users/{user_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_user failed: HTTP {}", resp.status()));

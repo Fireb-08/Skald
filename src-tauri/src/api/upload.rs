@@ -103,9 +103,8 @@ impl AbsClient {
             .post(format!("{}/api/upload", self.root()))
             .header("Authorization", self.auth_header()?)
             .multipart(form)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             // Include the response body — ABS returns plain-text reasons here

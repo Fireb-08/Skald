@@ -3,6 +3,54 @@
 // auth_header() helpers, and shared imports come from the parent (mod.rs).
 use super::*;
 
+/// Why a `/auth/refresh` call did not yield a new token pair.
+///
+/// Typed rather than a formatted string because the caller's response differs
+/// sharply by case — a 401 signs the user out, a 404 latches legacy mode, and
+/// anything else must be treated as transient. Matching on `HTTP 401` inside a
+/// message would let a server's *error text* trigger a sign-out.
+#[derive(Debug)]
+pub enum RefreshError {
+    /// The server answered, with a non-success status and (usually) a reason.
+    Status {
+        status: reqwest::StatusCode,
+        detail: String,
+    },
+    /// The request never completed — DNS, TLS, timeout, connection refused.
+    Transport(String),
+    /// The server answered 200 but the body was not a login payload.
+    Decode(String),
+}
+
+impl RefreshError {
+    /// The route does not exist: the server predates ABS 2.26.
+    pub fn is_route_missing(&self) -> bool {
+        matches!(self, Self::Status { status, .. } if *status == reqwest::StatusCode::NOT_FOUND)
+    }
+
+    /// The refresh token itself was rejected — spent, expired, revoked, or the
+    /// user was deactivated. The session cannot be recovered without a re-login.
+    pub fn is_credential_rejected(&self) -> bool {
+        matches!(
+            self,
+            Self::Status { status, .. }
+                if *status == reqwest::StatusCode::UNAUTHORIZED
+                    || *status == reqwest::StatusCode::FORBIDDEN
+        )
+    }
+}
+
+impl std::fmt::Display for RefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Status { status, detail } if detail.is_empty() => write!(f, "HTTP {status}"),
+            Self::Status { status, detail } => write!(f, "HTTP {status} — {detail}"),
+            Self::Transport(e) => write!(f, "request failed: {e}"),
+            Self::Decode(e) => write!(f, "unreadable refresh response: {e}"),
+        }
+    }
+}
+
 /// Everything a successful `/login` (or `/auth/refresh`) hands back. The two
 /// endpoints return the identical payload shape — ABS builds both from
 /// `getUserLoginResponsePayload` — so one parser and one outcome type serve both.
@@ -88,14 +136,14 @@ impl AbsClient {
     /// A 404 means the server predates 2.26 and has no refresh route; callers use
     /// that to stop trying. A 401 means the refresh token is spent, expired, or
     /// revoked, and the session is over.
-    pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<LoginOutcome, String> {
+    pub async fn refresh_tokens(&self, refresh_token: &str) -> Result<LoginOutcome, RefreshError> {
         let resp = self
             .http
             .post(format!("{}/auth/refresh", self.root()))
             .header("x-refresh-token", refresh_token)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| RefreshError::Transport(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -107,10 +155,13 @@ impl AbsClient {
                 .ok()
                 .and_then(|b| b.get("error")?.as_str().map(str::to_string))
                 .unwrap_or_default();
-            return Err(format!("refresh failed: HTTP {status} {detail}").trim_end().to_string());
+            return Err(RefreshError::Status { status, detail });
         }
 
-        let body: AuthPayload = resp.json().await.map_err(|e| e.to_string())?;
+        let body: AuthPayload = resp
+            .json()
+            .await
+            .map_err(|e| RefreshError::Decode(e.to_string()))?;
         Ok(body.into_outcome())
     }
 
@@ -120,9 +171,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/me", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_me failed: HTTP {}", resp.status()));
@@ -140,9 +190,8 @@ impl AbsClient {
             .patch(format!("{}/api/me/password", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "password": current, "newPassword": new_password }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -159,9 +208,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/auth-settings", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_auth_settings failed: HTTP {}", resp.status()));

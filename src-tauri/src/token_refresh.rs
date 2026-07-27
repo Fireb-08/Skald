@@ -170,7 +170,7 @@ async fn refresh_now(
             }
             Ok(rotated)
         }
-        Err(e) if is_not_found(&e) => {
+        Err(e) if e.is_route_missing() => {
             // Pre-2.26 server: the route does not exist. The legacy token we hold
             // does not expire, so this is not a failure — just stop asking.
             SERVER_LACKS_REFRESH.store(true, Ordering::Relaxed);
@@ -180,32 +180,33 @@ async fn refresh_now(
             );
             Ok(current)
         }
-        Err(e) if is_unauthorized(&e) => {
+        Err(e) if e.is_credential_rejected() => {
             // The refresh token is spent, expired, or revoked. This session is
             // over; only the user can fix it.
             log::warn!(target: "skald::auth", "refresh rejected, session ended: {e}");
+
+            // Drop the dead credential rather than leaving it to be retried on
+            // every launch. Keeping it would make has_token() report a session
+            // that cannot work, so startup would enter the authenticated path,
+            // fail the same refresh, and bounce back to Login.
+            if let Err(clear_err) = auth::clear_token() {
+                log::warn!(
+                    target: "skald::auth",
+                    "could not clear the rejected credential from the keyring: {clear_err}"
+                );
+            }
+
             emit_auth_expired();
             Err(format!("Your session has expired. Please sign in again. ({e})"))
         }
         Err(e) => {
-            // Network/transport trouble. The access token may still have life in
-            // it (we refresh early on purpose), so let the caller try.
+            // Transport trouble or an unreadable response — neither is a verdict
+            // on the credential. The access token may still have life in it (we
+            // refresh early on purpose), so let the caller try.
             log::warn!(target: "skald::auth", "refresh attempt failed, continuing with the current token: {e}");
             Ok(current)
         }
     }
-}
-
-/// `refresh_tokens` formats transport and status failures into one string; these
-/// two read the status back out of it. Narrow by design — anything unrecognized
-/// is treated as a transient error, which fails safe (retry later) rather than
-/// signing the user out on a blip.
-fn is_not_found(err: &str) -> bool {
-    err.contains("HTTP 404")
-}
-
-fn is_unauthorized(err: &str) -> bool {
-    err.contains("HTTP 401") || err.contains("HTTP 403")
 }
 
 fn now_seconds() -> i64 {
@@ -294,11 +295,29 @@ mod tests {
 
     #[test]
     fn refresh_errors_are_classified_by_status() {
-        assert!(is_not_found("refresh failed: HTTP 404 Not Found"));
-        assert!(is_unauthorized("refresh failed: HTTP 401 Unauthorized Refresh token expired"));
-        // A transport failure is neither — it must fail safe as transient.
-        let transport = "error sending request for url (http://x/auth/refresh)";
-        assert!(!is_not_found(transport) && !is_unauthorized(transport));
+        use crate::api::RefreshError;
+        use reqwest::StatusCode;
+
+        let status = |s: StatusCode, detail: &str| RefreshError::Status {
+            status: s,
+            detail: detail.to_string(),
+        };
+
+        assert!(status(StatusCode::NOT_FOUND, "").is_route_missing());
+        assert!(status(StatusCode::UNAUTHORIZED, "Refresh token expired").is_credential_rejected());
+        assert!(status(StatusCode::FORBIDDEN, "").is_credential_rejected());
+
+        // A 500 is not a verdict on the credential.
+        let server_error = status(StatusCode::INTERNAL_SERVER_ERROR, "boom");
+        assert!(!server_error.is_route_missing() && !server_error.is_credential_rejected());
+
+        // Transport and decode failures must fail safe as transient. Note the
+        // message deliberately contains "HTTP 401": the old string-matching
+        // classifier would have signed the user out on this.
+        let transport = RefreshError::Transport("proxy said HTTP 401 somewhere".into());
+        assert!(!transport.is_route_missing() && !transport.is_credential_rejected());
+        let decode = RefreshError::Decode("expected value at line 1".into());
+        assert!(!decode.is_route_missing() && !decode.is_credential_rejected());
     }
 }
 
@@ -555,18 +574,37 @@ mod contract_tests {
             .mount(&env.server)
             .await;
 
-        // The protected endpoint rejects the first (stale) token and accepts the
+        // The real endpoint rejects the first (stale) token and accepts the
         // refreshed one — the scenario proactive expiry maths cannot predict.
+        // Deliberately driven through `get_me()` rather than the retry helper
+        // directly: an earlier version of this test exercised the helper in
+        // isolation and so failed to notice that no endpoint actually called it.
         Mock::given(method("GET"))
             .and(path("/api/me"))
             .respond_with({
                 let calls = calls.clone();
-                move |_: &wiremock::Request| {
+                move |req: &wiremock::Request| {
                     let n = calls.fetch_add(1, Ordering::Relaxed);
+                    let bearer = req
+                        .headers
+                        .get("authorization")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string();
                     if n == 0 {
                         ResponseTemplate::new(401)
                     } else {
-                        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "ok": true }))
+                        // The retry must carry the *new* token, and exactly one
+                        // Authorization header — `insert`, not append.
+                        assert_eq!(req.headers.get_all("authorization").iter().count(), 1);
+                        ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                            "id": "u1",
+                            "username": "listener",
+                            // Null, as a post-migration account's would be.
+                            "token": null,
+                            "isActive": true,
+                            "sentBearer": bearer,
+                        }))
                     }
                 }
             })
@@ -582,20 +620,58 @@ mod contract_tests {
         .unwrap();
 
         let uri = env.server.uri();
-        let client = AbsClient::authenticated(uri.clone()).await.unwrap();
-        let resp = client
-            .send_authed(|token| {
-                client
-                    .http
-                    .get(format!("{uri}/api/me"))
-                    .header("Authorization", format!("Bearer {token}"))
-            })
+        let me = AbsClient::authenticated(uri.clone())
             .await
-            .unwrap();
+            .unwrap()
+            .get_me()
+            .await
+            .expect("get_me should succeed on the retry");
 
-        assert_eq!(resp.status(), 200);
+        assert_eq!(me.id, "u1");
         // Exactly twice: the original and one retry. Never a loop.
         assert_eq!(calls.load(Ordering::Relaxed), 2);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_401_clears_the_stored_credential() {
+        let env = setup().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/me"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&env.server)
+            .await;
+
+        // The refresh token is dead too, so the session cannot be recovered.
+        Mock::given(method("POST"))
+            .and(path("/auth/refresh"))
+            .respond_with(
+                ResponseTemplate::new(401)
+                    .set_body_json(serde_json::json!({ "error": "Refresh token expired" })),
+            )
+            .mount(&env.server)
+            .await;
+
+        auth::save_tokens(&AuthTokens {
+            access: Some(fresh_access("v1")),
+            refresh: Some("refresh-v1".into()),
+            legacy: None,
+        })
+        .unwrap();
+
+        let err = AbsClient::authenticated(env.server.uri())
+            .await
+            .unwrap()
+            .get_me()
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("sign in again"), "user-facing message: {err}");
+        // Leaving the revoked pair behind would make has_token() report a session
+        // that cannot work, so the next launch would take the authenticated path,
+        // fail the same refresh, and bounce straight back to Login.
+        assert_eq!(auth::load_tokens().unwrap(), None);
+        assert_eq!(AUTH_EXPIRED_EMITS.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
@@ -619,19 +695,18 @@ mod contract_tests {
         // reproduce the same 401 against the same server.
         auth::save_tokens(&AuthTokens::legacy("old-tok")).unwrap();
 
-        let uri = env.server.uri();
-        let client = AbsClient::authenticated(uri.clone()).await.unwrap();
-        let resp = client
-            .send_authed(|token| {
-                client
-                    .http
-                    .get(format!("{uri}/api/me"))
-                    .header("Authorization", format!("Bearer {token}"))
-            })
+        let err = AbsClient::authenticated(env.server.uri())
             .await
-            .unwrap();
+            .unwrap()
+            .get_me()
+            .await
+            .unwrap_err();
 
-        assert_eq!(resp.status(), 401);
+        assert!(err.contains("401"), "should surface the original status: {err}");
         assert_eq!(calls.load(Ordering::Relaxed), 1);
+        // A legacy session is not "expired" — there is simply nothing to refresh,
+        // so the stored token must survive rather than being wiped.
+        assert!(auth::load_tokens().unwrap().is_some());
+        assert_eq!(AUTH_EXPIRED_EMITS.load(Ordering::Relaxed), 0);
     }
 }

@@ -13,9 +13,8 @@ impl AbsClient {
             .post(format!("{}/api/podcasts/feed", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "rssFeed": rss_feed }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_podcast_feed failed: HTTP {}", resp.status()));
         }
@@ -32,9 +31,8 @@ impl AbsClient {
             .post(format!("{}/api/podcasts", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("create_podcast failed: HTTP {}", resp.status()));
         }
@@ -49,9 +47,8 @@ impl AbsClient {
             .post(format!("{}/api/podcasts/opml/parse", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&serde_json::json!({ "opmlText": opml_text }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("parse_opml failed: HTTP {}", resp.status()));
         }
@@ -67,9 +64,8 @@ impl AbsClient {
             .post(format!("{}/api/podcasts/opml/create", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("create_from_opml failed: HTTP {}", resp.status()));
         }
@@ -91,7 +87,7 @@ impl AbsClient {
         if let Some(l) = limit {
             req = req.query(&[("limit", l.to_string())]);
         }
-        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send_refreshing(self).await?;
         if !resp.status().is_success() {
             return Err(format!("check_new_episodes failed: HTTP {}", resp.status()));
         }
@@ -105,9 +101,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/podcasts/{item_id}/downloads", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_episode_downloads failed: HTTP {}", resp.status()));
         }
@@ -121,9 +116,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/podcasts/{item_id}/clear-queue", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("clear_download_queue failed: HTTP {}", resp.status()));
         }
@@ -143,9 +137,8 @@ impl AbsClient {
             .post(format!("{}/api/podcasts/{item_id}/download-episodes", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&episodes)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("download_episodes failed: HTTP {}", resp.status()));
         }
@@ -160,9 +153,8 @@ impl AbsClient {
             .get(format!("{}/api/podcasts/{item_id}/search-episode", self.root()))
             .header("Authorization", self.auth_header()?)
             .query(&[("title", title)])
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("find_episode failed: HTTP {}", resp.status()));
         }
@@ -185,7 +177,7 @@ impl AbsClient {
         if override_existing {
             req = req.query(&[("override", "1")]);
         }
-        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send_refreshing(self).await?;
         if !resp.status().is_success() {
             return Err(format!("match_episodes failed: HTTP {}", resp.status()));
         }
@@ -198,9 +190,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/podcasts/{item_id}/episode/{episode_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_episode failed: HTTP {}", resp.status()));
         }
@@ -221,9 +212,8 @@ impl AbsClient {
             .patch(format!("{}/api/podcasts/{item_id}/episode/{episode_id}", self.root()))
             .header("Authorization", self.auth_header()?)
             .json(&payload)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("update_episode failed: HTTP {}", resp.status()));
         }
@@ -245,7 +235,7 @@ impl AbsClient {
         if hard {
             req = req.query(&[("hard", "1")]);
         }
-        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send_refreshing(self).await?;
         if !resp.status().is_success() {
             return Err(format!("delete_episode failed: HTTP {}", resp.status()));
         }
@@ -272,9 +262,8 @@ impl AbsClient {
             .get(format!("{}/api/libraries/{library_id}/recent-episodes", self.root()))
             .header("Authorization", self.auth_header()?)
             .query(&query)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("get_recent_episodes failed: HTTP {}", resp.status()));
         }
@@ -288,9 +277,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/opml", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
         if !resp.status().is_success() {
             return Err(format!("export_opml failed: HTTP {}", resp.status()));
         }

@@ -15,9 +15,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_libraries failed: HTTP {}", resp.status()));
@@ -38,9 +37,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/items", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_library_items failed: HTTP {}", resp.status()));
@@ -66,9 +64,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/series?limit=1000", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_library_series failed: HTTP {}", resp.status()));
@@ -99,9 +96,8 @@ impl AbsClient {
                 self.root()
             ))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_series_items failed: HTTP {}", resp.status()));
@@ -118,9 +114,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/libraries/{library_id}/personalized", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_continue_listening failed: HTTP {}", resp.status()));
@@ -146,9 +141,8 @@ impl AbsClient {
             .http
             .get(format!("{}/api/items/{item_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("get_item failed: HTTP {}", resp.status()));
@@ -163,9 +157,8 @@ impl AbsClient {
             .http
             .delete(format!("{}/api/items/{item_id}", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("delete_item failed: HTTP {}", resp.status()));
@@ -180,9 +173,8 @@ impl AbsClient {
             .http
             .post(format!("{}/api/items/{item_id}/scan", self.root()))
             .header("Authorization", self.auth_header()?)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .send_refreshing(self)
+            .await?;
 
         if !resp.status().is_success() {
             return Err(format!("rescan_item failed: HTTP {}", resp.status()));
