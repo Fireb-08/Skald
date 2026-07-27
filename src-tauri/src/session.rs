@@ -331,6 +331,71 @@ pub struct PendingListen {
     /// day even though the drain lands after midnight. Zero until the first
     /// second is counted.
     pub last_counted_ms: i64,
+    /// Set when this playback's books have been closed (`close_local_listen_credit`).
+    /// A closed bucket is inert to its tick task: no further second may be
+    /// counted into it. See `count_listen_second` for why that matters.
+    pub closed: bool,
+}
+
+impl PendingListen {
+    /// Take the counted listening, leaving the bucket's *closed* state behind.
+    /// A plain `mem::take` would reopen it, and the straggler tick this whole
+    /// mechanism exists to stop would simply refill it after the closing drain.
+    fn drain(&mut self) -> PendingListen {
+        let closed = self.closed;
+        let drained = std::mem::take(self);
+        self.closed = closed;
+        drained
+    }
+}
+
+/// What became of one played second offered to the listening bucket.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ListenTick {
+    /// The bucket belongs to a playback that has already been closed off, so
+    /// this second is not this tick's to count.
+    Refused,
+    /// Counted; `flush` once the bucket is big enough to be worth writing out.
+    Counted { flush: bool },
+}
+
+/// Count one played second into the bucket.
+///
+/// The refusal is the point. A tick task is only *asked* to stop (an atomic
+/// flag), so the outgoing item's task can already be past its active check —
+/// and about to count another second — when the switch drains and closes its
+/// books. That straggler second would drain later under the *previous* item's
+/// credit, and `offline_sessions::accrue` would then find the next item's
+/// session in the store's single active slot and retire a listen that is still
+/// growing, splitting one continuous listen across two sessions. Refusing it
+/// under the same mutex the closing drain takes leaves no window: a second
+/// either lands before the close and is drained by it, or never lands at all.
+fn count_listen_second(
+    pending: &mut PendingListen,
+    current_time: f64,
+    duration: f64,
+    now_ms: i64,
+) -> ListenTick {
+    if pending.closed {
+        return ListenTick::Refused;
+    }
+    pending.seconds += 1.0;
+    pending.current_time = current_time;
+    pending.duration = duration;
+    pending.last_counted_ms = now_ms;
+    ListenTick::Counted { flush: pending.seconds >= LISTEN_FLUSH_EVERY }
+}
+
+/// Whether the bucket's counted seconds and `now_ms` fall on different local
+/// days — the tick's signal to drain before counting, so an evening's seconds
+/// are not dated from a drain that lands after midnight. A closed bucket is
+/// never rolled over: whatever it still holds is the closing drain's to retry
+/// (or the tick's own loop-end drain), not a straggler's to file.
+fn bucket_rolled_over(pending: &PendingListen, now_ms: i64) -> bool {
+    !pending.closed
+        && pending.seconds > 0.0
+        && pending.last_counted_ms > 0
+        && crate::offline_sessions::day_changed(pending.last_counted_ms, now_ms)
 }
 
 /// How many accumulated local listening seconds trigger a catalog flush. The
@@ -364,7 +429,7 @@ pub fn flush_listen_time(
         // Poison-tolerant like the tick's player lock — stats must never be the
         // thing that blocks a flush during teardown.
         let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
-        std::mem::take(&mut *p)
+        p.drain()
     };
     if drained.seconds < 1.0 {
         return;
@@ -531,10 +596,23 @@ impl SessionManager {
     /// here, synchronously, means the late task has nothing left to drain and its
     /// retire is a no-op — the identity check in `retire_active_for` then covers
     /// what remains.
+    ///
+    /// Draining is not enough on its own: the outgoing task can be *mid*-iteration,
+    /// already past its active check and about to count one more second into the
+    /// bucket this is draining. So the bucket is marked closed first, under the
+    /// same mutex the tick counts through — `count_listen_second` then refuses
+    /// that second rather than letting it drain later under a dead credit.
     fn close_local_listen_credit(&mut self) {
         let Some(credit) = self.local_listen_credit.take() else {
             return;
         };
+        {
+            let mut pending = self
+                .local_listen_pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            pending.closed = true;
+        }
         let Some(item_id) = self.local_item_id.clone() else {
             return;
         };
@@ -1190,22 +1268,20 @@ impl SessionManager {
                         // yesterday's seconds stay on yesterday.
                         let rolled_over = {
                             let pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
-                            pend.seconds > 0.0
-                                && pend.last_counted_ms > 0
-                                && crate::offline_sessions::day_changed(pend.last_counted_ms, now_ms)
+                            bucket_rolled_over(&pend, now_ms)
                         };
                         if rolled_over {
                             flush_listen_time(listen_credit_tick.as_ref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
                         }
-                        let due = {
+                        // Refused when a book-switch has already closed this
+                        // playback's books — the second belongs to a listen that
+                        // is over, and draining it later would disturb the next
+                        // item's live session (see count_listen_second).
+                        let counted = {
                             let mut pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
-                            pend.seconds += 1.0;
-                            pend.current_time = report;
-                            pend.duration = dur;
-                            pend.last_counted_ms = now_ms;
-                            pend.seconds >= LISTEN_FLUSH_EVERY
+                            count_listen_second(&mut pend, report, dur, now_ms)
                         };
-                        if due {
+                        if matches!(counted, ListenTick::Counted { flush: true }) {
                             flush_listen_time(listen_credit_tick.as_ref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
                         }
                     }
@@ -1453,7 +1529,7 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{acknowledge_listened, commit_position, downloaded_session_context, end_decision, flush_listen_time, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, EndState, ListenCredit, PendingListen, PersistState, SessionManager, SyncClaim};
+    use super::{acknowledge_listened, bucket_rolled_over, commit_position, count_listen_second, downloaded_session_context, end_decision, flush_listen_time, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, EndState, ListenCredit, ListenTick, PendingListen, PersistState, SessionManager, SyncClaim, LISTEN_FLUSH_EVERY};
     use crate::api::AbsClient;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
@@ -1472,6 +1548,7 @@ mod tick_tests {
             current_time: 900.0,
             duration: 3600.0,
             last_counted_ms: 1_700_000_000_000,
+            closed: false,
         }));
         flush_listen_time(None, "li_abc", None, &pending);
 
@@ -1479,6 +1556,121 @@ mod tick_tests {
             pending.lock().unwrap().seconds,
             300.0,
             "with no credit channel the counter is neither written nor drained",
+        );
+    }
+
+    // A bucket counts freely until its playback's books are closed, and never
+    // again after — including for the day-roll drain, which would otherwise let
+    // a straggler file seconds the closing drain is still responsible for.
+    #[test]
+    fn a_closed_listen_bucket_refuses_every_further_second() {
+        let mut bucket = PendingListen::default();
+        let now_ms = 1_700_000_000_000;
+
+        assert_eq!(
+            count_listen_second(&mut bucket, 120.0, 3600.0, now_ms),
+            ListenTick::Counted { flush: false },
+        );
+        assert_eq!(bucket.seconds, 1.0);
+        assert_eq!(bucket.current_time, 120.0, "the position rides along with the second");
+
+        // The bucket asks to be written out once it is worth a disk trip.
+        bucket.seconds = LISTEN_FLUSH_EVERY - 1.0;
+        assert_eq!(
+            count_listen_second(&mut bucket, 150.0, 3600.0, now_ms),
+            ListenTick::Counted { flush: true },
+        );
+
+        // The switch closes the books; the drain must not reopen them.
+        bucket.closed = true;
+        let drained = bucket.drain();
+        assert_eq!(drained.seconds, LISTEN_FLUSH_EVERY, "the closing drain still takes everything");
+        assert!(bucket.closed, "a drained bucket stays closed");
+
+        // The straggler's second, and its day-roll drain, both find nothing to do.
+        assert_eq!(count_listen_second(&mut bucket, 999.0, 3600.0, now_ms), ListenTick::Refused);
+        assert_eq!(bucket.seconds, 0.0, "a refused second leaves no trace to drain later");
+        bucket.seconds = 5.0;
+        bucket.last_counted_ms = now_ms;
+        assert!(
+            !bucket_rolled_over(&bucket, now_ms + 24 * 60 * 60 * 1_000),
+            "a closed bucket is inert to its tick even across midnight",
+        );
+    }
+
+    /// The stale-task interleaving end to end, against a real session store.
+    ///
+    /// A tick task is only *asked* to stop, so the outgoing item's task can be
+    /// past its active check and about to count another second when the switch
+    /// drains and closes its books. Draining alone does not stop that second:
+    /// it would sit in the old bucket, drain on the task's way out under the
+    /// *previous* item's credit, and `accrue` — which cannot tell a straggler
+    /// from a legitimate item-switch — would retire the next item's still-growing
+    /// session, splitting one continuous listen across two. The closed flag is
+    /// what removes the window.
+    #[test]
+    fn a_straggler_second_cannot_disturb_the_next_items_live_session() {
+        use crate::offline_sessions::{accrue, load_store, retire_active_for, SessionContext};
+        use chrono::TimeZone;
+
+        let context = |item_id: &str| SessionContext {
+            item_id: item_id.to_string(),
+            episode_id: None,
+            media_type: "book".to_string(),
+            display_title: "The Red Knight".to_string(),
+            display_author: "Miles Cameron".to_string(),
+            server_key: "https://abs.example.com".to_string(),
+            user_id: "usr_listener".to_string(),
+        };
+        let dir = tempfile::tempdir().unwrap();
+        // One fixed instant throughout, so nothing here can day-split.
+        let at = chrono::Local.with_ymd_and_hms(2026, 7, 27, 9, 0, 0).single().unwrap();
+        let (first, second) = (context("li_first"), context("li_second"));
+
+        // The first book has been playing; the switch closes and drains its books.
+        let bucket = Arc::new(Mutex::new(PendingListen {
+            seconds: 12.0,
+            current_time: 612.0,
+            duration: 3600.0,
+            last_counted_ms: at.timestamp_millis(),
+            closed: false,
+        }));
+        let drained = {
+            let mut b = bucket.lock().unwrap();
+            b.closed = true;
+            b.drain()
+        };
+        accrue(dir.path(), &first, drained.seconds, drained.current_time, drained.duration, at).unwrap();
+        retire_active_for(dir.path(), &first).unwrap();
+
+        // The second book starts and mints its session.
+        accrue(dir.path(), &second, 30.0, 30.0, 1800.0, at).unwrap();
+        let live = load_store(dir.path()).active.expect("the new book is accruing").session.id;
+
+        // The straggler finally wakes. Its second is refused, so its loop-end
+        // drain has nothing to carry into the store under the dead credit.
+        let outcome = {
+            let mut b = bucket.lock().unwrap();
+            count_listen_second(&mut b, 613.0, 3600.0, at.timestamp_millis())
+        };
+        assert_eq!(outcome, ListenTick::Refused);
+        let straggler = bucket.lock().unwrap().drain();
+        assert!(straggler.seconds < 1.0, "nothing is left to reach accrue");
+
+        let store = load_store(dir.path());
+        assert_eq!(store.active.expect("still accruing").session.id, live, "the live listen is untouched");
+        assert_eq!(store.pending.len(), 1, "only the finished book is flushable");
+        assert_eq!(store.pending[0].session.library_item_id, "li_first");
+
+        // ...and this is precisely the damage the refusal prevents: had that one
+        // second drained under the previous item's credit, accrue would have
+        // closed off a listen that was still growing.
+        accrue(dir.path(), &first, 1.0, 613.0, 3600.0, at).unwrap();
+        let store = load_store(dir.path());
+        assert_eq!(store.active.unwrap().session.library_item_id, "li_first", "the dead item takes the slot");
+        assert!(
+            store.pending.iter().any(|s| s.session.id == live),
+            "the next item's live session would have been retired mid-listen",
         );
     }
 
