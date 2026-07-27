@@ -10,9 +10,7 @@ pub async fn update_server_settings(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<ServerSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_server_settings(payload).await
+    AbsClient::authenticated(server_url).await?.update_server_settings(payload).await
 }
 
 /// PATCH /api/sorting-prefixes — replace the server's sorting prefix list. Admin only.
@@ -22,9 +20,7 @@ pub async fn update_sorting_prefixes(
     server_url: String,
     prefixes: Vec<String>,
 ) -> Result<ServerSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_sorting_prefixes(prefixes).await
+    AbsClient::authenticated(server_url).await?.update_sorting_prefixes(prefixes).await
 }
 
 /// POST /api/authorize via the stored token to refresh serverSettings on an
@@ -33,9 +29,7 @@ pub async fn update_sorting_prefixes(
 /// ABS returns serverSettings to any authenticated user, so no role check here.
 #[tauri::command]
 pub async fn fetch_server_settings(server_url: String) -> Result<ServerSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).fetch_server_settings().await
+    AbsClient::authenticated(server_url).await?.fetch_server_settings().await
 }
 
 // ── Notification settings (Apprise) — admin only ─────────────────────────────
@@ -45,9 +39,7 @@ pub async fn fetch_server_settings(server_url: String) -> Result<ServerSettings,
 /// GET /api/notifications — fetch the current settings + event catalog.
 #[tauri::command]
 pub async fn get_notifications(server_url: String) -> Result<NotificationsResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_notifications().await
+    AbsClient::authenticated(server_url).await?.get_notifications().await
 }
 
 /// PATCH /api/notifications — update global settings (appriseApiUrl, limits).
@@ -56,9 +48,7 @@ pub async fn update_notification_settings(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_notification_settings(payload).await
+    AbsClient::authenticated(server_url).await?.update_notification_settings(payload).await
 }
 
 /// POST /api/notifications — create a notification rule.
@@ -67,9 +57,7 @@ pub async fn create_notification(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).create_notification(payload).await
+    AbsClient::authenticated(server_url).await?.create_notification(payload).await
 }
 
 /// PATCH /api/notifications/:id — update one rule.
@@ -79,9 +67,7 @@ pub async fn update_notification(
     id: String,
     payload: serde_json::Value,
 ) -> Result<NotificationSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_notification(&id, payload).await
+    AbsClient::authenticated(server_url).await?.update_notification(&id, payload).await
 }
 
 /// DELETE /api/notifications/:id — delete one rule.
@@ -90,25 +76,19 @@ pub async fn delete_notification(
     server_url: String,
     id: String,
 ) -> Result<NotificationSettings, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).delete_notification(&id).await
+    AbsClient::authenticated(server_url).await?.delete_notification(&id).await
 }
 
 /// GET /api/notifications/:id/test — send a real test to one rule's URLs.
 #[tauri::command]
 pub async fn test_notification(server_url: String, id: String) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).test_notification(&id).await
+    AbsClient::authenticated(server_url).await?.test_notification(&id).await
 }
 
 /// GET /api/notifications/test — fire a synthetic onTest event end-to-end.
 #[tauri::command]
 pub async fn fire_test_notification_event(server_url: String) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).fire_test_event().await
+    AbsClient::authenticated(server_url).await?.fire_test_event().await
 }
 
 // ── Backups (admin only) ─────────────────────────────────────────────────────
@@ -117,33 +97,25 @@ pub async fn fire_test_notification_event(server_url: String) -> Result<(), Stri
 /// GET /api/backups — list backups + the backup directory location.
 #[tauri::command]
 pub async fn get_backups(server_url: String) -> Result<BackupsResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_backups().await
+    AbsClient::authenticated(server_url).await?.get_backups().await
 }
 
 /// POST /api/backups — create a backup now.
 #[tauri::command]
 pub async fn create_backup(server_url: String) -> Result<BackupsResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).create_backup().await
+    AbsClient::authenticated(server_url).await?.create_backup().await
 }
 
 /// DELETE /api/backups/:id — delete a backup.
 #[tauri::command]
 pub async fn delete_backup(server_url: String, id: String) -> Result<BackupsResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).delete_backup(&id).await
+    AbsClient::authenticated(server_url).await?.delete_backup(&id).await
 }
 
 /// GET /api/backups/:id/apply — restore from a backup (destructive; restarts ABS).
 #[tauri::command]
 pub async fn apply_backup(server_url: String, id: String) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).apply_backup(&id).await
+    AbsClient::authenticated(server_url).await?.apply_backup(&id).await
 }
 
 // ── Scheduled tasks ──────────────────────────────────────────────────────────
@@ -153,17 +125,13 @@ pub async fn apply_backup(server_url: String, id: String) -> Result<(), String> 
 /// GET /api/tasks — current + recently-finished background tasks.
 #[tauri::command]
 pub async fn get_tasks(server_url: String) -> Result<TasksResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_tasks().await
+    AbsClient::authenticated(server_url).await?.get_tasks().await
 }
 
 /// POST /api/validate-cron — true if the cron expression is valid.
 #[tauri::command]
 pub async fn validate_cron(server_url: String, expression: String) -> Result<bool, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).validate_cron(&expression).await
+    AbsClient::authenticated(server_url).await?.validate_cron(&expression).await
 }
 
 // ── Server logs (admin only) ─────────────────────────────────────────────────
@@ -174,9 +142,7 @@ pub async fn validate_cron(server_url: String, expression: String) -> Result<boo
 /// GET /api/logger-data — the current day's recent log entries.
 #[tauri::command]
 pub async fn get_logger_data(server_url: String) -> Result<LoggerData, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_logger_data().await
+    AbsClient::authenticated(server_url).await?.get_logger_data().await
 }
 
 /// Register the live-sync socket as a log listener at `level` (TRACE=0…FATAL=5).
@@ -207,9 +173,7 @@ pub async fn browse_server_filesystem(
     server_url: String,
     path: String,
 ) -> Result<models::FsDirectory, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_filesystem(&path).await
+    AbsClient::authenticated(server_url).await?.get_filesystem(&path).await
 }
 
 /// Returns all libraries with the full expanded shape (folders, settings, timestamps).
@@ -218,9 +182,7 @@ pub async fn browse_server_filesystem(
 /// without aliasing concerns in the frontend.
 #[tauri::command]
 pub async fn get_libraries_full(server_url: String) -> Result<Vec<models::Library>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_libraries().await
+    AbsClient::authenticated(server_url).await?.get_libraries().await
 }
 
 /// Creates a new library on the server and returns the created Library.
@@ -234,10 +196,8 @@ pub async fn create_library(
     provider: Option<String>,
     settings: Option<models::LibrarySettings>,
 ) -> Result<models::Library, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     let payload = models::CreateLibraryPayload { name, media_type, folders, icon, provider, settings };
-    AbsClient::new(server_url).with_token(token).create_library(&payload).await
+    AbsClient::authenticated(server_url).await?.create_library(&payload).await
 }
 
 /// Partially updates a library. Only fields set in the payload are sent to the server.
@@ -247,9 +207,7 @@ pub async fn update_library(
     library_id: String,
     payload: models::UpdateLibraryPayload,
 ) -> Result<models::Library, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_library(&library_id, &payload).await
+    AbsClient::authenticated(server_url).await?.update_library(&library_id, &payload).await
 }
 
 /// Permanently deletes a library and all its items.
@@ -258,9 +216,7 @@ pub async fn delete_library(
     server_url: String,
     library_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).delete_library(&library_id).await
+    AbsClient::authenticated(server_url).await?.delete_library(&library_id).await
 }
 
 /// Triggers a server-side library scan. `force=true` requests a full rescan;
@@ -271,9 +227,7 @@ pub async fn scan_library(
     library_id: String,
     force: bool,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).scan_library(&library_id, force).await
+    AbsClient::authenticated(server_url).await?.scan_library(&library_id, force).await
 }
 
 // ── Custom metadata providers (admin) ────────────────────────────────────────
@@ -281,8 +235,7 @@ pub async fn scan_library(
 /// GET /api/custom-metadata-providers — list custom providers.
 #[tauri::command]
 pub async fn get_custom_metadata_providers(server_url: String) -> Result<Vec<CustomMetadataProvider>, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_custom_metadata_providers().await
+    AbsClient::authenticated(server_url).await?.get_custom_metadata_providers().await
 }
 
 /// POST /api/custom-metadata-providers — register a custom provider.
@@ -291,13 +244,11 @@ pub async fn create_custom_metadata_provider(
     server_url: String,
     payload: serde_json::Value,
 ) -> Result<CustomMetadataProvider, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).create_custom_metadata_provider(payload).await
+    AbsClient::authenticated(server_url).await?.create_custom_metadata_provider(payload).await
 }
 
 /// DELETE /api/custom-metadata-providers/:id — remove a custom provider.
 #[tauri::command]
 pub async fn delete_custom_metadata_provider(server_url: String, id: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).delete_custom_metadata_provider(&id).await
+    AbsClient::authenticated(server_url).await?.delete_custom_metadata_provider(&id).await
 }

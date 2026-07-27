@@ -20,6 +20,7 @@ pub mod podcast_feed; // Local Podcasts: server-free RSS/Atom feed + OPML parsin
 pub mod podcast_scheduler; // Local Podcasts: auto-download poll + retention
 pub mod sync_config; // Shared Rust/React playback-sync cadence definition
 pub mod session_ownership; // Stable ABS device identity + Skald-owned session journal
+pub mod token_refresh; // ABS 2.26+ access-token refresh (single-flight, persist-before-use)
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -149,6 +150,11 @@ pub fn run() {
         .manage(upload_registry) // per-upload CancellationTokens — accessed by cancel_upload
         .setup(move |app| {
             use tauri::Manager;
+
+            // Give the refresh engine a handle for its auth-expired /
+            // auth-token-refreshed events. It runs beneath API calls that carry
+            // no handle of their own, so it cannot be passed one per request.
+            token_refresh::init(app.handle().clone());
 
             #[cfg(target_os = "linux")]
             if disabled_dmabuf_for_nvidia {

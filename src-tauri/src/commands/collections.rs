@@ -8,10 +8,8 @@ pub async fn get_collections(
     server_url: String,
     library_id: String,
 ) -> Result<Vec<models::Collection>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_collections(&library_id)
         .await
 }
@@ -23,10 +21,8 @@ pub async fn create_collection(
     name: String,
     book_id: String,
 ) -> Result<models::Collection, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_collection(&library_id, &name, &book_id)
         .await
 }
@@ -37,10 +33,8 @@ pub async fn add_book_to_collection(
     collection_id: String,
     book_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .add_book_to_collection(&collection_id, &book_id)
         .await
 }
@@ -53,9 +47,7 @@ pub async fn update_collection(
     collection_id: String,
     payload: serde_json::Value,
 ) -> Result<models::Collection, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).update_collection(&collection_id, payload).await
+    AbsClient::authenticated(server_url).await?.update_collection(&collection_id, payload).await
 }
 
 /// DELETE /api/collections/:id/book/:bookId — remove a book from a collection.
@@ -65,9 +57,7 @@ pub async fn remove_book_from_collection(
     collection_id: String,
     book_id: String,
 ) -> Result<models::Collection, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).remove_book_from_collection(&collection_id, &book_id).await
+    AbsClient::authenticated(server_url).await?.remove_book_from_collection(&collection_id, &book_id).await
 }
 
 // ── Playlist commands ────────────────────────────────────────────────────────
@@ -77,10 +67,8 @@ pub async fn get_playlists(
     server_url: String,
     library_id: String,
 ) -> Result<Vec<models::Playlist>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_playlists(&library_id)
         .await
 }
@@ -90,10 +78,8 @@ pub async fn get_playlist(
     server_url: String,
     playlist_id: String,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_playlist(&playlist_id)
         .await
 }
@@ -106,10 +92,8 @@ pub async fn create_playlist(
     description: Option<String>,
     items: Option<Vec<models::PlaylistItemInput>>,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_playlist(&library_id, &name, description.as_deref(), items)
         .await
 }
@@ -122,10 +106,8 @@ pub async fn update_playlist(
     description: Option<String>,
     items: Option<Vec<models::PlaylistItemInput>>,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .update_playlist(&playlist_id, name.as_deref(), description.as_deref(), items)
         .await
 }
@@ -135,10 +117,8 @@ pub async fn delete_playlist(
     server_url: String,
     playlist_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .delete_playlist(&playlist_id)
         .await
 }
@@ -149,10 +129,8 @@ pub async fn batch_add_to_playlist(
     playlist_id: String,
     items: Vec<models::PlaylistItemInput>,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .batch_add_to_playlist(&playlist_id, items)
         .await
 }
@@ -163,10 +141,8 @@ pub async fn batch_remove_from_playlist(
     playlist_id: String,
     items: Vec<models::PlaylistItemInput>,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .batch_remove_from_playlist(&playlist_id, items)
         .await
 }
@@ -176,10 +152,8 @@ pub async fn create_playlist_from_collection(
     server_url: String,
     collection_id: String,
 ) -> Result<models::Playlist, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_playlist_from_collection(&collection_id)
         .await
 }

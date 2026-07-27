@@ -1,7 +1,10 @@
+#[cfg(not(test))]
 use keyring::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(test))]
 const SERVICE: &str = "skald";
+#[cfg(not(test))]
 const ACCOUNT: &str = "token";
 
 /// The credential set for one ABS session.
@@ -128,6 +131,7 @@ fn jwt_exp(token: &str) -> Option<i64> {
     claims.get("exp")?.as_i64()
 }
 
+#[cfg(not(test))]
 fn credential_error(action: &str, error: KeyringError) -> String {
     #[cfg(target_os = "linux")]
     {
@@ -144,12 +148,41 @@ fn credential_error(action: &str, error: KeyringError) -> String {
     }
 }
 
+#[cfg(not(test))]
 fn entry() -> Result<Entry, String> {
     Entry::new(SERVICE, ACCOUNT).map_err(|e| credential_error("opening the keyring", e))
 }
 
+/// In-memory stand-in for the OS keyring, used only under `cargo test`.
+///
+/// Tests must never read or write the developer's real credentials (the same
+/// house rule that keeps the persistence tests in tempfile dirs). Routing the
+/// three storage functions through this seam lets the refresh engine be tested
+/// end-to-end against a mock server with no keyring involved at all.
+#[cfg(test)]
+pub(crate) mod test_keyring {
+    use std::sync::Mutex;
+
+    pub(crate) static STORE: Mutex<Option<String>> = Mutex::new(None);
+
+    /// Reset to the signed-out state.
+    pub(crate) fn clear() {
+        *STORE.lock().unwrap() = None;
+    }
+
+    /// Seed the stored payload directly, as a previous session would have left it.
+    pub(crate) fn seed(raw: &str) {
+        *STORE.lock().unwrap() = Some(raw.to_string());
+    }
+
+    pub(crate) fn peek() -> Option<String> {
+        STORE.lock().unwrap().clone()
+    }
+}
+
 /// Persist the full credential set. This is the only write path that can store a
 /// refresh token; `save_token` remains for single-token (API-key) sessions.
+#[cfg(not(test))]
 pub fn save_tokens(tokens: &AuthTokens) -> Result<(), String> {
     entry()?
         .set_password(&tokens.to_stored())
@@ -157,12 +190,32 @@ pub fn save_tokens(tokens: &AuthTokens) -> Result<(), String> {
 }
 
 /// Load the full credential set, migrating a bare-string entry on the fly.
+#[cfg(not(test))]
 pub fn load_tokens() -> Result<Option<AuthTokens>, String> {
     match entry()?.get_password() {
         Ok(raw) => Ok(Some(AuthTokens::from_stored(&raw))),
         Err(KeyringError::NoEntry) => Ok(None),
         Err(e) => Err(credential_error("loading your sign-in token", e)),
     }
+}
+
+// Test builds swap the three storage functions for the in-memory seam above, so
+// no test can read or write the developer's real credentials.
+#[cfg(test)]
+pub fn save_tokens(tokens: &AuthTokens) -> Result<(), String> {
+    test_keyring::seed(&tokens.to_stored());
+    Ok(())
+}
+
+#[cfg(test)]
+pub fn load_tokens() -> Result<Option<AuthTokens>, String> {
+    Ok(test_keyring::peek().as_deref().map(AuthTokens::from_stored))
+}
+
+#[cfg(test)]
+pub fn clear_token() -> Result<(), String> {
+    test_keyring::clear();
+    Ok(())
 }
 
 /// Store a single non-refreshable token (API-key login, and any caller that only
@@ -182,6 +235,7 @@ pub fn load_token() -> Result<Option<String>, String> {
 }
 
 /// Returns Ok(()) even if no entry exists — absence is not an error.
+#[cfg(not(test))]
 pub fn clear_token() -> Result<(), String> {
     match entry()?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => Ok(()),

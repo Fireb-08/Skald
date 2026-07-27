@@ -33,9 +33,7 @@ pub async fn open_playback_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<OpenSessionResult, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let client = AbsClient::new(server_url).with_token(token);
+    let client = AbsClient::authenticated(server_url).await?;
     let resolved_user_id = if user_id.trim().is_empty() {
         client.get_me().await?.id
     } else {
@@ -73,9 +71,7 @@ pub async fn cleanup_owned_playback_sessions(
     user_id: String,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<u32, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let client = AbsClient::new(server_url).with_token(token);
+    let client = AbsClient::authenticated(server_url).await?;
     let resolved_user_id = if user_id.trim().is_empty() {
         client.get_me().await?.id
     } else {
@@ -219,10 +215,8 @@ pub async fn create_bookmark(
     time: f64,
     title: String,
 ) -> Result<models::Bookmark, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_bookmark(&item_id, time, &title)
         .await
 }
@@ -232,10 +226,8 @@ pub async fn delete_progress(
     server_url: String,
     item_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .delete_progress(&item_id)
         .await
 }
@@ -249,10 +241,8 @@ pub async fn update_progress(
     duration: f64,
     is_finished: bool,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .update_progress(&item_id, episode_id.as_deref(), current_time, duration, is_finished)
         .await
 }
@@ -264,10 +254,8 @@ pub async fn sync_session(
     current_time: f64,
     time_listened: f64,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .sync_session(&session_id, current_time, time_listened)
         .await
 }
@@ -411,10 +399,8 @@ pub async fn close_session(
     current_time: f64,
     time_listened: f64,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let result = AbsClient::new(server_url)
-        .with_token(token)
+    let result = AbsClient::authenticated(server_url)
+        .await?
         .close_session(&session_id, current_time, time_listened)
         .await;
     if result.is_ok() {

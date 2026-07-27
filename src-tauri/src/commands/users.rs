@@ -8,18 +8,14 @@ use super::*;
 /// Any authenticated user can call this; the ABS server does not restrict it to admins.
 #[tauri::command]
 pub async fn get_online_users(server_url: String) -> Result<Vec<String>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_online_users().await
+    AbsClient::authenticated(server_url).await?.get_online_users().await
 }
 
 /// GET /api/users — returns every user account on the server.
 /// Admin and root accounts only; the ABS server returns 403 for others.
 #[tauri::command]
 pub async fn get_all_users(server_url: String) -> Result<Vec<models::AdminUser>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_all_users().await
+    AbsClient::authenticated(server_url).await?.get_all_users().await
 }
 
 /// POST /api/users — creates a new user account on the server.
@@ -37,10 +33,8 @@ pub async fn create_user(
     is_active: Option<bool>,
     permissions: Option<serde_json::Value>,
 ) -> Result<models::AdminUser, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_user(
             &username,
             &password,
@@ -73,13 +67,11 @@ pub async fn update_user(
     // itemTagsSelected nested); None leaves access control untouched.
     permissions: Option<serde_json::Value>,
 ) -> Result<models::AdminUser, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
     // Treat an empty password string the same as None so the server keeps the
     // existing hash rather than overwriting it with an empty password.
     let pw = password.as_deref().filter(|s| !s.is_empty());
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .update_user(
             &user_id,
             crate::api::UserPatch {
@@ -99,10 +91,8 @@ pub async fn update_user(
 /// the server would reject self-deletion anyway.
 #[tauri::command]
 pub async fn delete_user(server_url: String, user_id: String) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .delete_user(&user_id)
         .await
 }
@@ -112,20 +102,17 @@ pub async fn delete_user(server_url: String, user_id: String) -> Result<(), Stri
 /// GET /api/users/:id — fetch one user with the full permissions object.
 #[tauri::command]
 pub async fn get_user(server_url: String, user_id: String) -> Result<models::AdminUser, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_user(&user_id).await
+    AbsClient::authenticated(server_url).await?.get_user(&user_id).await
 }
 
 /// PATCH /api/me/password — self-service password change ({ password, newPassword }).
 #[tauri::command]
 pub async fn change_password(server_url: String, current: String, new_password: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).change_password(&current, &new_password).await
+    AbsClient::authenticated(server_url).await?.change_password(&current, &new_password).await
 }
 
 /// GET /api/auth-settings — admin-only; read-only check of whether OIDC is enabled.
 #[tauri::command]
 pub async fn get_auth_settings(server_url: String) -> Result<models::AuthSettings, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_auth_settings().await
+    AbsClient::authenticated(server_url).await?.get_auth_settings().await
 }

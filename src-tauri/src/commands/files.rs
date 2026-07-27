@@ -1,10 +1,8 @@
-use crate::{api::AbsClient, auth, models};
+use crate::{api::AbsClient, models};
 use std::path::PathBuf;
 
-fn client(server_url: String) -> Result<AbsClient, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    Ok(AbsClient::new(server_url).with_token(token))
+async fn client(server_url: String) -> Result<AbsClient, String> {
+    AbsClient::authenticated(server_url).await
 }
 
 #[tauri::command]
@@ -13,7 +11,7 @@ pub async fn fetch_item_expanded(
     item_id: String,
 ) -> Result<models::LibraryItem, String> {
     log::info!(target: "skald::library", "file inspector load start item={item_id}");
-    let result = client(server_url)?.get_item_expanded(&item_id).await;
+    let result = client(server_url).await?.get_item_expanded(&item_id).await;
     match &result {
         Ok(item) => log::info!(target: "skald::library", "file inspector load success item={} files={}", item_id, item.library_files.as_ref().map_or(0, Vec::len)),
         Err(error) => log::warn!(target: "skald::library", "file inspector load failed item={item_id}: {error}"),
@@ -28,7 +26,7 @@ pub async fn get_audio_file_probe(
     file_id: String,
 ) -> Result<serde_json::Value, String> {
     log::info!(target: "skald::library", "audio probe start item={item_id} file={file_id}");
-    let result = client(server_url)?.get_audio_file_probe(&item_id, &file_id).await;
+    let result = client(server_url).await?.get_audio_file_probe(&item_id, &file_id).await;
     match &result {
         Ok(_) => log::info!(target: "skald::library", "audio probe success item={item_id} file={file_id}"),
         Err(error) => log::warn!(target: "skald::library", "audio probe failed item={item_id} file={file_id}: {error}"),
@@ -44,7 +42,8 @@ pub async fn download_library_file(
     destination: String,
 ) -> Result<u64, String> {
     log::info!(target: "skald::downloads", "individual file download start item={item_id} file={file_id}");
-    let result = client(server_url)?
+    let result = client(server_url)
+        .await?
         .download_library_file(&item_id, &file_id, &PathBuf::from(destination))
         .await;
     match &result {
@@ -61,7 +60,7 @@ pub async fn delete_library_file(
     file_id: String,
 ) -> Result<(), String> {
     log::info!(target: "skald::library", "individual file delete start item={item_id} file={file_id}");
-    let result = client(server_url)?.delete_library_file(&item_id, &file_id).await;
+    let result = client(server_url).await?.delete_library_file(&item_id, &file_id).await;
     match &result {
         Ok(()) => log::info!(target: "skald::library", "individual file delete success item={item_id} file={file_id}"),
         Err(error) => log::warn!(target: "skald::library", "individual file delete failed item={item_id} file={file_id}: {error}"),
@@ -85,7 +84,7 @@ pub async fn update_item_tracks(
     let included = ordered_file_data.iter().filter(|entry| !entry.exclude).count();
     let excluded = ordered_file_data.len() - included;
     log::info!(target: "skald::playback", "track update start item={item_id} included={included} excluded={excluded}");
-    let result = client(server_url)?.update_item_tracks(&item_id, &ordered_file_data).await;
+    let result = client(server_url).await?.update_item_tracks(&item_id, &ordered_file_data).await;
     match &result {
         Ok(_) => log::info!(target: "skald::playback", "track update success item={item_id} included={included} excluded={excluded}"),
         Err(error) => log::warn!(target: "skald::playback", "track update failed item={item_id}: {error}"),

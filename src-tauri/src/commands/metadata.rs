@@ -21,10 +21,8 @@ pub async fn get_cover(
     // widths are stored separately and never collide.
     if !cover_cache::is_cached(&item_id, width, version) {
         // Not yet cached: fetch from ABS (resized when width is Some) and write to disk.
-        let token = auth::load_token()?
-            .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-        let bytes = AbsClient::new(server_url)
-            .with_token(token)
+        let bytes = AbsClient::authenticated(server_url)
+            .await?
             .fetch_cover(&item_id, width)
             .await?;
         cover_cache::save_cover(&item_id, width, version, &bytes)?;
@@ -75,10 +73,8 @@ pub async fn update_media(
     item_id: String,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .update_media(&item_id, payload)
         .await
 }
@@ -90,10 +86,8 @@ pub async fn update_chapters(
     item_id: String,
     chapters: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .update_chapters(&item_id, chapters)
         .await
 }
@@ -110,15 +104,13 @@ pub async fn find_covers(
     author: String,
     provider: String,
 ) -> Result<Vec<String>, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).find_covers(&title, &author, &provider).await
+    AbsClient::authenticated(server_url).await?.find_covers(&title, &author, &provider).await
 }
 
 /// POST /api/items/:id/cover { url } — set the cover from a remote URL.
 #[tauri::command]
 pub async fn set_cover_url(server_url: String, item_id: String, url: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).set_cover_url(&item_id, &url).await;
+    let result = AbsClient::authenticated(server_url).await?.set_cover_url(&item_id, &url).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
     result
 }
@@ -126,8 +118,7 @@ pub async fn set_cover_url(server_url: String, item_id: String, url: String) -> 
 /// POST /api/items/:id/cover (multipart) — upload a local image as the cover.
 #[tauri::command]
 pub async fn upload_cover(server_url: String, item_id: String, file_path: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).upload_cover(&item_id, &file_path).await;
+    let result = AbsClient::authenticated(server_url).await?.upload_cover(&item_id, &file_path).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
     result
 }
@@ -135,8 +126,7 @@ pub async fn upload_cover(server_url: String, item_id: String, file_path: String
 /// DELETE /api/items/:id/cover — remove the cover.
 #[tauri::command]
 pub async fn remove_cover(server_url: String, item_id: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    let result = AbsClient::new(server_url).with_token(token).remove_cover(&item_id).await;
+    let result = AbsClient::authenticated(server_url).await?.remove_cover(&item_id).await;
     if result.is_ok() { cover_cache::clear(&item_id); }
     result
 }
@@ -148,20 +138,16 @@ pub async fn search_books(
     author: String,
     provider: String,
 ) -> Result<serde_json::Value, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .search_books(&title, &author, &provider)
         .await
 }
 
 #[tauri::command]
 pub async fn search_providers(server_url: String) -> Result<serde_json::Value, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .search_providers()
         .await
 }

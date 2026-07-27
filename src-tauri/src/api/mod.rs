@@ -80,6 +80,26 @@ impl AbsClient {
         self
     }
 
+    /// A client for the current signed-in session, holding a token that is not
+    /// about to expire.
+    ///
+    /// This is the constructor authenticated commands should use. It replaces the
+    /// former `load_token()` + `with_token()` pair everywhere, which means every
+    /// API call now implicitly keeps the ABS 2.26 access token current — the
+    /// refresh is single-flight and shared, so a burst of commands still causes
+    /// at most one `/auth/refresh`.
+    ///
+    /// Errors only when there is no usable session at all (signed out, or a
+    /// refresh token the server has rejected outright).
+    pub async fn authenticated(base_url: String) -> Result<Self, String> {
+        let tokens = crate::token_refresh::fresh_tokens(&base_url).await?;
+        let token = tokens
+            .effective()
+            .ok_or_else(|| "Not authenticated: no token stored".to_string())?
+            .to_string();
+        Ok(Self::new(base_url).with_token(token))
+    }
+
     fn root(&self) -> String {
         self.base_url.trim_end_matches('/').to_string()
     }
@@ -89,6 +109,44 @@ impl AbsClient {
             .as_ref()
             .map(|t| format!("Bearer {t}"))
             .ok_or_else(|| "No auth token configured".to_string())
+    }
+
+    /// Send an authenticated request, refreshing and retrying **once** if the
+    /// server rejects the token.
+    ///
+    /// `build` is called with the bearer token and must produce the request from
+    /// scratch each time; that is what lets the retry carry the new token rather
+    /// than trying to rewrite a header on an already-built request.
+    ///
+    /// The retry is a safety net, not the main mechanism — `authenticated()`
+    /// normally refreshes before a token can go stale. It exists for the cases
+    /// expiry maths cannot predict: a session revoked server-side, a password
+    /// changed on another device, or a clock that disagrees with the server's.
+    /// It never loops: one refresh, one retry, then the caller sees the 401.
+    pub async fn send_authed<F>(&self, build: F) -> Result<reqwest::Response, String>
+    where
+        F: Fn(&str) -> reqwest::RequestBuilder,
+    {
+        let token = self
+            .token
+            .clone()
+            .ok_or_else(|| "No auth token configured".to_string())?;
+
+        let resp = build(&token).send().await.map_err(|e| e.to_string())?;
+        if resp.status() != reqwest::StatusCode::UNAUTHORIZED {
+            return Ok(resp);
+        }
+
+        let refreshed = crate::token_refresh::force_refresh(&self.base_url).await?;
+        let new_token = match refreshed.effective() {
+            // Unchanged token means there was nothing to refresh (legacy session,
+            // old server). Retrying with it would just reproduce the same 401.
+            Some(t) if t != token => t.to_string(),
+            _ => return Ok(resp),
+        };
+
+        log::info!(target: "skald::auth", "retrying request after 401 with a refreshed token");
+        build(&new_token).send().await.map_err(|e| e.to_string())
     }
 
 }

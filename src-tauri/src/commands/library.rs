@@ -5,9 +5,7 @@ use super::*;
 
 #[tauri::command]
 pub async fn fetch_libraries(server_url: String) -> Result<Vec<models::Library>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_libraries().await
+    AbsClient::authenticated(server_url).await?.get_libraries().await
 }
 
 #[tauri::command]
@@ -15,10 +13,8 @@ pub async fn fetch_library_items(
     server_url: String,
     library_id: String,
 ) -> Result<Vec<models::LibraryItem>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_library_items(&library_id)
         .await
 }
@@ -28,10 +24,8 @@ pub async fn get_library_series(
     server_url: String,
     library_id: String,
 ) -> Result<Vec<models::LibrarySeries>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_library_series(&library_id)
         .await
 }
@@ -44,10 +38,8 @@ pub async fn get_series_items(
     library_id: String,
     series_id: String,
 ) -> Result<Vec<models::LibraryItem>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_series_items(&library_id, &series_id)
         .await
 }
@@ -57,10 +49,8 @@ pub async fn get_continue_listening(
     server_url: String,
     library_id: String,
 ) -> Result<Vec<models::LibraryItem>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_continue_listening(&library_id)
         .await
 }
@@ -70,10 +60,8 @@ pub async fn fetch_item(
     server_url: String,
     item_id: String,
 ) -> Result<models::LibraryItem, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_item(&item_id)
         .await
 }
@@ -83,10 +71,8 @@ pub async fn delete_item(
     server_url: String,
     item_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .delete_item(&item_id)
         .await
 }
@@ -96,10 +82,8 @@ pub async fn rescan_item(
     server_url: String,
     item_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .rescan_item(&item_id)
         .await
 }

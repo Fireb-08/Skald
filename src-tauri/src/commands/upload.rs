@@ -100,8 +100,6 @@ pub async fn upload_media(
     app_handle: tauri::AppHandle,
     uploads: tauri::State<'_, UploadCancelRegistry>,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
 
     if file_paths.is_empty() {
         return Err("No files to upload".to_string());
@@ -163,8 +161,8 @@ pub async fn upload_media(
         }
     };
 
-    let result = AbsClient::new(server_url)
-        .with_token(token)
+    let result = AbsClient::authenticated(server_url)
+        .await?
         .upload_media(
             crate::api::UploadForm {
                 library_id: &library_id,

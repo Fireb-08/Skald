@@ -17,9 +17,8 @@ pub async fn create_share(
     expires_at: Option<i64>,
     is_downloadable: bool,
 ) -> Result<models::MediaItemShare, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .create_share(&slug, &media_item_type, &media_item_id, expires_at, is_downloadable)
         .await
 }
@@ -27,8 +26,7 @@ pub async fn create_share(
 /// DELETE /api/share/mediaitem/:id — revoke a share.
 #[tauri::command]
 pub async fn delete_share(server_url: String, share_id: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).delete_share(&share_id).await
+    AbsClient::authenticated(server_url).await?.delete_share(&share_id).await
 }
 
 /// GET /public/share/:slug — public re-validation of a tracked share (404 ⇒ gone).
@@ -44,10 +42,8 @@ pub async fn get_share_by_slug(server_url: String, slug: String) -> Result<model
 pub async fn get_item_share(server_url: String, item_id: String) -> Result<Option<models::MediaItemShare>, String> {
     // Authenticated route (/api/items/:id) — unlike the public get_share_by_slug,
     // this needs the stored token.
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_item_share(&item_id)
         .await
 }
@@ -55,8 +51,7 @@ pub async fn get_item_share(server_url: String, item_id: String) -> Result<Optio
 /// GET /api/feeds — list all open RSS feeds.
 #[tauri::command]
 pub async fn get_feeds(server_url: String) -> Result<Vec<models::RssFeed>, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_feeds().await
+    AbsClient::authenticated(server_url).await?.get_feeds().await
 }
 
 /// POST /api/feeds/:kind/:id/open — open a feed for an item/collection/series.
@@ -70,9 +65,8 @@ pub async fn open_feed(
     server_address: String,
     slug: String,
 ) -> Result<models::RssFeed, String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .open_feed(&entity_kind, &entity_id, &server_address, &slug)
         .await
 }
@@ -80,6 +74,5 @@ pub async fn open_feed(
 /// POST /api/feeds/:id/close — close/revoke an open feed.
 #[tauri::command]
 pub async fn close_feed(server_url: String, feed_id: String) -> Result<(), String> {
-    let token = auth::load_token()?.ok_or_else(|| "Not authenticated".to_string())?;
-    AbsClient::new(server_url).with_token(token).close_feed(&feed_id).await
+    AbsClient::authenticated(server_url).await?.close_feed(&feed_id).await
 }

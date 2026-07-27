@@ -91,3 +91,7 @@ keyring = { version = "3", default-features = false, features = ["linux-native-s
 # Temp dirs for persistence tests (downloads registry, offline queue) — tests
 # must never touch the user's real Skald data (Testing Suite plan).
 tempfile = "3"
+# Mock ABS server for HTTP contract tests: asserts the exact paths, methods and
+# headers Skald sends against fixtures captured while verifying the ABS source.
+# Introduced by the Auth Token Refresh roadmap for the /auth/refresh contract.
+wiremock = "0.6"

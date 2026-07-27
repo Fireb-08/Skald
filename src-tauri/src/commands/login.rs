@@ -19,6 +19,10 @@ pub async fn login(
     username: String,
     password: String,
 ) -> Result<LoginResult, String> {
+    // The "this server has no refresh route" flag describes whichever server was
+    // signed in before; this may be a different one.
+    crate::token_refresh::reset_for_new_session();
+
     let abs_client = AbsClient::new(server_url.clone());
     let outcome = abs_client.login(&username, &password).await?;
     let mut user = outcome.user;
@@ -78,6 +82,7 @@ pub async fn login(
 
 #[tauri::command]
 pub fn logout() -> Result<(), String> {
+    crate::token_refresh::reset_for_new_session();
     auth::clear_token()
 }
 
@@ -93,9 +98,7 @@ pub fn save_token(token: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn get_me(server_url: String) -> Result<models::MeResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_me().await
+    AbsClient::authenticated(server_url).await?.get_me().await
 }
 
 /// Return type for login_with_api_key — carries both the user profile and the

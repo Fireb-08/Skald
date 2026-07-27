@@ -404,9 +404,7 @@ pub async fn flush_offline_progress(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<u32, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    let client = AbsClient::new(server_url).with_token(token);
+    let client = AbsClient::authenticated(server_url).await?;
     let dl_dir = downloads::downloads_dir()?;
     // Snapshot the queue before iterating so remove_progress_entry modifies the
     // file independently of our iteration — no borrow-checker conflict.

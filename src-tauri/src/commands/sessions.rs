@@ -8,10 +8,8 @@ pub async fn fetch_listening_stats(
     server_url: String,
     user_id: String,
 ) -> Result<models::ListeningStats, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_listening_stats(&user_id)
         .await
 }
@@ -28,10 +26,8 @@ pub async fn get_listening_sessions(
     sort: Option<String>,   // ABS sort field name — None omits the param
     desc: Option<bool>,     // true=descending, false=ascending, None=omit
 ) -> Result<models::ListeningSessionsResponse, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         // Convert Option<String> to Option<&str> for the AbsClient method.
         .get_listening_sessions(user_id.as_deref(), page, items_per_page, sort.as_deref(), desc)
         .await
@@ -45,10 +41,8 @@ pub async fn delete_session(
     server_url: String,
     session_id: String,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .delete_session(&session_id)
         .await
 }
@@ -58,10 +52,8 @@ pub async fn delete_session(
 /// array; this command extracts only the sessions, which is what the Settings panel needs.
 #[tauri::command]
 pub async fn get_open_sessions(server_url: String) -> Result<Vec<models::ListeningSession>, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_online_open_sessions() // distinct from get_open_sessions which returns IDs for cleanup
         .await
 }
@@ -71,9 +63,7 @@ pub async fn get_open_sessions(server_url: String) -> Result<Vec<models::Listeni
 /// books finished, 7-day sparkline data, and recent sessions.
 #[tauri::command]
 pub async fn get_user_stats(server_url: String) -> Result<models::UserStats, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url).with_token(token).get_user_stats().await
+    AbsClient::authenticated(server_url).await?.get_user_stats().await
 }
 
 /// GET /api/libraries/{id}/stats — returns aggregate statistics for a library.
@@ -84,10 +74,8 @@ pub async fn get_library_stats(
     server_url: String,
     library_id: String,
 ) -> Result<models::LibraryStats, String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
-    AbsClient::new(server_url)
-        .with_token(token)
+    AbsClient::authenticated(server_url)
+        .await?
         .get_library_stats(&library_id)
         .await
 }
