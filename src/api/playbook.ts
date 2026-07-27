@@ -193,15 +193,38 @@ export async function playBook(
     // Keep focused book in sync so the Player view reflects the playing book.
     st.setFocusedBookId(bookId);
 
-    // 4. Sync UI position to the server-confirmed currentTime before the
-    //    first playback-tick event so waveform and chapter highlight are
-    //    correct from the first render.
-    st.setPosition(result.currentTime);
+    // 4. ABS is checked when the session opens, immediately before playback.
+    // Do not move backwards when Skald already has a later local stop point:
+    // the server can still be waiting for the next periodic push from this
+    // device. An explicit chapter/bookmark jump remains authoritative even
+    // when it intentionally moves backwards.
+    const cached = st.mediaProgress.find(progress =>
+      progress.libraryItemId === bookId && (progress.episodeId ?? null) === null);
+    const localCurrentTime = st.currentBookId === bookId
+      ? Math.max(st.position, cached?.currentTime ?? 0)
+      : cached?.currentTime ?? 0;
+    const resumeTime = requestedStartTime === undefined
+      ? Math.max(result.currentTime, localCurrentTime)
+      : result.currentTime;
+    if (resumeTime > result.currentTime) {
+      await seekAudio(resumeTime);
+      log.info('playback', 'preserved later local resume position', {
+        bookId,
+        localCurrentTime,
+        serverCurrentTime: result.currentTime,
+      });
+    }
+    st.setPosition(resumeTime);
 
     // 5. Start playback and optimistically mark the UI as playing — the
     //    playback-tick event from Rust confirms within ~1 second.
-    await playAudio().catch(logErr);
-    st.setPlaying(true);
+    try {
+      await playAudio();
+      st.setPlaying(true);
+    } catch (error) {
+      logErr(error);
+      st.setPlaying(false);
+    }
   } finally {
     // Always clear the flag, even if playBook throws
     playBookInFlight = false;
@@ -286,10 +309,34 @@ export async function playEpisode(
     st.setCurrentEpisode(episode);
     st.setCurrentBookId(podcastItemId);
     st.setFocusedBookId(podcastItemId);
-    st.setPosition(result.currentTime);
+    const cached = st.mediaProgress.find(progress =>
+      progress.libraryItemId === podcastItemId &&
+      (progress.episodeId ?? null) === episodeId);
+    const localCurrentTime =
+      st.currentBookId === podcastItemId && st.currentEpisodeId === episodeId
+        ? Math.max(st.position, cached?.currentTime ?? 0)
+        : cached?.currentTime ?? 0;
+    const resumeTime = requestedStartTime === undefined
+      ? Math.max(result.currentTime, localCurrentTime)
+      : result.currentTime;
+    if (resumeTime > result.currentTime) {
+      await seekAudio(resumeTime);
+      log.info('playback', 'preserved later local episode resume position', {
+        podcastItemId,
+        episodeId,
+        localCurrentTime,
+        serverCurrentTime: result.currentTime,
+      });
+    }
+    st.setPosition(resumeTime);
 
-    await playAudio().catch(logErr);
-    st.setPlaying(true);
+    try {
+      await playAudio();
+      st.setPlaying(true);
+    } catch (error) {
+      logErr(error);
+      st.setPlaying(false);
+    }
   } finally {
     playBookInFlight = false;
   }
@@ -343,6 +390,11 @@ export async function resumePlayback(st: OnyxState): Promise<void> {
     await seekAudio(target).catch(logErr);
     st.setPosition(target);
   }
-  await playAudio().catch(logErr);
-  st.setPlaying(true);
+  try {
+    await playAudio();
+    st.setPlaying(true);
+  } catch (error) {
+    logErr(error);
+    st.setPlaying(false);
+  }
 }

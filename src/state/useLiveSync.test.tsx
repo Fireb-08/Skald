@@ -37,7 +37,7 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     currentBookIdRef: { current: '' },
     currentEpisodeIdRef: { current: null },
     playingRef: { current: false },
-    positionRef: { current: 0 },
+    isLocalPlaybackRef: { current: false },
     sessionIdRef: { current: '' },
     sessionReadyRef: { current: false },
     currentLibraryIdRef: { current: 'library' },
@@ -71,6 +71,26 @@ beforeEach(() => {
 });
 
 describe('useLiveSync runtime preference lifecycle', () => {
+  it('moves a loaded local transport to the ABS position after an offline conflict', async () => {
+    const stableDeps = deps();
+    stableDeps.currentBookIdRef.current = 'book';
+    stableDeps.isLocalPlaybackRef.current = true;
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: false }));
+    await act(async () => {});
+
+    act(() => {
+      tauri.emit('offline-sync-conflict', {
+        itemId: 'book',
+        episodeId: null,
+        localCurrentTime: 30,
+        serverCurrentTime: 420,
+      });
+    });
+
+    expect(stableDeps.setPosition).toHaveBeenCalledWith(420);
+    expect(invokeMock).toHaveBeenCalledWith('seek_audio', { secs: 420 });
+  });
+
   it('uses session identity to ignore own transport echoes and surface other devices', async () => {
     const stableDeps = deps();
     stableDeps.currentBookIdRef.current = 'book';
@@ -228,41 +248,24 @@ describe('useLiveSync runtime preference lifecycle', () => {
     });
   });
 
-  it('reconciles from ABS on focus and asks before applying newer remote progress', async () => {
+  it('does not poll ABS or alter playback when the window regains focus', async () => {
     const stableDeps = deps();
     stableDeps.currentBookIdRef.current = 'book';
     stableDeps.sessionIdRef.current = 'skald-session';
     stableDeps.sessionReadyRef.current = true;
-    stableDeps.positionRef.current = 20;
-    invokeMock.mockImplementation(async (command: string) => {
-      if (command === 'get_offline_progress_count') return 0;
-      if (command === 'get_me') return {
-        mediaProgress: [{
-          id: 'progress', libraryItemId: 'book', episodeId: null,
-          duration: 1000, progress: 0.08, currentTime: 80,
-          isFinished: false, lastUpdate: 2_000,
-        }],
-      };
-      return undefined;
-    });
 
     renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: false }));
     await act(async () => {});
-    act(() => {
-      tauri.emit('session-sync-success', { currentTime: 20, reason: 'periodic', at: 1_000 });
-    });
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
-      await Promise.resolve();
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
       await Promise.resolve();
     });
 
-    expect(stableDeps.applyServerProgress).toHaveBeenCalled();
-    expect(stableDeps.setSyncConflict).toHaveBeenCalledWith(expect.objectContaining({
-      libraryItemId: 'book',
-      currentTime: 80,
-      sessionId: 'focus-reconcile',
-    }));
+    expect(invokeMock).not.toHaveBeenCalledWith('get_me');
+    expect(stableDeps.applyServerProgress).not.toHaveBeenCalled();
+    expect(stableDeps.setSyncConflict).not.toHaveBeenCalled();
     expect(stableDeps.setPosition).not.toHaveBeenCalled();
   });
 });
