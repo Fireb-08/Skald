@@ -162,6 +162,12 @@ export function playLocalFile(
   baselineCaptured = false,
   serverLastUpdate?: number,
   speed?: number,
+  // Whose listening this is. A downloaded book accrues an offline session that
+  // may not reach ABS for days, and ABS credits whoever is authenticated when it
+  // arrives — so the account is captured at playback start and travels with the
+  // session. Unused for local-library items (their listening never leaves).
+  serverUrl?: string,
+  userId?: string,
 ): Promise<void> {
   return invoke('play_local_file', {
     filePath, itemId, startTime, localLibrary,
@@ -169,5 +175,7 @@ export function playLocalFile(
     baselineCaptured,
     serverLastUpdate: serverLastUpdate ?? null,
     speed: speed ?? null,
+    serverUrl: serverUrl ?? null,
+    userId: userId ?? null,
   });
 }

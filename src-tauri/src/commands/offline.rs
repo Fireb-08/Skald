@@ -431,7 +431,22 @@ async fn flush_offline_sessions(
     if offline_sessions::is_unsupported(dl_dir, server_url) {
         return 0;
     }
-    let pending = offline_sessions::pending_sessions(dl_dir);
+    if !offline_sessions::has_pending(dl_dir) {
+        return 0;
+    }
+    // Ask the server who it is about to credit rather than trusting a cached id:
+    // this is the identity every queued session is matched against, so it has to
+    // be the one ABS will actually attribute the listening to. Resolved only once
+    // something is queued, so an idle reconnect costs no request.
+    let user_id = match client.get_me().await {
+        Ok(me) => me.id,
+        Err(error) => {
+            log::warn!(target: "skald::sync",
+                "offline listening flush deferred, could not confirm the active user: {error}");
+            return 0;
+        }
+    };
+    let pending = offline_sessions::pending_sessions_for(dl_dir, server_url, &user_id);
     if pending.is_empty() {
         return 0;
     }
@@ -1390,14 +1405,28 @@ mod tests {
         offline_sessions::device_info("device-under-test")
     }
 
-    /// Seed `count` retired sessions and return their ids in order.
-    fn seed_sessions(dir: &std::path::Path, count: usize) -> Vec<String> {
-        struct FrozenClock;
-        impl offline_sessions::Clock for FrozenClock {
-            fn now(&self) -> chrono::DateTime<chrono::Local> {
-                chrono::Local::now()
-            }
-        }
+    const TEST_USER: &str = "usr_under_test";
+
+    /// The flush resolves who the server will credit before sending anything, so
+    /// every mock ABS in these tests has to answer `/api/me`.
+    async fn mount_me(server: &MockServer, user_id: &str) {
+        Mock::given(http_method("GET"))
+            .and(http_path("/api/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": user_id, "username": "listener", "mediaProgress": [], "bookmarks": [],
+            })))
+            .mount(server)
+            .await;
+    }
+
+    /// Seed `count` retired sessions bound to `server_url`/`user_id`, returning
+    /// their ids in order.
+    fn seed_sessions_for(
+        dir: &std::path::Path,
+        count: usize,
+        server_url: &str,
+        user_id: &str,
+    ) -> Vec<String> {
         for index in 0..count {
             let context = offline_sessions::SessionContext {
                 item_id: format!("li_{index}"),
@@ -1405,18 +1434,24 @@ mod tests {
                 media_type: "book".to_string(),
                 display_title: format!("Book {index}"),
                 display_author: "Author".to_string(),
+                server_key: offline_sessions::server_key(server_url),
+                user_id: user_id.to_string(),
             };
-            offline_sessions::accrue(dir, &context, 60.0, 60.0, 3600.0, &FrozenClock).unwrap();
+            offline_sessions::accrue(dir, &context, 60.0, 60.0, 3600.0, chrono::Local::now()).unwrap();
         }
         offline_sessions::retire_active(dir).unwrap();
-        offline_sessions::pending_sessions(dir).into_iter().map(|s| s.id).collect()
+        offline_sessions::pending_sessions_for(dir, server_url, user_id)
+            .into_iter()
+            .map(|s| s.id)
+            .collect()
     }
 
     #[tokio::test]
     async fn local_all_batch_flush_removes_acked_only() {
         let dir = tempfile::tempdir().unwrap();
-        let ids = seed_sessions(dir.path(), 2);
         let server = MockServer::start().await;
+        mount_me(&server, TEST_USER).await;
+        let ids = seed_sessions_for(dir.path(), 2, &server.uri(), TEST_USER);
 
         // ABS answers 200 for the batch as a whole and reports per-session
         // outcomes inside it — one placed, one whose item is gone.
@@ -1435,7 +1470,7 @@ mod tests {
         let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
 
         assert_eq!(flushed, 1);
-        let left = offline_sessions::pending_sessions(dir.path());
+        let left = offline_sessions::pending_sessions_for(dir.path(), &server.uri(), TEST_USER);
         assert_eq!(left.len(), 1, "a rejected session stays queued");
         assert_eq!(left[0].id, ids[1]);
     }
@@ -1443,8 +1478,9 @@ mod tests {
     #[tokio::test]
     async fn per_item_fallback_when_the_batch_route_is_absent() {
         let dir = tempfile::tempdir().unwrap();
-        let ids = seed_sessions(dir.path(), 2);
         let server = MockServer::start().await;
+        mount_me(&server, TEST_USER).await;
+        let ids = seed_sessions_for(dir.path(), 2, &server.uri(), TEST_USER);
 
         Mock::given(http_method("POST"))
             .and(http_path("/api/session/local-all"))
@@ -1464,7 +1500,7 @@ mod tests {
         let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
 
         assert_eq!(flushed, 2);
-        assert!(offline_sessions::pending_sessions(dir.path()).is_empty());
+        assert!(offline_sessions::pending_sessions_for(dir.path(), &server.uri(), TEST_USER).is_empty());
         assert!(
             !offline_sessions::is_unsupported(dir.path(), &server.uri()),
             "a missing batch route alone must not condemn the server",
@@ -1475,7 +1511,9 @@ mod tests {
     #[tokio::test]
     async fn missing_routes_set_unsupported_and_stop_further_session_traffic() {
         let dir = tempfile::tempdir().unwrap();
-        seed_sessions(dir.path(), 1);
+        let server = MockServer::start().await;
+        mount_me(&server, TEST_USER).await;
+        seed_sessions_for(dir.path(), 1, &server.uri(), TEST_USER);
         // A queued position must survive untouched: this feature failing has no
         // bearing on where the user is in the book.
         downloads::upsert_progress_entry(dir.path(), downloads::OfflineProgressEntry {
@@ -1484,7 +1522,6 @@ mod tests {
             baseline_captured: false, server_last_update: None,
             pending_confirmation_current_time: None,
         }).unwrap();
-        let server = MockServer::start().await;
 
         // Neither route exists — an ABS predating local sessions.
         Mock::given(http_method("POST"))
@@ -1506,15 +1543,19 @@ mod tests {
         // A second flush must not touch the network at all — the `expect(1)`
         // above fails on drop if this one probes again.
         assert_eq!(flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await, 0);
-        assert_eq!(offline_sessions::pending_sessions(dir.path()).len(), 1, "sessions stay, unsent");
+        assert_eq!(
+            offline_sessions::pending_sessions_for(dir.path(), &server.uri(), TEST_USER).len(),
+            1, "sessions stay, unsent",
+        );
         assert_eq!(downloads::load_progress_queue(dir.path()).len(), 1, "position sync is unaffected");
     }
 
     #[tokio::test]
     async fn a_transport_failure_leaves_every_session_queued() {
         let dir = tempfile::tempdir().unwrap();
-        seed_sessions(dir.path(), 2);
         let server = MockServer::start().await;
+        mount_me(&server, TEST_USER).await;
+        seed_sessions_for(dir.path(), 2, &server.uri(), TEST_USER);
         Mock::given(http_method("POST"))
             .and(http_path("/api/session/local-all"))
             .respond_with(ResponseTemplate::new(503))
@@ -1525,7 +1566,7 @@ mod tests {
         let flushed = flush_offline_sessions(&client, &server.uri(), dir.path(), &test_device()).await;
 
         assert_eq!(flushed, 0);
-        assert_eq!(offline_sessions::pending_sessions(dir.path()).len(), 2);
+        assert_eq!(offline_sessions::pending_sessions_for(dir.path(), &server.uri(), TEST_USER).len(), 2);
         assert!(
             !offline_sessions::is_unsupported(dir.path(), &server.uri()),
             "a 5xx is a bad moment, not a server without the route",
@@ -1539,9 +1580,11 @@ mod tests {
     #[tokio::test]
     async fn the_batch_body_matches_the_verified_abs_shape() {
         let dir = tempfile::tempdir().unwrap();
-        seed_sessions(dir.path(), 1);
-        let session = offline_sessions::pending_sessions(dir.path()).remove(0);
         let server = MockServer::start().await;
+        mount_me(&server, TEST_USER).await;
+        seed_sessions_for(dir.path(), 1, &server.uri(), TEST_USER);
+        let session =
+            offline_sessions::pending_sessions_for(dir.path(), &server.uri(), TEST_USER).remove(0);
 
         Mock::given(http_method("POST"))
             .and(http_path("/api/session/local-all"))
@@ -1583,8 +1626,9 @@ mod tests {
     #[test]
     fn sessions_wait_for_their_items_position_to_settle() {
         let dir = tempfile::tempdir().unwrap();
-        seed_sessions(dir.path(), 2);
-        let sessions = offline_sessions::pending_sessions(dir.path());
+        seed_sessions_for(dir.path(), 2, "http://abs.local", TEST_USER);
+        let sessions =
+            offline_sessions::pending_sessions_for(dir.path(), "http://abs.local", TEST_USER);
         let queue = vec![downloads::OfflineProgressEntry {
             item_id: "li_0".to_string(), episode_id: None, current_time: 60.0,
             duration: 3600.0, progress: 0.016, is_finished: false, recorded_at: 1,

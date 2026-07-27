@@ -325,6 +325,12 @@ pub struct PendingListen {
     pub seconds: f64,
     pub current_time: f64,
     pub duration: f64,
+    /// Epoch ms of the most recent second counted into this bucket — *when* the
+    /// listening happened, as opposed to when the bucket is drained. A session
+    /// is dated from this, so an evening's last seconds stay on the evening's
+    /// day even though the drain lands after midnight. Zero until the first
+    /// second is counted.
+    pub last_counted_ms: i64,
 }
 
 /// How many accumulated local listening seconds trigger a catalog flush. The
@@ -378,7 +384,10 @@ pub fn flush_listen_time(
                     drained.seconds,
                     drained.current_time,
                     drained.duration,
-                    &crate::offline_sessions::SystemClock,
+                    // Dated by the last second counted, not by this drain: a
+                    // bucket flushed at 00:00:05 — or hours later at shutdown —
+                    // still belongs to the day it was listened on.
+                    crate::offline_sessions::local_instant(drained.last_counted_ms),
                 )
             });
             (format!("local session item={}", context.item_id), accrued)
@@ -394,6 +403,11 @@ pub fn flush_listen_time(
             p.current_time = drained.current_time;
             p.duration = drained.duration;
         }
+        // Keep the earlier stamp when nothing newer has been counted, so a retry
+        // still dates the seconds to the day they were listened on.
+        if p.last_counted_ms == 0 {
+            p.last_counted_ms = drained.last_counted_ms;
+        }
     } else {
         log::debug!(target: "skald::playback", "listen flush {what} secs={}", drained.seconds);
     }
@@ -406,6 +420,8 @@ pub fn flush_listen_time(
 fn downloaded_session_context(
     item_id: &str,
     episode_id: Option<&str>,
+    server_url: &str,
+    user_id: &str,
 ) -> crate::offline_sessions::SessionContext {
     let record = crate::downloads::downloads_dir()
         .map(|dir| crate::downloads::load_registry(&dir))
@@ -421,6 +437,11 @@ fn downloaded_session_context(
         media_type: if episode_id.is_some() { "podcast" } else { "book" }.to_string(),
         display_title: record.as_ref().map(|r| r.title.clone()).unwrap_or_default(),
         display_author: record.map(|r| r.author).unwrap_or_default(),
+        // Captured now, at playback start, because that is the last moment the
+        // account is reliably known: the flush may run days later, after a
+        // logout, and ABS credits whoever is authenticated then.
+        server_key: crate::offline_sessions::server_key(server_url),
+        user_id: user_id.to_string(),
     }
 }
 
@@ -428,11 +449,15 @@ fn downloaded_session_context(
 /// downloaded playback stops, switches item, or the app exits; harmless (and a
 /// no-op) for every other credit channel.
 pub fn retire_local_session(credit: Option<&ListenCredit>) {
-    if !matches!(credit, Some(ListenCredit::LocalSession { .. })) {
+    let Some(ListenCredit::LocalSession { context }) = credit else {
         return;
-    }
+    };
+    // Retire only *this* credit's session. A tick task is stopped asynchronously,
+    // so the previous item's task can reach here after the next item has already
+    // started accruing — and the store's active slot would then belong to a
+    // session that is still growing.
     let retired = crate::downloads::downloads_dir()
-        .and_then(|dir| crate::offline_sessions::retire_active(&dir));
+        .and_then(|dir| crate::offline_sessions::retire_active_for(&dir, context));
     if let Err(e) = retired {
         log::warn!(target: "skald::sync", "offline listening session retire failed: {e}");
     }
@@ -493,6 +518,33 @@ impl SessionManager {
     /// Called at the top of both load paths, online and local.
     fn begin_media_load(&mut self) {
         self.paused_at = None;
+        self.close_local_listen_credit();
+    }
+
+    /// Drain and close the outgoing local listening credit *before* the next item
+    /// is allowed to accrue.
+    ///
+    /// The previous item's tick task is only asked to stop (an atomic flag); it
+    /// finishes asynchronously and does its own drain-and-retire on the way out.
+    /// If the next item mints its session first, that late drain would find a
+    /// stranger's session in the store's single active slot. Closing the books
+    /// here, synchronously, means the late task has nothing left to drain and its
+    /// retire is a no-op — the identity check in `retire_active_for` then covers
+    /// what remains.
+    fn close_local_listen_credit(&mut self) {
+        let Some(credit) = self.local_listen_credit.take() else {
+            return;
+        };
+        let Some(item_id) = self.local_item_id.clone() else {
+            return;
+        };
+        flush_listen_time(
+            Some(&credit),
+            &item_id,
+            self.local_episode_id.as_deref(),
+            &self.local_listen_pending,
+        );
+        retire_local_session(Some(&credit));
     }
 
     /// Open a playback session for `item_id`, spawn the 1-second tick loop
@@ -526,9 +578,8 @@ impl SessionManager {
         self.online_duration = 0.0;
         // Online playback is reported by the ABS `/play` session itself, so this
         // playback takes no local credit at all — that is the mutual exclusion
-        // that keeps an interval from being counted twice. The old tick task
-        // drains its own pending counter on exit.
-        self.local_listen_credit = None;
+        // that keeps an interval from being counted twice. Any outgoing local
+        // credit was already drained and closed by begin_media_load above.
 
         // Initialize the audio player on first call (deferred to avoid
         // requiring libvlc.dll on PATH at startup).
@@ -849,6 +900,11 @@ impl SessionManager {
         // this method starts playback itself — see the apply site below. `None`
         // leaves whatever rate the player already had.
         speed: Option<f32>,
+        // The account this playback belongs to. Offline listening is reported to
+        // ABS later, and ABS credits whoever is authenticated *then*, so the
+        // identity has to be captured now and travel with the session.
+        server_url: &str,
+        user_id: &str,
         app: tauri::AppHandle<R>,
     ) -> Result<(), String> {
         // Kill any background tasks from a previous online or local session so
@@ -894,7 +950,12 @@ impl SessionManager {
             ListenCredit::Catalog { session_id: format!("local-{item_id}-{started}") }
         } else {
             ListenCredit::LocalSession {
-                context: downloaded_session_context(item_id, self.local_episode_id.as_deref()),
+                context: downloaded_session_context(
+                    item_id,
+                    self.local_episode_id.as_deref(),
+                    server_url,
+                    user_id,
+                ),
             }
         });
         self.local_listen_pending = Arc::new(Mutex::new(PendingListen::default()));
@@ -1119,11 +1180,29 @@ impl SessionManager {
                     // same reasoning as PERSIST_EVERY). The position rides along
                     // so a local session records where the listening reached.
                     if listen_credit_tick.is_some() {
+                        let now_ms = chrono::Local::now().timestamp_millis();
+                        // Drain before counting this second when the calendar day
+                        // has rolled over mid-bucket. Otherwise the whole bucket —
+                        // up to LISTEN_FLUSH_EVERY seconds of it — would be dated
+                        // from the drain and land entirely on the new day, which
+                        // is precisely the attribution this feature exists to get
+                        // right. The drain uses the bucket's own last stamp, so
+                        // yesterday's seconds stay on yesterday.
+                        let rolled_over = {
+                            let pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
+                            pend.seconds > 0.0
+                                && pend.last_counted_ms > 0
+                                && crate::offline_sessions::day_changed(pend.last_counted_ms, now_ms)
+                        };
+                        if rolled_over {
+                            flush_listen_time(listen_credit_tick.as_ref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
+                        }
                         let due = {
                             let mut pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
                             pend.seconds += 1.0;
                             pend.current_time = report;
                             pend.duration = dur;
+                            pend.last_counted_ms = now_ms;
                             pend.seconds >= LISTEN_FLUSH_EVERY
                         };
                         if due {
@@ -1392,6 +1471,7 @@ mod tick_tests {
             seconds: 300.0,
             current_time: 900.0,
             duration: 3600.0,
+            last_counted_ms: 1_700_000_000_000,
         }));
         flush_listen_time(None, "li_abc", None, &pending);
 
@@ -1407,10 +1487,14 @@ mod tick_tests {
     // only reach a local session.
     #[test]
     fn a_downloaded_item_is_credited_as_a_book_session() {
-        let context = downloaded_session_context("li_abc", None);
+        let context = downloaded_session_context("li_abc", None, "https://abs.example.com/", "usr_1");
         assert_eq!(context.item_id, "li_abc");
         assert_eq!(context.media_type, "book");
         assert!(context.episode_id.is_none());
+        // The account travels with the credit — a flush days later has to be able
+        // to tell whose listening this was.
+        assert_eq!(context.server_key, "https://abs.example.com");
+        assert_eq!(context.user_id, "usr_1");
 
         let credit = ListenCredit::LocalSession { context };
         assert!(!matches!(credit, ListenCredit::Catalog { .. }));

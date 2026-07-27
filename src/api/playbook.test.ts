@@ -226,6 +226,8 @@ describe('downloaded ABS playback resume', () => {
       true,
       900,
       1,
+      'http://abs.local',
+      'user-123',
     );
     expect(st.setPosition).toHaveBeenCalledWith(420);
   });
@@ -269,6 +271,8 @@ describe('downloaded ABS playback resume', () => {
       true,
       800,
       1,
+      'http://abs.local',
+      'user-123',
     );
   });
 
@@ -299,6 +303,8 @@ describe('downloaded ABS playback resume', () => {
       false,
       undefined,
       1,
+      'http://abs.local',
+      'user-123',
     );
     expect(st.setPosition).toHaveBeenCalledWith(75);
   });
@@ -467,6 +473,7 @@ describe('playback start applies the resolved speed', () => {
 
     expect(abs.playLocalFile).toHaveBeenCalledWith(
       '/books/book.m4b', 'book', 0, false, undefined, true, undefined, 1.75,
+      'http://abs.local', 'user-123',
     );
     expect(st.setSpeed).toHaveBeenCalledWith('1.75');
   });
@@ -481,6 +488,7 @@ describe('playback start applies the resolved speed', () => {
 
     expect(abs.playLocalFile).toHaveBeenCalledWith(
       '/books/local', 'local-book', 0, true, undefined, false, undefined, 1.25,
+      'http://abs.local', 'user-123',
     );
   });
 
@@ -501,6 +509,7 @@ describe('playback start applies the resolved speed', () => {
 
     expect(abs.playLocalFile).toHaveBeenLastCalledWith(
       '/books/plain.m4b', 'plain', 0, false, undefined, true, undefined, 1,
+      'http://abs.local', 'user-123',
     );
   });
 
@@ -513,6 +522,7 @@ describe('playback start applies the resolved speed', () => {
 
     expect(abs.playLocalFile).toHaveBeenCalledWith(
       '/pods/ep1.mp3', 'podcast', 0, true, 'episode', false, undefined, 1.5,
+      'http://abs.local', 'user-123',
     );
   });
 

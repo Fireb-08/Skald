@@ -215,9 +215,13 @@ export async function playBook(
       // The rate travels with the command: play_local_file starts LibVLC itself,
       // so a separate setSpeed would only take hold after the book had begun
       // playing at whatever rate the previous item left behind.
+      // The account rides along too: a downloaded book's listening is reported to
+      // ABS on some later reconnect, and ABS credits whoever is authenticated
+      // then — so the session has to remember who actually listened.
       await playLocalFile(
         localFilePath, bookId, startTime, isLocalLibrary, undefined,
         baselineCaptured, serverLastUpdate ?? undefined, resolveItemSpeed(st, bookId),
+        st.serverUrl, st.userId,
       );
 
       // Signal to the frontend that we are in local playback mode so transport
@@ -403,6 +407,7 @@ export async function playEpisode(
       await playLocalFile(
         localPath, podcastItemId, startTime, true, episodeId,
         false, undefined, resolveItemSpeed(st, podcastItemId),
+        st.serverUrl, st.userId,
       );
       st.setIsLocalPlayback(true);
       st.setPosition(startTime);

@@ -482,6 +482,11 @@ pub async fn play_local_file(
     // it — a separate set_speed call would only take effect after the first
     // moment of audio had already played at the previous item's rate.
     speed: Option<f32>,
+    // Whose listening this is. Offline sessions are flushed long after the fact,
+    // and ABS credits the user authenticated at flush time — so the account is
+    // captured here, while it is still known, and travels with the session.
+    server_url: Option<String>,
+    user_id: Option<String>,
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<Mutex<SessionManager>>>,
 ) -> Result<(), String> {
@@ -495,6 +500,8 @@ pub async fn play_local_file(
         baseline_captured.unwrap_or(false),
         server_last_update,
         speed,
+        server_url.as_deref().unwrap_or_default(),
+        user_id.as_deref().unwrap_or_default(),
         app,
     ).await
 }
