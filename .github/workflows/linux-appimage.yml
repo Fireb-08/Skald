@@ -4,7 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/linux-port
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   appimage:
