@@ -23,18 +23,45 @@ export interface TitlebarProps {
 }
 
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
+type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0];
 
 const BUTTONS = [
-  { glyph: '–',      label: 'Minimize', kind: 'min',   font: undefined },
-  { glyph: '', label: 'Maximize', kind: 'max',   font: '"Segoe MDL2 Assets", "Segoe Fluent Icons"' },
-  { glyph: '✕',      label: 'Close',    kind: 'close', font: undefined },
+  { label: 'Minimize', kind: 'min' },
+  { label: 'Maximize', kind: 'max' },
+  { label: 'Close', kind: 'close' },
 ] as const;
+
+function WindowControlIcon({ kind }: { kind: (typeof BUTTONS)[number]['kind'] }) {
+  // Stroke icons keep the native-looking visual weight without relying on
+  // Segoe MDL2 Assets, which is absent on Linux.
+  if (kind === 'min') {
+    return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M2 8.5h8" /></svg>;
+  }
+  if (kind === 'max') {
+    return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><rect x="2.25" y="2.25" width="7.5" height="7.5" /></svg>;
+  }
+  return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="m2.5 2.5 7 7m0-7-7 7" /></svg>;
+}
 
 const HANDLERS: Record<string, () => void> = {
   min:   () => { void getCurrentWindow().minimize(); },
   max:   () => { void getCurrentWindow().toggleMaximize(); },
   close: () => { void getCurrentWindow().close(); },
 };
+
+const RESIZE_EDGES: Array<{
+  direction: ResizeDirection;
+  style: CSSProperties;
+}> = [
+  { direction: 'North', style: { top: 0, left: 8, right: 8, height: 5, cursor: 'ns-resize' } },
+  { direction: 'South', style: { bottom: 0, left: 8, right: 8, height: 5, cursor: 'ns-resize' } },
+  { direction: 'West', style: { top: 8, bottom: 8, left: 0, width: 5, cursor: 'ew-resize' } },
+  { direction: 'East', style: { top: 8, bottom: 8, right: 0, width: 5, cursor: 'ew-resize' } },
+  { direction: 'NorthWest', style: { top: 0, left: 0, width: 10, height: 10, cursor: 'nwse-resize' } },
+  { direction: 'NorthEast', style: { top: 0, right: 0, width: 10, height: 10, cursor: 'nesw-resize' } },
+  { direction: 'SouthWest', style: { bottom: 0, left: 0, width: 10, height: 10, cursor: 'nesw-resize' } },
+  { direction: 'SouthEast', style: { bottom: 0, right: 0, width: 10, height: 10, cursor: 'nwse-resize' } },
+];
 
 export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted, trailing }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
@@ -54,7 +81,42 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
   };
 
   return (
-    <div style={bar} data-tauri-drag-region>
+    <div
+      style={bar}
+      data-tauri-drag-region
+      onMouseDown={(event) => {
+        if (event.button !== 0) return;
+        const target = event.target as Element;
+        if (target.closest('button, input, textarea, select, a, [data-tauri-drag-region="false"]')) return;
+        // WebKitGTK does not consistently honor CSS/data drag regions for
+        // undecorated windows, so initiate the compositor move explicitly.
+        void getCurrentWindow().startDragging();
+      }}
+      onDoubleClick={(event) => {
+        const target = event.target as Element;
+        if (!target.closest('button, input, textarea, select, a, [data-tauri-drag-region="false"]')) {
+          void getCurrentWindow().toggleMaximize();
+        }
+      }}
+    >
+      {RESIZE_EDGES.map(({ direction, style }) => (
+        <div
+          key={direction}
+          aria-hidden="true"
+          data-tauri-drag-region="false"
+          onMouseDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void getCurrentWindow().startResizeDragging(direction);
+          }}
+          style={{
+            position: 'fixed',
+            zIndex: 1000,
+            ...style,
+          }}
+        />
+      ))}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Lyre logo mark — transparent PNG sits cleanly against the dark titlebar */}
         <img
@@ -129,12 +191,12 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
               width: 46, height: 44, borderRadius: 0,
               background: 'transparent', border: 'none',
               color: 'var(--onyx-text-dim)',
-              fontSize: b.kind === 'max' ? 11 : 16, lineHeight: 1,
               cursor: 'pointer', padding: 0,
-              fontFamily: b.font ?? "'Segoe UI', system-ui, -apple-system, sans-serif",
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
-          >{b.glyph}</button>
+          >
+            <WindowControlIcon kind={b.kind} />
+          </button>
         ))}
       </div>
     </div>

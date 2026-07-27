@@ -1,6 +1,7 @@
 // Node 26 exposes a configurable global `localStorage` accessor whose value is
 // undefined unless the process receives --localstorage-file. It also shadows
-// jsdom's implementation in Vitest, so provide an in-memory Storage for tests.
+// jsdom's implementation in Vitest, so provide the same in-memory Storage
+// semantics the tests received from jsdom on earlier Node releases.
 const entries = new Map<string, string>();
 const storage: Storage = {
   get length() {

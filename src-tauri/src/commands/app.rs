@@ -88,10 +88,7 @@ pub async fn disconnect_socket(
 pub fn reveal_cache_dir() -> Result<(), String> {
     let path = get_cache_dir()?;
     std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -103,7 +100,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     if !p.exists() {
         return Err(format!("path does not exist: {path}"));
     }
-    // Directories only (review H4): `explorer <path>` on a FILE launches it via
+    // Directories only (review H4): opening a FILE launches it via
     // its default handler, which would let a compromised renderer execute an
     // arbitrary local file through this command. Every caller reveals a folder
     // (staging, cache, library root); a future file-reveal must use
@@ -111,10 +108,7 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     if !p.is_dir() {
         return Err(format!("not a folder: {path}"));
     }
-    std::process::Command::new("explorer")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -167,9 +161,6 @@ pub fn open_log_dir(app: tauri::AppHandle) -> Result<(), String> {
     use tauri::Manager;
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer")
-        .arg(&dir)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    tauri_plugin_opener::open_path(&dir, None::<&str>).map_err(|e| e.to_string())?;
     Ok(())
 }

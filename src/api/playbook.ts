@@ -3,8 +3,8 @@
 // close any existing session, open a fresh session at the book's saved
 // server position (or an explicit override), start audio, and sync the UI.
 import type { OnyxState } from '../state/onyx';
-import type { PodcastEpisode } from './abs';
-import { closeActiveSession, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, seekAudio } from './abs';
+import type { MediaProgress, PodcastEpisode } from './abs';
+import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
 import { log } from '../lib/log';
 import { rewindSeconds } from '../lib/playbackPrefs';
 
@@ -17,6 +17,75 @@ const logErr = (e: unknown) => log.error('playback', 'transport command failed',
 // would start a second session, clobbering the first call's setSessionReady(true)
 // with a new setSessionReady(false) at line 78.
 let playBookInFlight = false;
+
+interface ServerProgressCheck {
+  checked: boolean;
+  progress?: MediaProgress;
+}
+
+async function checkServerProgress(
+  st: OnyxState,
+  itemId: string,
+  episodeId: string | null,
+  transport: 'downloaded' | 'streamed',
+): Promise<ServerProgressCheck> {
+  if (st.isOffline || !st.serverUrl) return { checked: false };
+  try {
+    const me = await getMe(st.serverUrl);
+    const progress = me.mediaProgress.find(candidate =>
+      candidate.libraryItemId === itemId &&
+      (candidate.episodeId ?? null) === episodeId);
+    log.info('sync', 'checked ABS progress before playback teardown', {
+      itemId,
+      episodeId,
+      transport,
+      serverCurrentTime: progress?.currentTime ?? 0,
+      serverLastUpdate: progress?.lastUpdate ?? null,
+    });
+    return { checked: true, progress };
+  } catch (error) {
+    log.warn('sync', 'ABS progress preflight failed; using playback fallback', {
+      itemId,
+      episodeId,
+      transport,
+      err: String(error),
+    });
+    return { checked: false };
+  }
+}
+
+async function closePreviousSession(
+  st: OnyxState,
+  targetItemId: string,
+  targetEpisodeId: string | null,
+  serverCheck: ServerProgressCheck,
+  hasExplicitStart: boolean,
+): Promise<void> {
+  const sameLoadedMedia =
+    st.sessionReady &&
+    st.currentBookId === targetItemId &&
+    (st.currentEpisodeId ?? null) === targetEpisodeId;
+  const serverTime = serverCheck.progress && !serverCheck.progress.isFinished
+    ? serverCheck.progress.currentTime
+    : 0;
+  const serverIsAhead =
+    !hasExplicitStart &&
+    serverCheck.checked &&
+    sameLoadedMedia &&
+    serverTime > st.position + 0.5;
+
+  if (serverIsAhead) {
+    log.info('sync', 'closing stale session without replacing newer ABS progress', {
+      itemId: targetItemId,
+      episodeId: targetEpisodeId,
+      localCurrentTime: st.position,
+      serverCurrentTime: serverTime,
+    });
+    await closeActiveSessionWithoutSync();
+    return;
+  }
+  await closeActiveSession();
+}
 
 export async function playBook(
   st: OnyxState,
@@ -51,12 +120,18 @@ export async function playBook(
     // after the user switches to a different library (where it leaves st.library).
     if (libItem) st.setPlayingItem(libItem);
     log.info('playback', 'playBook', { bookId, offline: !!localFilePath, local: isLocalLibrary, override: startTimeOverride !== undefined });
+    // Capture ABS before any existing session is closed. A normal close sends
+    // its current position, so checking afterward can only observe the stale
+    // value Skald just wrote over a phone's newer progress.
+    const serverCheck = isLocalLibrary
+      ? { checked: false } satisfies ServerProgressCheck
+      : await checkServerProgress(st, bookId, null, localDownload ? 'downloaded' : 'streamed');
     if (localFilePath) {
       // Close any session left open from a previous ONLINE book first. play_local
       // (below) nulls the session id, after which closeActiveSession would no-op —
       // so without this, switching from a streamed book to a downloaded one would
       // orphan an open session on the ABS server.
-      await closeActiveSession().catch(e =>
+      await closePreviousSession(st, bookId, null, serverCheck, startTimeOverride !== undefined).catch(e =>
         log.error('playback', 'closeActiveSession (offline switch) failed', { err: String(e) }),
       );
       // Clear any stale online session state — there is no server session in the
@@ -80,9 +155,10 @@ export async function playBook(
         }
       }
 
-      // Resolve start position: explicit override > server progress > offline queue > 0.
-      // When offline, st.mediaProgress may be empty since it requires a server fetch.
-      // Fall back to the offline progress queue which persists locally between launches.
+      // Resolve start position: explicit override > newest known ordinary
+      // progress > 0. A pending offline stop point is legitimate progress that
+      // ABS may not have accepted yet, so—as in streamed playback—the later of
+      // the fresh server position and local position wins.
       let startTime = startTimeOverride;
       if (startTime === undefined) {
         if (isLocalLibrary) {
@@ -98,6 +174,14 @@ export async function playBook(
           } catch {
             startTime = 0;
           }
+        } else if (serverCheck.checked) {
+          const serverTime = serverCheck.progress && !serverCheck.progress.isFinished
+            ? serverCheck.progress.currentTime
+            : 0;
+          const offlineTime = offlineProgress && !offlineProgress.isFinished
+            ? offlineProgress.currentTime
+            : 0;
+          startTime = Math.max(serverTime, offlineTime);
         } else {
           const saved = st.mediaProgress.find(p => p.libraryItemId === bookId);
           if (saved) {
@@ -122,10 +206,10 @@ export async function playBook(
       // branched. Reopening an existing offline branch must not silently adopt
       // a newer server revision and later overwrite another device's progress.
       const baselineCaptured = !isLocalLibrary
-        && (offlineProgress?.baselineCaptured ?? !st.isOffline);
+        && (!!offlineProgress?.baselineCaptured || serverCheck.checked);
       const serverLastUpdate = offlineProgress?.baselineCaptured
         ? offlineProgress.serverLastUpdate
-        : savedServerProgress?.lastUpdate;
+        : serverCheck.progress?.lastUpdate ?? savedServerProgress?.lastUpdate;
       await playLocalFile(
         localFilePath, bookId, startTime, isLocalLibrary, undefined,
         baselineCaptured, serverLastUpdate ?? undefined,
@@ -157,7 +241,7 @@ export async function playBook(
     // Log session close failures so ghost sessions can be diagnosed.
     // We still proceed even on failure — a new session open will work regardless,
     // but the server may have a dangling open session.
-    await closeActiveSession().catch(e =>
+    await closePreviousSession(st, bookId, null, serverCheck, startTimeOverride !== undefined).catch(e =>
       log.error('playback', 'closeActiveSession failed', { err: String(e) })
     );
     st.setSessionReady(false);
@@ -203,14 +287,18 @@ export async function playBook(
     const localCurrentTime = st.currentBookId === bookId
       ? Math.max(st.position, cached?.currentTime ?? 0)
       : cached?.currentTime ?? 0;
+    const preflightCurrentTime = serverCheck.progress && !serverCheck.progress.isFinished
+      ? serverCheck.progress.currentTime
+      : 0;
     const resumeTime = requestedStartTime === undefined
-      ? Math.max(result.currentTime, localCurrentTime)
+      ? Math.max(result.currentTime, preflightCurrentTime, localCurrentTime)
       : result.currentTime;
     if (resumeTime > result.currentTime) {
       await seekAudio(resumeTime);
       log.info('playback', 'preserved later local resume position', {
         bookId,
         localCurrentTime,
+        preflightCurrentTime,
         serverCurrentTime: result.currentTime,
       });
     }
@@ -257,10 +345,20 @@ export async function playEpisode(
     // A local podcast episode carries `localPath` (the downloaded audio file) and
     // its progress lives in the catalog keyed per (podcast, episode).
     const localPath = (episode as unknown as { localPath?: string }).localPath;
-    if (st.activeLibrary?.source === 'local' && localPath) {
+    const isLocalEpisode = st.activeLibrary?.source === 'local' && !!localPath;
+    const serverCheck = isLocalEpisode
+      ? { checked: false } satisfies ServerProgressCheck
+      : await checkServerProgress(st, podcastItemId, episodeId, 'streamed');
+    if (isLocalEpisode && localPath) {
       // Close any open online session first (see playBook) so switching to a
       // local episode doesn't orphan a server session.
-      await closeActiveSession().catch(e =>
+      await closePreviousSession(
+        st,
+        podcastItemId,
+        episodeId,
+        serverCheck,
+        startTimeOverride !== undefined,
+      ).catch(e =>
         log.error('playback', 'closeActiveSession (local episode switch) failed', { err: String(e) }),
       );
       st.setSessionReady(false);
@@ -284,7 +382,13 @@ export async function playEpisode(
     }
 
     st.setIsLocalPlayback(false);
-    await closeActiveSession().catch(e =>
+    await closePreviousSession(
+      st,
+      podcastItemId,
+      episodeId,
+      serverCheck,
+      startTimeOverride !== undefined,
+    ).catch(e =>
       log.error('playback', 'closeActiveSession failed', { err: String(e) })
     );
     st.setSessionReady(false);
@@ -316,8 +420,11 @@ export async function playEpisode(
       st.currentBookId === podcastItemId && st.currentEpisodeId === episodeId
         ? Math.max(st.position, cached?.currentTime ?? 0)
         : cached?.currentTime ?? 0;
+    const preflightCurrentTime = serverCheck.progress && !serverCheck.progress.isFinished
+      ? serverCheck.progress.currentTime
+      : 0;
     const resumeTime = requestedStartTime === undefined
-      ? Math.max(result.currentTime, localCurrentTime)
+      ? Math.max(result.currentTime, preflightCurrentTime, localCurrentTime)
       : result.currentTime;
     if (resumeTime > result.currentTime) {
       await seekAudio(resumeTime);
@@ -325,6 +432,7 @@ export async function playEpisode(
         podcastItemId,
         episodeId,
         localCurrentTime,
+        preflightCurrentTime,
         serverCurrentTime: result.currentTime,
       });
     }

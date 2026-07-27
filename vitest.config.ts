@@ -9,6 +9,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // Give jsdom a non-opaque origin. Recent jsdom/Node combinations no longer
+    // expose Web Storage for the default about:blank origin.
     environmentOptions: {
       jsdom: {
         url: 'http://localhost/',

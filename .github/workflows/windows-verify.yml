@@ -1,0 +1,49 @@
+name: Windows Verify
+
+# Windows counterpart of the Linux AppImage workflow's verification stage.
+# The repo does not carry the VLC link artifacts (vlc-lib/vlc.lib and the
+# vlc-dist/ runtime are provisioned locally on the packaging machine), so any
+# step that links the backend — cargo test, tauri build — cannot run here.
+# What CAN run covers the cross-platform gap this workflow exists for:
+# clippy compiles every crate and #[cfg(windows)] branch with check semantics
+# (no linking), proving the Windows-only code still builds after changes made
+# on Linux. Release packaging and the runtime smoke test remain manual on the
+# Windows machine.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - run: pnpm install --frozen-lockfile
+
+      # The frontend layers of `pnpm verify`, plus clippy. test:rust is
+      # deliberately absent: it links against libvlc (see header comment).
+      - run: pnpm typecheck
+      - run: pnpm test:front
+      - run: pnpm verify:commands
+      - run: pnpm verify:console
+      - run: pnpm verify:clippy

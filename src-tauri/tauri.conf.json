@@ -16,40 +16,18 @@
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost blob: data: http: https:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 https://openlibrary.org; media-src 'self' asset: http://asset.localhost; object-src 'none'",
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$HOME/AppData/Local/Skald/cache/covers/**/*"
-        ]
+        "scope": []
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": {
-      "vlc-dist/libvlc.dll": "libvlc.dll",
-      "vlc-dist/libvlccore.dll": "libvlccore.dll",
-      "vlc-dist/vlc-cache-gen.exe": "vlc-cache-gen.exe",
-      "vlc-dist/plugins/**/*": "plugins/",
-      "bin/ffprobe.exe": "ffprobe.exe",
-      "bin/tone.exe": "tone.exe"
-    },
-    "windows": {
-      "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com",
-      "tsp": false,
-      "nsis": {
-        "displayLanguageSelector": false,
-        "installerIcon": "icons/icon.ico",
-        "installMode": "perMachine",
-        "installerHooks": "windows/hooks.nsh"
-      }
-    }
+    ]
   }
 }

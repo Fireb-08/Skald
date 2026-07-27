@@ -36,6 +36,13 @@ Skald API Tokens.txt
 # Not committed; build.rs copies these to the binary output directory.
 src-tauri/vlc-dist/
 
+# Linux AppImage staging — populated from the build host's matching VLC install
+# immediately before bundling.
+src-tauri/linux-runtime/*
+!src-tauri/linux-runtime/plugins/
+src-tauri/linux-runtime/plugins/*
+!src-tauri/linux-runtime/plugins/placeholder.txt
+
 # Bundled helper binaries (ffprobe = read metadata/chapters, tone = write).
 # Not committed; fetched locally, build.rs copies them next to the binary.
 src-tauri/bin/
