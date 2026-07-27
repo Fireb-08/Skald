@@ -305,6 +305,18 @@ pub fn run() {
             // per-minute cron evaluation). No-op until a podcast enables it.
             crate::podcast_scheduler::start(app.handle().clone());
 
+            // Close any offline listening session left open by a crash or a kill.
+            // Nothing is playing yet at startup, so an accruing session can only
+            // be a leftover — and one that is never retired is never flushed,
+            // silently losing the listening it holds.
+            if let Ok(dir) = downloads::downloads_dir() {
+                match offline_sessions::retire_active(&dir) {
+                    Ok(()) => {}
+                    Err(error) => log::warn!(target: "skald::sync",
+                        "could not retire the offline listening session left from the previous run: {error}"),
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
