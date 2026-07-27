@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useOnyxState } from './state/onyx';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { useUpNext } from './hooks/useUpNext';
 import { cleanupOwnedPlaybackSessions, closeActiveSession, connectSocket, disconnectSocket, flushOfflineProgress, getMe, recordStopPoint, seekAudio, setAutoRewindCfg, startStagingWatch, autoIngestStaging, syncActiveSession } from './api/abs';
 import { autoRewindCfg } from './lib/playbackPrefs';
 import { log } from './lib/log';
@@ -12,6 +13,7 @@ import ActivityCenter from './components/ActivityCenter';
 import ConfirmDialog from './components/ui/ConfirmDialog';
 import DownloadProgressToast from './components/downloads/DownloadProgressToast';
 import UnidentifiedNotice from './components/UnidentifiedNotice';
+import UpNextPanel from './components/player/UpNextPanel';
 import OnyxWash from './components/chrome/OnyxWash';
 import Titlebar from './components/chrome/Titlebar';
 import Login from './screens/Login';
@@ -44,6 +46,10 @@ export default function App() {
 
   // Register global keyboard shortcuts (Ctrl+Alt+Space etc.) once on mount
   useGlobalShortcuts(st);
+
+  // Continuation when an item ends. Mounted here, not in a screen, because a
+  // book finishing while the listener is in Settings must continue just the same.
+  const upNext = useUpNext(st);
 
   // The backend decides every resume, so it needs the rewind settings before the
   // first one can happen. Pushed on mount; Settings → Playback re-pushes on each
@@ -350,6 +356,18 @@ export default function App() {
 
       {/* Quarantine notice — local-library books awaiting a metadata match. */}
       <UnidentifiedNotice st={st} />
+
+      {/* "Up next" prompt — shown when an item ends and continuation is set to
+          ask. Auto mode plays without this panel; off never resolves one. */}
+      {upNext.prompt && (
+        <UpNextPanel
+          target={upNext.prompt.target}
+          seconds={upNext.prompt.seconds}
+          serverUrl={st.serverUrl}
+          onPlay={upNext.accept}
+          onDismiss={upNext.decline}
+        />
+      )}
 
       {/* Global toast notification — rendered above all screens */}
       {st.toast && (

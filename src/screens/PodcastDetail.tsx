@@ -17,6 +17,8 @@ import PlaylistPicker from '../components/PlaylistPicker';
 import PodcastSettingsModal from '../components/podcast/PodcastSettingsModal';
 import PodcastDownloadModal from '../components/podcast/PodcastDownloadModal';
 import { buildEpisodeContextMenu } from '../components/podcast/buildEpisodeContextMenu';
+import type { EpisodeDirection } from '../lib/upNext';
+import { episodeDirection, setEpisodeDirection } from '../lib/upNextPrefs';
 
 export interface PodcastDetailProps {
   st: OnyxState;
@@ -41,6 +43,11 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   // Episode right-click menu + the Add-to-Playlist picker it can open.
   const [epMenu, setEpMenu] = useState<{ x: number; y: number; ep: PodcastEpisode; downloaded: boolean } | null>(null);
   const [playlistEp, setPlaylistEp] = useState<PodcastEpisode | null>(null);
+  // Which way auto-play-next walks this show. Per show, because it is a property
+  // of the show: a back catalogue is worked forwards, a news feed backwards.
+  const [advanceDir, setAdvanceDir] = useState<EpisodeDirection>(
+    () => episodeDirection(st.podcastDetailId),
+  );
 
   // The library list returns MINIFIED podcast items (numEpisodes but no
   // episodes[]). Fetch the expanded item for the downloaded episode list.
@@ -222,6 +229,20 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
                 fontFamily: mono, fontSize: 11, letterSpacing: '0.06em', fontWeight: autoOn ? 600 : 400,
               }}
             >{autoOn ? 'Auto-download · enabled' : 'Auto-download'}</button>
+            <button
+              onClick={() => {
+                const next: EpisodeDirection = advanceDir === 'oldest' ? 'newest' : 'oldest';
+                setAdvanceDir(next);
+                if (st.podcastDetailId) setEpisodeDirection(st.podcastDetailId, next);
+              }}
+              title="Which episode plays after this one, when continuation is on (Settings → Playback)"
+              style={{
+                padding: '7px 14px', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', color: 'var(--onyx-text-dim)',
+                border: '1px solid var(--onyx-glass-edge)',
+                fontFamily: mono, fontSize: 11, letterSpacing: '0.06em',
+              }}
+            >{advanceDir === 'oldest' ? 'Up next · oldest first' : 'Up next · newest first'}</button>
           </div>
         </div>
       </div>

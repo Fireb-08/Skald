@@ -5,12 +5,24 @@
 // the series; the listener may be offline, in which case only downloads can
 // play; a book already finished on another device should be stepped over.
 import type { OnyxState } from './onyx';
-import type { LibraryItem, PodcastEpisode } from '../api/abs';
+import type { DownloadRecord, LibraryItem, PodcastEpisode } from '../api/abs';
 import { asPodcastItem, getSeriesItems } from '../api/abs';
 import { nextInSeries, primarySeries } from '../lib/series';
 import { nextEpisode } from '../lib/upNext';
 import { episodeDirection } from '../lib/upNextPrefs';
 import { log } from '../lib/log';
+
+/** Everything resolution reads, and nothing else. `OnyxState` satisfies it
+ *  structurally, so callers pass `st` — but the narrow shape is what lets the
+ *  resolution be exercised without standing up the whole app state. */
+export interface UpNextContext {
+  library: LibraryItem[];
+  downloads: DownloadRecord[];
+  mediaProgress: OnyxState['mediaProgress'];
+  playingItem: LibraryItem | null | undefined;
+  serverUrl: string;
+  isOffline: boolean;
+}
 
 export type UpNextTarget =
   | { kind: 'book'; item: LibraryItem }
@@ -26,13 +38,13 @@ export type UpNextResolution =
 
 /** An item playable without the network: a completed download, or a
  *  local-library item that lives on disk in the first place. */
-function isPlayableOffline(st: OnyxState, item: LibraryItem): boolean {
+function isPlayableOffline(st: UpNextContext, item: LibraryItem): boolean {
   return !!item.localPath || st.downloads.some(d => d.itemId === item.id);
 }
 
 /** Progress-backed "already heard this" test. Keyed by (item, episode) so a
  *  podcast's episodes never mask each other. */
-function finishedTest(st: OnyxState): (itemId: string, episodeId: string | null) => boolean {
+function finishedTest(st: UpNextContext): (itemId: string, episodeId: string | null) => boolean {
   return (itemId, episodeId) =>
     st.mediaProgress.some(p =>
       p.libraryItemId === itemId && (p.episodeId ?? null) === episodeId && p.isFinished);
@@ -45,7 +57,7 @@ function finishedTest(st: OnyxState): (itemId: string, episodeId: string | null)
  * different library, or a shelf that was filtered down, would otherwise look
  * like the end of the series.
  */
-async function seriesCandidates(st: OnyxState, ended: LibraryItem): Promise<LibraryItem[]> {
+async function seriesCandidates(st: UpNextContext, ended: LibraryItem): Promise<LibraryItem[]> {
   const series = primarySeries(ended);
   if (!series) return st.library;
   const cached = st.library.filter(it => primarySeries(it)?.name === series.name);
@@ -79,7 +91,7 @@ async function seriesCandidates(st: OnyxState, ended: LibraryItem): Promise<Libr
  * the caller decides whether to prompt, play, or do nothing.
  */
 export async function resolveUpNext(
-  st: OnyxState,
+  st: UpNextContext,
   endedItemId: string,
   endedEpisodeId: string | null,
 ): Promise<UpNextResolution> {
