@@ -600,8 +600,14 @@ pub async fn download_item(
     use futures_util::StreamExt;
     use tokio::io::AsyncWriteExt;
 
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    // Refresh first if the access token is near expiry: ABS authorizes this
+    // request once, at the start, but a download can run for a long time and
+    // starting it on a token with seconds left is a needless way to fail.
+    let token = crate::token_refresh::fresh_tokens(&server_url)
+        .await?
+        .effective()
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?
+        .to_string();
 
     // Resolve and create the downloads directory (e.g. AppData\Local\Skald\data\downloads).
     let dl_dir = downloads::downloads_dir()?;

@@ -156,6 +156,20 @@ pub fn run() {
             // no handle of their own, so it cannot be passed one per request.
             token_refresh::init(app.handle().clone());
 
+            // Keep the live socket's credential in step with the stored one. The
+            // socket authenticates once at connect, so a rotation would otherwise
+            // leave it holding a token that no longer exists.
+            {
+                use tauri::Listener;
+                let handle = app.handle().clone();
+                app.listen("auth-token-refreshed", move |_| {
+                    let sockets = handle.state::<socket::SocketState>().inner().clone();
+                    tauri::async_runtime::spawn(async move {
+                        socket::reauthenticate(sockets).await;
+                    });
+                });
+            }
+
             #[cfg(target_os = "linux")]
             if disabled_dmabuf_for_nvidia {
                 log::info!(

@@ -68,8 +68,14 @@ pub async fn connect_socket(
     app: tauri::AppHandle,
     socket: tauri::State<'_, socket::SocketState>,
 ) -> Result<(), String> {
-    let token = auth::load_token()?
-        .ok_or_else(|| "Not authenticated: no token stored".to_string())?;
+    // Refresh before connecting if the token is near expiry. The socket
+    // authenticates once and then holds that binding, so opening on a token with
+    // a minute left means the next reconnect starts from a dead credential.
+    let token = crate::token_refresh::fresh_tokens(&server_url)
+        .await?
+        .effective()
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?
+        .to_string();
     socket::connect(server_url, token, app, socket.inner().clone()).await
 }
 

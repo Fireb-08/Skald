@@ -1130,6 +1130,22 @@ export function useOnyxState(): OnyxState {
   const clearActivity = useCallback(() => setActivity([]), []);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
 
+  // The backend emits auth-expired when a refresh token is spent, expired, or
+  // revoked — the one auth failure the app cannot recover from on its own. Route
+  // to Login rather than leaving the user on a shelf where every action 401s.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen('auth-expired', () => {
+      log.warn('auth', 'session expired — routing to sign-in');
+      // Clear presence only; the keyring is the backend's to manage, and the
+      // stored server address stays as a returning-user convenience.
+      setAuthToken('');
+      setScreen('login');
+      setToast({ message: 'Your session expired. Please sign in again.', type: 'error' });
+    }).then(fn => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [setAuthToken]);
+
   const [enableOpenLibrary, setEnableOpenLibraryRaw] = useState(() => {
     const v = localStorage.getItem('skald.enableOpenLibrary');
     return v === null ? true : v === 'true';

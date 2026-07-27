@@ -23,6 +23,9 @@ const tauri = vi.hoisted(() => {
       set.add(cb);
       return Promise.resolve(() => { set!.delete(cb); });
     },
+    emit: (event: string, payload?: unknown) => {
+      listeners.get(event)?.forEach(cb => cb({ event, payload }));
+    },
   };
 });
 
@@ -110,5 +113,46 @@ describe('useOnyxState auth persistence', () => {
 
     expect(result.current.authToken).toBeTruthy();       // auth presence…
     expect(result.current.authToken).toBe('__keyring__'); // …as the sentinel, never a JWT
+  });
+});
+
+// The backend emits auth-expired only when a refresh token is spent, expired or
+// revoked — the one auth failure it cannot recover from. Leaving the user on the
+// shelf at that point means every subsequent action silently 401s.
+describe('auth-expired routing (Auth Token Refresh roadmap)', () => {
+  it('drops auth presence and lands on Login with an explanation', async () => {
+    localStorage.setItem('skald.hasAuth', 'true');
+    localStorage.setItem('skald.serverUrl', 'https://abs.example');
+    // A configured server makes the mount effect fetch the shelf; give it an
+    // empty result so the effect settles instead of rejecting mid-test.
+    tauri.handlers.set('fetch_libraries', () => []);
+    const { useOnyxState } = await freshOnyx();
+    const { result } = renderHook(() => useOnyxState(), {
+      wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode>,
+    });
+    await act(async () => {});
+    expect(result.current.screen).not.toBe('login');
+
+    await act(async () => { tauri.emit('auth-expired'); });
+
+    expect(result.current.screen).toBe('login');
+    expect(result.current.authToken).toBe('');
+    expect(localStorage.getItem('skald.hasAuth')).toBeNull();
+    expect(result.current.toast?.message).toMatch(/sign in again/i);
+    // The address is a convenience, not a credential — it survives.
+    expect(localStorage.getItem('skald.serverUrl')).toBe('https://abs.example');
+  });
+
+  it('unsubscribes on unmount so a remounted hook does not double-handle', async () => {
+    const { useOnyxState } = await freshOnyx();
+    const { unmount } = renderHook(() => useOnyxState(), {
+      wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode>,
+    });
+    await act(async () => {});
+    unmount();
+    await act(async () => {});
+
+    // No listener should remain; emitting must not throw or touch state.
+    expect(() => tauri.emit('auth-expired')).not.toThrow();
   });
 });

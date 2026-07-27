@@ -39,11 +39,6 @@ pub async fn connect(
     // sockets from a previous session or server change don't accumulate.
     disconnect(state.clone()).await;
 
-    // Clone the token before the builder so the reconnect handler can capture
-    // it independently of the original, which is still needed for the initial
-    // auth emit after .connect() returns.
-    let token_rc = token.clone();
-
     let client = ClientBuilder::new(server_url.clone())
         // Force WebSocket transport — skip HTTP long-polling.
         .transport_type(TransportType::Websocket)
@@ -232,15 +227,17 @@ pub async fn connect(
         // application events.
         .on("reconnect", {
             let app = app.clone();
-            // Capture a separate clone of the token for this handler.
-            // The original `token` is still needed for the initial auth emit below.
             move |_: Payload, socket: Client| {
-                let token = token_rc.clone();
                 let app = app.clone();
                 async move {
                     // Wait for the socket handshake to settle before re-auth;
                     // mirrors the 500 ms delay used on initial connect.
                     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    // Read the token now rather than replaying the one captured at
+                    // connect. Access tokens rotate roughly hourly, and the drops
+                    // this handler exists for — sleep/wake, a long network outage —
+                    // are exactly the ones likely to outlive the original token.
+                    let token = crate::auth::load_token().ok().flatten().unwrap_or_default();
                     // Re-emit auth on the fresh socket ID. Failure is unusual
                     // (same valid token, same established transport) so we
                     // proceed to notify the frontend regardless — the resync HTTP
@@ -306,6 +303,32 @@ pub async fn connect(
     // Store the live client in managed state so disconnect_socket can reach it.
     *state.lock().await = Some(client);
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// re-auth after a token rotation
+// ---------------------------------------------------------------------------
+
+/// Re-emits `auth` on the live socket with the current stored token.
+///
+/// The socket authenticates once, at connect. That binding survives an access
+/// token expiring — ABS does not re-validate per event — but the *next* reconnect
+/// would replay a dead credential, and any server-side re-check would drop us.
+/// Re-authing on rotation keeps the live connection and the stored credential in
+/// step. No-op when nothing is connected, which is the common case.
+pub async fn reauthenticate(state: SocketState) {
+    let guard = state.lock().await;
+    let Some(client) = guard.as_ref() else { return };
+
+    let Ok(Some(token)) = crate::auth::load_token() else {
+        log::warn!(target: "skald::sync", "socket re-auth skipped: no stored token");
+        return;
+    };
+
+    match client.emit("auth", token).await {
+        Ok(()) => log::info!(target: "skald::sync", "socket re-authenticated after token refresh"),
+        Err(e) => log::warn!(target: "skald::sync", "socket re-auth emit failed: {e}"),
+    }
 }
 
 // ---------------------------------------------------------------------------
