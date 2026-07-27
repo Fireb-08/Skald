@@ -61,6 +61,20 @@ describe('server-backed playback resume', () => {
     expect(st.setPosition).toHaveBeenCalledWith(420);
   });
 
+  it('keeps a later local book position when ABS has not received it yet', async () => {
+    const st = state({
+      currentBookId: 'book',
+      position: 480,
+      mediaProgress: [{ libraryItemId: 'book', currentTime: 470, isFinished: false } as OnyxState['mediaProgress'][number]],
+    });
+    abs.openPlaybackSession.mockResolvedValue({ sessionId: 'session-book', currentTime: 420 });
+
+    await playBook(st, 'book');
+
+    expect(abs.seekAudio).toHaveBeenCalledWith(480);
+    expect(st.setPosition).toHaveBeenCalledWith(480);
+  });
+
   it('preserves an explicit chapter or bookmark jump for a book', async () => {
     const st = state();
     abs.openPlaybackSession.mockResolvedValue({ sessionId: 'session-book', currentTime: 90 });
@@ -82,5 +96,26 @@ describe('server-backed playback resume', () => {
 
     expect(abs.openPlaybackSession).toHaveBeenCalledWith('http://abs.local', 'podcast', 'user-123', undefined, 'episode');
     expect(st.setPosition).toHaveBeenCalledWith(300);
+  });
+
+  it('does not report a book as playing when LibVLC rejects startup', async () => {
+    const st = state();
+    abs.openPlaybackSession.mockResolvedValue({ sessionId: 'session-book', currentTime: 30 });
+    abs.playAudio.mockRejectedValueOnce(new Error('decoder unavailable'));
+
+    await playBook(st, 'book');
+
+    expect(st.setPlaying).toHaveBeenLastCalledWith(false);
+  });
+
+  it('does not report an episode as playing when LibVLC rejects startup', async () => {
+    const st = state();
+    const episode = { id: 'episode', title: 'Episode' } as PodcastEpisode;
+    abs.openPlaybackSession.mockResolvedValue({ sessionId: 'session-episode', currentTime: 30 });
+    abs.playAudio.mockRejectedValueOnce(new Error('decoder unavailable'));
+
+    await playEpisode(st, 'podcast', episode);
+
+    expect(st.setPlaying).toHaveBeenLastCalledWith(false);
   });
 });

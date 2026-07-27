@@ -1362,7 +1362,7 @@ export function useOnyxState(): OnyxState {
     currentBookIdRef,
     currentEpisodeIdRef,
     playingRef,
-    positionRef,
+    isLocalPlaybackRef,
     sessionIdRef,
     sessionReadyRef,
     currentLibraryIdRef,
