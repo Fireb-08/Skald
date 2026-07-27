@@ -195,6 +195,13 @@ input, textarea, [contenteditable="true"],
   color: var(--onyx-text) !important;
 }
 
+.onyx-winbtn svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: square;
+  stroke-width: 1;
+}
+
 .onyx-row:hover {
   background: rgba(var(--onyx-accent-r), var(--onyx-accent-g), var(--onyx-accent-b), 0.06) !important;
 }

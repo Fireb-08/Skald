@@ -25,10 +25,22 @@ export interface TitlebarProps {
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
 
 const BUTTONS = [
-  { glyph: '–',      label: 'Minimize', kind: 'min',   font: undefined },
-  { glyph: '', label: 'Maximize', kind: 'max',   font: '"Segoe MDL2 Assets", "Segoe Fluent Icons"' },
-  { glyph: '✕',      label: 'Close',    kind: 'close', font: undefined },
+  { label: 'Minimize', kind: 'min' },
+  { label: 'Maximize', kind: 'max' },
+  { label: 'Close', kind: 'close' },
 ] as const;
+
+function WindowControlIcon({ kind }: { kind: (typeof BUTTONS)[number]['kind'] }) {
+  // Stroke icons keep the native-looking visual weight without relying on
+  // Segoe MDL2 Assets, which is absent on Linux.
+  if (kind === 'min') {
+    return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="M2 8.5h8" /></svg>;
+  }
+  if (kind === 'max') {
+    return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><rect x="2.25" y="2.25" width="7.5" height="7.5" /></svg>;
+  }
+  return <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="m2.5 2.5 7 7m0-7-7 7" /></svg>;
+}
 
 const HANDLERS: Record<string, () => void> = {
   min:   () => { void getCurrentWindow().minimize(); },
@@ -129,12 +141,12 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
               width: 46, height: 44, borderRadius: 0,
               background: 'transparent', border: 'none',
               color: 'var(--onyx-text-dim)',
-              fontSize: b.kind === 'max' ? 11 : 16, lineHeight: 1,
               cursor: 'pointer', padding: 0,
-              fontFamily: b.font ?? "'Segoe UI', system-ui, -apple-system, sans-serif",
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
-          >{b.glyph}</button>
+          >
+            <WindowControlIcon kind={b.kind} />
+          </button>
         ))}
       </div>
     </div>

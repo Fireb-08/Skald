@@ -1,12 +1,12 @@
 # Skald
 
-A native Windows desktop client for [Audiobookshelf](https://www.audiobookshelf.org/), and a standalone server-free audiobook and podcast player.
+A native Windows and Linux desktop client for [Audiobookshelf](https://www.audiobookshelf.org/), and a standalone server-free audiobook and podcast player.
 
 Skald connects to your Audiobookshelf server for streaming, offline playback, library browsing, live progress sync, and server management for admins. It can also build and play local libraries straight from folders on your disk with no server at all, and subscribe to podcasts by RSS. You can access both your local files and your server libraries in a single, unified switcher. 
 
 Built with **Tauri 2 + React 19 + TypeScript + Rust**, with audio handled natively by **LibVLC**. The user interface follows a bespoke design language called *Onyx*.
 
-> **Status:** Working alpha. The app authenticates via password or API key, streams and plays audio, syncs progress live over Socket.IO, downloads for offline use, and features a deep settings menu. The target platform is **Windows 11 x64**. Linux is a future second-class target (see `Vault/Skald/Skald/Roadmaps/linux-roadmap.md`).
+> **Status:** Working alpha. Windows 11 x64 is the primary target. Linux support is under active development, with Arch Linux/CachyOS as the current development host (see `Vault/Skald/Skald/Roadmaps/linux-roadmap.md`).
 
 ---
 
@@ -40,7 +40,7 @@ The biggest release since 1.0, with work spread across multiple libraries, acces
 
 ## Features
 
-- **Audiobookshelf Client:** Log in with a password or API key (tokens are safely stored in Windows Credential Manager). Browse your library by grid or list, explore 3D cover layouts, and sort by Series, Authors, Narrators, Collections, Playlists, Genres, or Publishers using advanced filters and scoped search.
+- **Audiobookshelf Client:** Log in with a password or API key (tokens are safely stored in Windows Credential Manager or a Linux Secret Service keyring). Browse your library by grid or list, explore 3D cover layouts, and sort by Series, Authors, Narrators, Collections, Playlists, Genres, or Publishers using advanced filters and scoped search.
 - **Advanced Player:** Enjoy gapless playback for multi-file books. The player includes a waveform scrubber, chapter navigation, variable speed, a sleep timer, bookmarks, and an audiobook-tuned equalizer.
 - **Live Sync:** Progress syncs over Socket.IO every 30 seconds. The app handles reconnect resyncs and cross-device progress reconciliation automatically.
 - **Offline Mode:** Download books for offline playback. Your progress is saved locally and flushes back to the server the next time you connect.
@@ -60,7 +60,7 @@ The biggest release since 1.0, with work spread across multiple libraries, acces
 | Backend | Rust (edition 2021), `reqwest` + `tokio` |
 | Audio | LibVLC via `vlc-rs` |
 | Live sync | `rust_socketio` (Socket.IO) |
-| Token storage | `keyring` mapping to Windows Credential Manager |
+| Token storage | `keyring` mapping to Windows Credential Manager or Linux Secret Service |
 | Local catalog | SQLite via `rusqlite` |
 
 ---
@@ -72,22 +72,27 @@ Skald standardizes on **pnpm**.
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/tools/install) (stable, MSVC toolchain)
-- Tauri 2 prerequisites for Windows (WebView2 and Visual Studio Build Tools)
+- [Rust](https://www.rust-lang.org/tools/install) (stable; MSVC toolchain on Windows)
+- Windows: Tauri 2 prerequisites (WebView2 and Visual Studio Build Tools)
+- Arch/CachyOS: `sudo pacman -S --needed base-devel rust nodejs pnpm webkit2gtk-4.1 libappindicator-gtk3 librsvg vlc libsecret`
+- Linux desktop session: an unlocked Secret Service provider such as GNOME Keyring or KDE Wallet
 
 ### Bundled Runtime (Not Committed)
 
-Two directories are git-ignored and must be filled before a build. The `build.rs` script copies their contents next to the binary, and the bundler packages them as resources:
+On Windows, two git-ignored directories must be filled before a build. The `build.rs` script copies their contents next to the binary, and the bundler packages them as resources:
 
 - `src-tauri/vlc-dist/`: Needs `libvlc.dll`, `libvlccore.dll`, `vlc-cache-gen.exe`, and the `plugins/` tree from a standard VLC installation.
 - `src-tauri/bin/`: Needs `ffprobe.exe` (reads metadata and chapters) and `tone.exe` (writes metadata).
+
+Linux development uses the system LibVLC and resolves `ffprobe` and `tone`
+from `PATH`; the Windows runtime directories are not required.
 
 ### Commands
 
 ```bash
 pnpm install            # Install Node dependencies
 pnpm tauri dev          # Run a development build with HMR
-pnpm tauri build        # Create a production NSIS installer for Windows
+pnpm tauri build        # Create NSIS on Windows or AppImage on Linux
 pnpm exec tsc --noEmit  # Run a frontend type-check (safe while the app is running)
 ```
 
