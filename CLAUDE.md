@@ -188,6 +188,13 @@ Verified against `server/Auth.js` + `server/auth/TokenManager.js` on 2026-07-27;
 18. **`user.token` is the pre-2.26 "old token" and can be `null`** for accounts created after the migration — it must deserialize as nullable. A current server returns it *alongside* `accessToken`, so the access token must take precedence.
 19. **Access tokens last 1 hour, refresh tokens 30 days, and refresh rotates.** The previous refresh token stays valid for a 10-minute grace window, but that is a race cushion — persist a rotated pair *before* using it, and keep refresh single-flight. Skald does both in `token_refresh.rs`; go through `AbsClient::authenticated()` rather than `auth::load_token()` + `with_token()` in new authenticated commands.
 
+### Server-side filters & ordering
+
+Verified against `server/utils/queries/libraryItemsBookFilters.js` + the web client on 2026-07-27; full notes in the *Auto-Play Next Roadmap*.
+
+20. **Build filter queries with `.query()`, never string interpolation.** ABS filters are `group.{base64}` using the **standard** Base64 alphabet, which emits `+` — and a raw `+` in a query string decodes server-side as a space. The filter then matches nothing and the endpoint answers `{ results: [] }`, which reads exactly like "there is nothing there". `get_series_items` had this bug. Any new filtered query needs a wiremock fixture whose id forces the `+`/`/` alphabet.
+21. **Series sequence ordering is a numeric cast, not a natural sort.** ABS orders by `CAST(series.bookSeries.sequence AS FLOAT) ASC NULLS LAST`, so "10" follows "9" and "1.5" sits between 1 and 2. `parseFloat` reproduces it (`"2a"` → 2). Podcast episodes order on `publishedAt` (falling back to the RSS `pubDate`); the web client's episode table defaults to newest-first for *display* only.
+
 ### Audio / LibVLC
 
 7. **LibVLC HTTP headers do not reliably forward.** Use the ABS token-in-URL pattern (`?token={JWT}`), not `:http-header=`.
