@@ -6,6 +6,7 @@ import { SPEEDS } from '../../state/onyx';
 import type { OnyxState } from '../../state/onyx';
 import { SectionHead, Row, Toggle, useLocal, MONO, Panel, Pill, Seg, SegGroup } from './shared';
 import { clearAllPerBookSpeeds, rememberedSpeedCount } from '../../lib/speedMemory';
+import type { UpNextMode } from '../../lib/upNext';
 import ListeningSessionsSection from './ListeningSessionsSection';
 
 // 'playback' shows the existing speed/skip/sleep controls.
@@ -33,6 +34,12 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
   const [skipDur, setSkipDur]           = useLocal('onyx.playback.skip',        '30s');
   const [rewindOnResume, setRewindOnResume] = useLocal('onyx.playback.rewind',  '5s');
   const [autoPlayNext, setAutoPlayNext] = useLocal('onyx.playback.autoPlayNext', true);
+  // Cross-item continuation (Auto-Play Next). Deliberately NOT folded into
+  // `autoPlayNext` above, which keeps its existing chapter-scoped meaning —
+  // see upNextPrefs.ts for why the old boolean is left alone.
+  const [bookUpNext, setBookUpNext]         = useLocal<UpNextMode>('onyx.playback.upNext.books', 'prompt');
+  const [podcastUpNext, setPodcastUpNext]   = useLocal<UpNextMode>('onyx.playback.upNext.podcasts', 'prompt');
+  const [upNextCountdown, setUpNextCountdown] = useLocal('onyx.playback.upNext.countdown', 10);
   const [sleepDefault, setSleepDefault] = useLocal('onyx.playback.sleepDefault', 'End of chapter');
 
   // Adaptive auto-rewind. `onyx.playback.rewind` above stays the fixed step —
@@ -58,6 +65,14 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
       log.warn('playback', 'auto-rewind config push failed', { err: String(e) }),
     );
   }, [adaptive, rewindMin, rewindMax, rewindDelay, chapterBarrier, rewindOnResume]);
+
+  // Off / prompt / auto, in ascending order of how much the app does unasked.
+  const UP_NEXT_MODES: Array<{ value: UpNextMode; label: string }> = [
+    { value: 'off',    label: 'Stop' },
+    { value: 'prompt', label: 'Ask'  },
+    { value: 'auto',   label: 'Play' },
+  ];
+  const COUNTDOWNS = [5, 10, 20, 30];
 
   const SKIP   = ['10s', '15s', '30s', '60s'];
   const REWIND = ['Off', '2s', '5s', '10s'];
@@ -209,9 +224,43 @@ export default function PlaybackSection({ st }: PlaybackSectionProps) {
             </>
           )}
 
-          <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends.">
+          <Row label="Auto-play next chapter" hint="Continue without pausing when a chapter ends. Applies within one book or episode.">
             <Toggle on={autoPlayNext} onChange={setAutoPlayNext} />
           </Row>
+
+          {/* Continuing into a different item is a separate decision from the
+              chapter continuity above — it opens a new session and starts
+              something the listener has not chosen — so it gets its own
+              controls rather than riding on that toggle. */}
+          <Row label="When a book ends" hint="Continue with the next book in the same series.">
+            <SegGroup>
+              {UP_NEXT_MODES.map(m => (
+                <Seg key={m.value} active={m.value === bookUpNext} onClick={() => setBookUpNext(m.value)}>
+                  {m.label}
+                </Seg>
+              ))}
+            </SegGroup>
+          </Row>
+
+          <Row label="When an episode ends" hint="Continue with the next episode. Each show keeps its own oldest- or newest-first order.">
+            <SegGroup>
+              {UP_NEXT_MODES.map(m => (
+                <Seg key={m.value} active={m.value === podcastUpNext} onClick={() => setPodcastUpNext(m.value)}>
+                  {m.label}
+                </Seg>
+              ))}
+            </SegGroup>
+          </Row>
+
+          {(bookUpNext === 'prompt' || podcastUpNext === 'prompt') && (
+            <Row label="Ask for" hint="How long the “Up next” panel waits before playing.">
+              <SegGroup>
+                {COUNTDOWNS.map(v => (
+                  <Seg key={v} active={v === upNextCountdown} onClick={() => setUpNextCountdown(v)}>{v}s</Seg>
+                ))}
+              </SegGroup>
+            </Row>
+          )}
 
           <Row label="Sleep timer default" hint="Pre-fill when you open the sleep timer.">
             <SegGroup>

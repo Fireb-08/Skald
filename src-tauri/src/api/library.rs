@@ -91,10 +91,13 @@ impl AbsClient {
 
         let resp = self
             .http
-            .get(format!(
-                "{}/api/libraries/{library_id}/items?filter=series.{encoded_id}",
-                self.root()
-            ))
+            .get(format!("{}/api/libraries/{library_id}/items", self.root()))
+            // Built with .query() rather than interpolated into the URL: standard
+            // Base64 emits '+' and '/', and a '+' sitting raw in a query string
+            // decodes server-side as a space — the filter then matches nothing and
+            // an existing series reads as empty, which auto-play-next would take
+            // for the end of the series.
+            .query(&[("filter", format!("series.{encoded_id}"))])
             .header("Authorization", self.auth_header()?)
             .send_refreshing(self)
             .await?;
@@ -181,5 +184,67 @@ impl AbsClient {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod series_contract_tests {
+    use super::*;
+    use base64::Engine;
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// The series filter is the query auto-play-next depends on when the shelf
+    /// cache lacks the rest of a series, and its encoding is the kind of detail
+    /// that fails silently: ABS answers an unencoded id with an empty result
+    /// set, which reads exactly like "the series is over". Pin the exact path,
+    /// method, and Base64 form (standard alphabet, NOT url-safe).
+    #[tokio::test]
+    async fn series_items_query_sends_the_base64_encoded_filter() {
+        let server = MockServer::start().await;
+        // A series id with characters that differ between the two alphabets, so
+        // a url-safe encoder would fail this test rather than pass by luck.
+        let series_id = "ser_ff>?~1";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(series_id);
+        assert!(encoded.contains('+') || encoded.contains('/'), "fixture must exercise the alphabet");
+
+        Mock::given(method("GET"))
+            .and(path("/api/libraries/lib1/items"))
+            .and(query_param("filter", format!("series.{encoded}")))
+            .and(header("Authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "results": [{
+                    "id": "b2",
+                    "ino": "2",
+                    "libraryId": "lib1",
+                    "mediaType": "book",
+                    "media": { "metadata": { "title": "Book 2" } },
+                }],
+            })))
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        let items = client.get_series_items("lib1", series_id).await.unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "b2");
+    }
+
+    /// An unreachable or erroring server must surface as an error, not as an
+    /// empty series — the advance path treats "no items" as the end of a series
+    /// and would quietly stop instead of falling back to the shelf cache.
+    #[tokio::test]
+    async fn a_server_error_is_not_an_empty_series() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/libraries/lib1/items"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = AbsClient::new(server.uri()).with_token("tok".into());
+        let err = client.get_series_items("lib1", "ser1").await.unwrap_err();
+        assert!(err.contains("500"), "error should name the status: {err}");
     }
 }

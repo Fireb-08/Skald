@@ -35,6 +35,7 @@ import MiniPlayer from '../components/player/MiniPlayer';
 // without touching session state.
 import { playBook, playEpisode, togglePlayback, resumePlayback, changeSpeed } from '../api/playbook';
 import { skipSeconds } from '../lib/playbackPrefs';
+import { chapterContinuityEnabled } from '../lib/upNextPrefs';
 // Presentational leaves split out per the God-File Decomposition roadmap
 // (review L3/L7) — pure moves, same behavior.
 import { railRow } from '../components/player/RailRow';
@@ -162,7 +163,10 @@ export default function Player({ st }: PlayerProps) {
     ? chapterAt(displayChapters, focusedPosition).idx
     : chIdx;
 
-  const autoPlayNext = localStorage.getItem('onyx.playback.autoPlayNext') !== 'false';
+  // Chapter-scoped continuity only — cross-item continuation is a separate
+  // setting (see upNextPrefs.ts), and reading through the helper keeps the two
+  // from being confused for each other here.
+  const autoPlayNext = chapterContinuityEnabled();
   const raw = localStorage.getItem('onyx.playback.sleepDefault') ?? '"Off"';
   const sleepDefault = JSON.parse(raw) as string;
 
