@@ -288,18 +288,43 @@ pub struct SessionManager {
     // foreign update.
     pub local_downloaded_revision: Option<SharedDownloadedProgressRevision>,
     // ── Local listening stats (Local Listening Stats roadmap) ────────────────
-    // Seconds of local-library listening not yet flushed to the catalog. The
-    // 1-second tick increments it; flush_listen_time() drains it every
-    // LISTEN_FLUSH_EVERY seconds, at loop end, and from the shutdown handler.
-    // Shared (Arc) because the tick task and the shutdown path both drain it —
-    // mem::take-style draining makes a concurrent double-flush harmless.
-    pub local_listen_pending: Arc<Mutex<f64>>,
-    // The listen_sessions row id for the CURRENT local-library playback (one
-    // continuous play of one item/episode). None during online playback and for
-    // downloaded ABS books — their listening reaches server stats via session
-    // sync, and counting them locally too would double-represent them in a
-    // combined stats view.
-    pub local_listen_session: Option<String>,
+    // Listening not yet flushed to its destination. The 1-second tick adds to
+    // it; flush_listen_time() drains it every LISTEN_FLUSH_EVERY seconds, at
+    // loop end, and from the shutdown handler. Shared (Arc) because the tick
+    // task and the shutdown path both drain it — mem::take-style draining makes
+    // a concurrent double-flush harmless.
+    pub local_listen_pending: Arc<Mutex<PendingListen>>,
+    // Where the CURRENT local playback's listening is credited, or None during
+    // online playback (an ABS `/play` session already reports it).
+    pub local_listen_credit: Option<ListenCredit>,
+}
+
+/// Where a second of playback is credited. Exactly one channel is ever chosen
+/// for a given playback, which is what makes double-reporting structurally
+/// impossible: online listening is reported by the ABS `/play` session and
+/// therefore takes no credit here at all, local-library listening goes only to
+/// the catalog, and downloaded-ABS listening goes only to a local session.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ListenCredit {
+    /// Local-library item — the `listen_sessions` row id for one continuous
+    /// play of one item/episode (`catalog.db`). Never reported to ABS: the
+    /// server has never heard of the item.
+    Catalog { session_id: String },
+    /// Downloaded ABS item — a client-built `playMethod: 3` session, flushed to
+    /// the server on reconnect so offline listening reaches its listening stats
+    /// on the day it happened.
+    LocalSession { context: crate::offline_sessions::SessionContext },
+}
+
+/// Listening counted but not yet written out: the seconds themselves, plus the
+/// position the last counted tick observed. A local session records *where* you
+/// were as well as *how long*, so the position travels with the counter rather
+/// than being re-read from a player that may already hold the next book.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PendingListen {
+    pub seconds: f64,
+    pub current_time: f64,
+    pub duration: f64,
 }
 
 /// How many accumulated local listening seconds trigger a catalog flush. The
@@ -315,32 +340,101 @@ fn acknowledge_listened(counter: &Arc<Mutex<f64>>, sent: f64) {
     *pending = (*pending - sent).max(0.0);
 }
 
-/// Drain the pending local listen-time counter into the catalog (listen_days +
-/// listen_sessions). Shared by the tick loop (periodic + loop-end flush) and
-/// lib.rs's ExitRequested handler (final flush — the tick task may never fire
-/// again once the runtime is shutting down). On a failed write the drained
-/// seconds are put back so the next flush retries instead of losing them.
+/// Drain the pending listen counter into whichever channel this playback is
+/// credited to — the SQLite catalog for a local-library item, or the offline
+/// local-session store for a downloaded ABS item. Shared by the tick loop
+/// (periodic + loop-end flush) and lib.rs's ExitRequested handler (final flush —
+/// the tick task may never fire again once the runtime is shutting down). On a
+/// failed write the drained seconds are put back so the next flush retries
+/// instead of losing them.
 pub fn flush_listen_time(
-    session_id: Option<&str>,
+    credit: Option<&ListenCredit>,
     item_id: &str,
     episode_id: Option<&str>,
-    pending: &Arc<Mutex<f64>>,
+    pending: &Arc<Mutex<PendingListen>>,
 ) {
-    let Some(sid) = session_id else { return };
-    let secs = {
+    let Some(credit) = credit else { return };
+    let drained = {
         // Poison-tolerant like the tick's player lock — stats must never be the
         // thing that blocks a flush during teardown.
         let mut p = pending.lock().unwrap_or_else(|e| e.into_inner());
         std::mem::take(&mut *p)
     };
-    if secs < 1.0 {
+    if drained.seconds < 1.0 {
         return;
     }
-    if let Err(e) = crate::catalog::add_listen_time(sid, item_id, episode_id, secs) {
-        log::warn!(target: "skald::playback", "local listen flush failed: {e}");
-        *pending.lock().unwrap_or_else(|p| p.into_inner()) += secs;
+    let (what, result) = match credit {
+        ListenCredit::Catalog { session_id } => (
+            format!("catalog session={session_id}"),
+            crate::catalog::add_listen_time(session_id, item_id, episode_id, drained.seconds),
+        ),
+        ListenCredit::LocalSession { context } => {
+            // Resolving the directory here (rather than caching it) keeps the
+            // shutdown drain honest if the user relocated downloads mid-run.
+            let accrued = crate::downloads::downloads_dir().and_then(|dir| {
+                crate::offline_sessions::accrue(
+                    &dir,
+                    context,
+                    drained.seconds,
+                    drained.current_time,
+                    drained.duration,
+                    &crate::offline_sessions::SystemClock,
+                )
+            });
+            (format!("local session item={}", context.item_id), accrued)
+        }
+    };
+    if let Err(e) = result {
+        log::warn!(target: "skald::playback", "listen flush failed ({what}): {e}");
+        // Put the seconds back, preserving whatever position a concurrent tick
+        // has since recorded — only the unwritten time needs to survive.
+        let mut p = pending.lock().unwrap_or_else(|p| p.into_inner());
+        p.seconds += drained.seconds;
+        if p.duration <= 0.0 {
+            p.current_time = drained.current_time;
+            p.duration = drained.duration;
+        }
     } else {
-        log::debug!(target: "skald::playback", "local listen flush session={sid} secs={secs}");
+        log::debug!(target: "skald::playback", "listen flush {what} secs={}", drained.seconds);
+    }
+}
+
+/// Build the local-session identity for a downloaded ABS item. Title and author
+/// come from the download registry so the ABS "Listening Sessions" page names
+/// the book; ABS fills both from the library item when they arrive empty, so a
+/// pruned or hand-edited registry costs display polish, never the session.
+fn downloaded_session_context(
+    item_id: &str,
+    episode_id: Option<&str>,
+) -> crate::offline_sessions::SessionContext {
+    let record = crate::downloads::downloads_dir()
+        .map(|dir| crate::downloads::load_registry(&dir))
+        .unwrap_or_default()
+        .into_iter()
+        .find(|record| record.item_id == item_id);
+    crate::offline_sessions::SessionContext {
+        item_id: item_id.to_string(),
+        episode_id: episode_id.map(str::to_string),
+        // ABS keys episode sessions off mediaType; offline episode downloads are
+        // still deferred, so this resolves to "book" today and stays correct if
+        // they land.
+        media_type: if episode_id.is_some() { "podcast" } else { "book" }.to_string(),
+        display_title: record.as_ref().map(|r| r.title.clone()).unwrap_or_default(),
+        display_author: record.map(|r| r.author).unwrap_or_default(),
+    }
+}
+
+/// Park the accruing offline session so the next flush can send it. Called when
+/// downloaded playback stops, switches item, or the app exits; harmless (and a
+/// no-op) for every other credit channel.
+pub fn retire_local_session(credit: Option<&ListenCredit>) {
+    if !matches!(credit, Some(ListenCredit::LocalSession { .. })) {
+        return;
+    }
+    let retired = crate::downloads::downloads_dir()
+        .and_then(|dir| crate::offline_sessions::retire_active(&dir));
+    if let Err(e) = retired {
+        log::warn!(target: "skald::sync", "offline listening session retire failed: {e}");
     }
 }
 
@@ -385,8 +479,8 @@ impl SessionManager {
             is_local_library: false,
             local_episode_id: None,
             local_downloaded_revision: None,
-            local_listen_pending: Arc::new(Mutex::new(0.0)),
-            local_listen_session: None,
+            local_listen_pending: Arc::new(Mutex::new(PendingListen::default())),
+            local_listen_credit: None,
         }
     }
 
@@ -430,9 +524,11 @@ impl SessionManager {
         self.online_item_id = None;
         self.online_episode_id = None;
         self.online_duration = 0.0;
-        // Online playback is counted by the server's own listening stats — stop
-        // any local stats session (the old tick task drains pending on exit).
-        self.local_listen_session = None;
+        // Online playback is reported by the ABS `/play` session itself, so this
+        // playback takes no local credit at all — that is the mutual exclusion
+        // that keeps an interval from being counted twice. The old tick task
+        // drains its own pending counter on exit.
+        self.local_listen_credit = None;
 
         // Initialize the audio player on first call (deferred to avoid
         // requiring libvlc.dll on PATH at startup).
@@ -783,22 +879,25 @@ impl SessionManager {
             DownloadedProgressRevision { baseline_captured, server_last_update },
         )));
 
-        // New local playback = new listening-stats session row (Local Listening
-        // Stats roadmap). Only LOCAL-LIBRARY playback is counted — downloaded ABS
-        // books reach server stats via session sync once online. The pending
-        // counter gets a FRESH Arc (same pattern as the active flag) so the
-        // previous tick task's loop-end flush drains its own counter under its
-        // own session id, never racing this session's accumulation.
-        self.local_listen_session = if local_library {
+        // New local playback = a new listening-credit channel. A local-library
+        // item opens a `listen_sessions` row (Local Listening Stats roadmap); a
+        // downloaded ABS item accrues a client-built local session that reaches
+        // the server's own stats on reconnect (Offline Local Sessions roadmap).
+        // The pending counter gets a FRESH Arc (same pattern as the active flag)
+        // so the previous tick task's loop-end flush drains its own counter
+        // under its own credit, never racing this playback's accumulation.
+        self.local_listen_credit = Some(if local_library {
             let started = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            Some(format!("local-{item_id}-{started}"))
+            ListenCredit::Catalog { session_id: format!("local-{item_id}-{started}") }
         } else {
-            None
-        };
-        self.local_listen_pending = Arc::new(Mutex::new(0.0));
+            ListenCredit::LocalSession {
+                context: downloaded_session_context(item_id, self.local_episode_id.as_deref()),
+            }
+        });
+        self.local_listen_pending = Arc::new(Mutex::new(PendingListen::default()));
 
         // Initialize the audio player on first call (deferred init matches start_session).
         let player_newly_created = {
@@ -927,9 +1026,10 @@ impl SessionManager {
         // ABS books persist to the offline queue (which later flushes to the server).
         let local_library_tick = local_library;
         let downloaded_revision_tick = self.local_downloaded_revision.clone();
-        // Listening-stats accumulation (local-library only — see the field docs).
+        // Listening-stats accumulation — the credit channel decides where the
+        // drained seconds land (catalog vs. offline local session).
         let listen_pending_tick = Arc::clone(&self.local_listen_pending);
-        let listen_session_tick = self.local_listen_session.clone();
+        let listen_credit_tick = self.local_listen_credit.clone();
 
         let local_tick_handle = tokio::spawn(async move {
             // Persist resume progress at most every PERSIST_EVERY seconds — the UI
@@ -986,7 +1086,11 @@ impl SessionManager {
                     if let Some((pos, dur)) = pstate.pending.take() { persist(pos, dur, false); }
                     // Book-switch/stop: drain the listen tail so short sessions
                     // (< LISTEN_FLUSH_EVERY) still register in the stats.
-                    flush_listen_time(listen_session_tick.as_deref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
+                    flush_listen_time(listen_credit_tick.as_ref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
+                    // Then close the offline session: it has stopped growing, so
+                    // it becomes flushable now rather than waiting for the next
+                    // play of the same book.
+                    retire_local_session(listen_credit_tick.as_ref());
                     break;
                 }
                 let (pos, dur, playing, live, ended) = {
@@ -1006,24 +1110,27 @@ impl SessionManager {
                     let mut ct = ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                     *ct = commit_position(*ct, pos, dur, live, ended);
                 }
+                // Report the committed position (never the raw 0 from Ended/buffering).
+                let report = *ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                 if playing {
                     *tl_tick.lock().unwrap_or_else(|e| e.into_inner()) += 1.0;
-                    // Local listening stats: count the second, flush to the
-                    // catalog once enough accrue (1 Hz SQLite writes for stats
-                    // would be needless churn — same reasoning as PERSIST_EVERY).
-                    if listen_session_tick.is_some() {
+                    // Listening stats: count the second, flush once enough accrue
+                    // (1 Hz SQLite/JSON writes for stats would be needless churn —
+                    // same reasoning as PERSIST_EVERY). The position rides along
+                    // so a local session records where the listening reached.
+                    if listen_credit_tick.is_some() {
                         let due = {
                             let mut pend = listen_pending_tick.lock().unwrap_or_else(|e| e.into_inner());
-                            *pend += 1.0;
-                            *pend >= LISTEN_FLUSH_EVERY
+                            pend.seconds += 1.0;
+                            pend.current_time = report;
+                            pend.duration = dur;
+                            pend.seconds >= LISTEN_FLUSH_EVERY
                         };
                         if due {
-                            flush_listen_time(listen_session_tick.as_deref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
+                            flush_listen_time(listen_credit_tick.as_ref(), &item_id_tick, episode_id_tick.as_deref(), &listen_pending_tick);
                         }
                     }
                 }
-                // Report the committed position (never the raw 0 from Ended/buffering).
-                let report = *ct_tick.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = app_tick.emit(
                     "playback-tick",
                     serde_json::json!({
@@ -1267,9 +1374,47 @@ impl SessionManager {
 // tokio runtime: the helpers take plain values and return decisions.
 #[cfg(test)]
 mod tick_tests {
-    use super::{acknowledge_listened, commit_position, end_decision, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, EndState, PersistState, SessionManager, SyncClaim};
+    use super::{acknowledge_listened, commit_position, downloaded_session_context, end_decision, flush_listen_time, lifecycle_position, persist_decision, queue_downloaded_progress, resolve_load_time, wait_for_sync_claim, DownloadedProgressRevision, EndState, ListenCredit, PendingListen, PersistState, SessionManager, SyncClaim};
     use crate::api::AbsClient;
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
+
+    // An online `/play` session reports its own listening to ABS. If this
+    // playback also took local credit, the same interval would reach the server
+    // twice — once from the session sync and once as a local session. The
+    // manager therefore starts with no credit at all, and the drain is a no-op
+    // without one, so there is no path from online playback to a local session.
+    #[test]
+    fn online_playback_never_produces_a_local_session() {
+        let manager = SessionManager::new(AbsClient::new("http://localhost".to_string()));
+        assert!(manager.local_listen_credit.is_none(), "online playback takes no local credit");
+
+        let pending = Arc::new(Mutex::new(PendingListen {
+            seconds: 300.0,
+            current_time: 900.0,
+            duration: 3600.0,
+        }));
+        flush_listen_time(None, "li_abc", None, &pending);
+
+        assert_eq!(
+            pending.lock().unwrap().seconds,
+            300.0,
+            "with no credit channel the counter is neither written nor drained",
+        );
+    }
+
+    // The two local channels are mutually exclusive by construction: a
+    // local-library item can only reach the catalog, a downloaded ABS item can
+    // only reach a local session.
+    #[test]
+    fn a_downloaded_item_is_credited_as_a_book_session() {
+        let context = downloaded_session_context("li_abc", None);
+        assert_eq!(context.item_id, "li_abc");
+        assert_eq!(context.media_type, "book");
+        assert!(context.episode_id.is_none());
+
+        let credit = ListenCredit::LocalSession { context };
+        assert!(!matches!(credit, ListenCredit::Catalog { .. }));
+    }
 
     #[test]
     fn load_time_prefers_explicit_start_over_server_time() {

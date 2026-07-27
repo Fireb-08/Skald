@@ -68,7 +68,10 @@ pub fn take_corrupt_notices() -> Vec<String> {
 // so the evidence survives the next save. `what` names the file in the log and
 // in the user-facing notice; pass `notify_user` for files whose reset is
 // user-visible (registry, offline queue) and not for per-book internals.
-fn load_json_or_preserve<T: serde::de::DeserializeOwned + Default>(
+// pub(crate) so offline_sessions.rs can persist local_sessions.json with the
+// identical corruption posture — a silently-emptied session store would lose
+// listening attribution with no trace, exactly like the progress queue.
+pub(crate) fn load_json_or_preserve<T: serde::de::DeserializeOwned + Default>(
     path: &Path,
     what: &str,
     notify_user: bool,

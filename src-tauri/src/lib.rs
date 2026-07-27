@@ -9,6 +9,7 @@ pub mod cover_cache;
 pub mod paths;     // Onboarding: user-relocatable downloads + cache roots
 pub mod socket;    // Phase B: Socket.IO transport for live sync
 pub mod downloads; // Phase B: persistent registry of downloaded books
+pub mod offline_sessions; // Offline listening reported to ABS as playMethod:3 local sessions
 pub mod probe;     // Local Library: ffprobe-based metadata + chapter reader
 pub mod tone;      // Local Library: tone-based metadata writer
 pub mod scanner;   // Local Library: local folder scanner (emits ABS-shaped items)
@@ -628,18 +629,21 @@ pub fn run() {
                                             log::warn!(target: "skald::downloads", "shutdown progress write failed: {e}");
                                         }
                                     }
-                                    // Final listen-time drain (Local Listening Stats
-                                    // roadmap): the tick task may never fire again once
-                                    // the runtime shuts down, so the ≤30s pending tail
-                                    // is written here — same rule as the progress write.
-                                    if guard.is_local_library {
-                                        session::flush_listen_time(
-                                            guard.local_listen_session.as_deref(),
-                                            item_id,
-                                            guard.local_episode_id.as_deref(),
-                                            &guard.local_listen_pending,
-                                        );
-                                    }
+                                    // Final listen-time drain (Local Listening Stats +
+                                    // Offline Local Sessions roadmaps): the tick task may
+                                    // never fire again once the runtime shuts down, so the
+                                    // ≤30s pending tail is written here — same rule as the
+                                    // progress write. The credit channel routes it to the
+                                    // catalog or to the offline local session.
+                                    session::flush_listen_time(
+                                        guard.local_listen_credit.as_ref(),
+                                        item_id,
+                                        guard.local_episode_id.as_deref(),
+                                        &guard.local_listen_pending,
+                                    );
+                                    // Exit ends the session as surely as a stop does; retire
+                                    // it now so the next launch's flush can send it.
+                                    session::retire_local_session(guard.local_listen_credit.as_ref());
                                 }
                                 return; // no server session — nothing more to do
                             }
