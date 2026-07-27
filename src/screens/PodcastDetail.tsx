@@ -48,6 +48,12 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   const [advanceDir, setAdvanceDir] = useState<EpisodeDirection>(
     () => episodeDirection(st.podcastDetailId),
   );
+  // Navigating between shows reuses this component, and a state initializer runs
+  // once per mount — without this the control would keep showing (and toggle
+  // from) the previous show's direction while writing under the new show's key.
+  useEffect(() => {
+    setAdvanceDir(episodeDirection(st.podcastDetailId));
+  }, [st.podcastDetailId]);
 
   // The library list returns MINIFIED podcast items (numEpisodes but no
   // episodes[]). Fetch the expanded item for the downloaded episode list.
@@ -135,7 +141,9 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     // first would leave it showing the previous (or no) item when the session
     // open fails, which reads as a broken player rather than a play error.
     try {
-      await playEpisode(st, item.id, ep);
+      // The expanded item, not its id: the shelf entry is minified, and the
+      // snapshot playEpisode keeps is what auto-play-next reads at the end.
+      await playEpisode(st, item, ep);
       st.setScreen('player');
     } catch (e) {
       log.error('playback', 'playEpisode failed', { itemId: item.id, episodeId: ep.id, err: String(e) });

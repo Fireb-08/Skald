@@ -47,11 +47,45 @@ export function useUpNext(st: OnyxState): UseUpNext {
   const stRef = useRef(st);
   stRef.current = st;
 
+  // Mirrored so accept/decline can clear the prompt *and* read what it was
+  // without a side effect inside a state updater — which React is free to call
+  // twice, and which would open two sessions for one accepted book.
+  const promptRef = useRef<UpNextPrompt | null>(null);
+  promptRef.current = prompt;
+
+  // Every end event runs under a generation. Resolving a book's successor can
+  // take a server round-trip (series cache miss), and a prompt sits on screen
+  // for its whole countdown — in either window the listener can start something
+  // else, and continuing then would take the audio away from the choice they
+  // just made. Invalidating bumps the generation so an in-flight resolution
+  // returns to a superseded token, and drops any visible prompt with it.
+  const generationRef = useRef(0);
+  const invalidate = useCallback(() => {
+    generationRef.current += 1;
+    if (promptRef.current) {
+      promptRef.current = null;
+      setPrompt(null);
+    }
+  }, []);
+
+  // What is loaded right now. `playback-ended` does not change it, so a change
+  // means something *else* started: a manual play, or the advance we started
+  // ourselves (whose prompt is already resolved by the time this fires).
+  const identity = `${st.currentBookId ?? ''}|${st.currentEpisodeId ?? ''}`;
+  const identityRef = useRef(identity);
+  useEffect(() => {
+    if (identityRef.current === identity) return;
+    identityRef.current = identity;
+    invalidate();
+  }, [identity, invalidate]);
+
   const play = useCallback((target: UpNextTarget) => {
     const current = stRef.current;
     const started = target.kind === 'book'
       ? playBook(current, target.item.id)
-      : playEpisode(current, target.item.id, target.episode);
+      // The resolved item, not its id: for a server podcast it is the expanded
+      // show, and passing it on is what lets the advance after this one resolve.
+      : playEpisode(current, target.item, target.episode);
     started.catch(error =>
       log.error('playback', 'advance to the next item failed', {
         itemId: target.item.id,
@@ -72,7 +106,28 @@ export function useUpNext(st: OnyxState): UseUpNext {
         return;
       }
 
+      // A second end event supersedes this one; so does anything the listener
+      // starts while the resolution is in flight.
+      invalidate();
+      const generation = generationRef.current;
+
       const { target, miss } = await resolveUpNext(current, payload.itemId, episodeId);
+
+      // Both halves matter: the generation catches a newer event or a load that
+      // has already been rendered, and the identity check catches one that
+      // started in the last few milliseconds and has not re-rendered yet.
+      const after = stRef.current;
+      const stillOnEndedItem =
+        after.currentBookId === payload.itemId && (after.currentEpisodeId ?? null) === episodeId;
+      if (generationRef.current !== generation || !stillOnEndedItem) {
+        log.info('playback', 'advance abandoned — the listener started something else', {
+          itemId: payload.itemId,
+          episodeId,
+          nowPlaying: after.currentBookId,
+        });
+        return;
+      }
+
       if (!target) {
         log.info('playback', 'nothing up next', { itemId: payload.itemId, episodeId, reason: miss });
         if (miss === 'series-end' || miss === 'feed-end') {
@@ -109,14 +164,12 @@ export function useUpNext(st: OnyxState): UseUpNext {
     return () => {
       cancelled = true;
       unlisten?.();
+      // A resolution still in flight belongs to a hook that no longer exists;
+      // let it return to a superseded generation rather than prompting into an
+      // unmounted tree.
+      generationRef.current += 1;
     };
-  }, [play]);
-
-  // Mirrored so accept/decline can clear the prompt *and* read what it was
-  // without a side effect inside a state updater — which React is free to call
-  // twice, and which would open two sessions for one accepted book.
-  const promptRef = useRef<UpNextPrompt | null>(null);
-  promptRef.current = prompt;
+  }, [invalidate, play]);
 
   const resolvePrompt = useCallback(() => {
     const current = promptRef.current;

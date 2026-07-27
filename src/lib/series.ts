@@ -22,18 +22,53 @@ export function parseSequence(v: SeriesObject['sequence']): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** An item's place in its series. `id` is the ABS series id when the response
+ *  carried the full series object — it is what makes two entries the *same*
+ *  series rather than merely a same-named one (see `sameSeries`). */
+export interface SeriesPlace {
+  id: string | null;
+  name: string;
+  sequence: number | null;
+}
+
 /**
- * Extract an item's primary series ({ name, sequence }), preferring the full
+ * Extract an item's primary series ({ id, name, sequence }), preferring the full
  * series object(s) over the flat seriesName. Returns null when the item is not
  * part of any series.
  */
-export function primarySeries(item: LibraryItem): { name: string; sequence: number | null } | null {
+export function primarySeries(item: LibraryItem): SeriesPlace | null {
   const s = item.media?.metadata?.series;
   const obj: SeriesObject | undefined = Array.isArray(s) ? s[0] : (s ?? undefined);
-  if (obj?.name) return { name: obj.name, sequence: parseSequence(obj.sequence) };
+  if (obj?.name) return { id: obj.id ?? null, name: obj.name, sequence: parseSequence(obj.sequence) };
   const name = item.media?.metadata?.seriesName;
-  if (name) return { name, sequence: null };
+  if (name) return { id: null, name, sequence: null };
   return null;
+}
+
+/** Series names are compared case- and whitespace-insensitively, since the
+ *  fallback exists for hand-filed local items where "  The Expanse" and
+ *  "The Expanse" are the same shelf to a listener. */
+function normalizeName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
+/**
+ * Whether two items belong to the same series — not merely to a same-named one.
+ *
+ * Skald's combined "all libraries" shelf merges libraries, so a display name is
+ * not an identity: two unrelated series called "Collected Works" would otherwise
+ * be one candidate set, and advancing into an unrelated book is worse than
+ * stopping. The ABS series id decides it whenever both sides carry one; local
+ * and legacy items have only a name, and for those the match is scoped to a
+ * single library.
+ */
+export function sameSeries(a: LibraryItem, b: LibraryItem): boolean {
+  const left = primarySeries(a);
+  const right = primarySeries(b);
+  if (!left || !right) return false;
+  if (a.libraryId !== b.libraryId) return false;
+  if (left.id && right.id) return left.id === right.id;
+  return normalizeName(left.name) === normalizeName(right.name);
 }
 
 export interface NextInSeriesOptions {
@@ -47,6 +82,8 @@ export interface NextInSeriesOptions {
 /**
  * Find the next book after `finished` in the same series within `library` — the
  * item with the smallest sequence strictly greater than the finished item's.
+ * "Same series" is `sameSeries`, not a shared display name, so a combined shelf
+ * cannot advance across a name collision into another library.
  * Returns `undefined` when the finished item has no comparable series sequence,
  * or nothing follows it. (A series with gaps simply takes the next-higher
  * sequence; ties and the finished item itself are skipped.)
@@ -65,7 +102,7 @@ export function nextInSeries(
   for (const it of library) {
     if (it.id === finished.id) continue;
     const s = primarySeries(it);
-    if (!s || s.name !== cur.name || s.sequence === null) continue;
+    if (!s || s.sequence === null || !sameSeries(finished, it)) continue;
     if (s.sequence <= cur.sequence) continue;
     if (opts.isFinished?.(it)) continue;
     if (opts.eligible && !opts.eligible(it)) continue;

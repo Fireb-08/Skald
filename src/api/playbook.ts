@@ -5,7 +5,8 @@
 import type { OnyxState } from '../state/onyx';
 import { chapterStartAt } from '../state/bookHelpers';
 import { hasRememberedSpeed, rememberSpeed, speedForItem } from '../lib/speedMemory';
-import type { MediaProgress, PodcastEpisode } from './abs';
+import type { LibraryItem, MediaProgress, PodcastEpisode } from './abs';
+import { asPodcastItem } from './abs';
 import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
 import { log } from '../lib/log';
 
@@ -324,16 +325,32 @@ export async function playBook(
   }
 }
 
+/** Of the item a caller handed us and the one on the shelf, the one that
+ *  actually carries `episodes[]` — preferring the caller's, since it is the
+ *  expanded fetch when there is one. Falls back to whichever exists so a
+ *  string-only call still snapshots something for the MiniPlayer. */
+function expandedPodcast(
+  provided: LibraryItem | undefined,
+  shelf: LibraryItem | undefined,
+): LibraryItem | undefined {
+  const hasEpisodes = (it: LibraryItem | undefined) =>
+    !!it && (asPodcastItem(it).media?.episodes?.length ?? 0) > 0;
+  if (hasEpisodes(provided)) return provided;
+  if (hasEpisodes(shelf)) return shelf;
+  return provided ?? shelf;
+}
+
 // Canonical entry point for starting playback of a podcast episode (cluster E).
 // Mirrors playBook's online path but opens the session on the episode so the
 // server tracks per-episode progress. Podcast episodes are not part of the
 // offline download registry, so there is no local-file branch here.
 export async function playEpisode(
   st: OnyxState,
-  podcastItemId: string,
+  podcast: string | LibraryItem,
   episode: PodcastEpisode,
   startTimeOverride?: number,
 ): Promise<void> {
+  const podcastItemId = typeof podcast === 'string' ? podcast : podcast.id;
   const episodeId = episode.id;
   if (!episodeId) return;
   if (playBookInFlight) {
@@ -343,8 +360,14 @@ export async function playEpisode(
   playBookInFlight = true;
   try {
     // Snapshot the parent podcast so the cross-library MiniPlayer can render the
-    // playing episode even after the user switches to a different library.
-    const podItem = st.library.find(b => b.id === podcastItemId);
+    // playing episode even after the user switches to a different library — and
+    // so auto-play-next has an episode list when this one ends. Callers that
+    // already hold the EXPANDED item pass it, because the shelf entry is the
+    // minified ABS shape: numEpisodes, but no episodes[] to advance through.
+    const podItem = expandedPodcast(
+      typeof podcast === 'string' ? undefined : podcast,
+      st.library.find(b => b.id === podcastItemId),
+    );
     if (podItem) st.setPlayingItem(podItem);
     // ── Local podcast path: play a downloaded episode from disk (no server) ──────
     // A local podcast episode carries `localPath` (the downloaded audio file) and

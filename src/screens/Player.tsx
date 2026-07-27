@@ -289,16 +289,17 @@ export default function Player({ st }: PlayerProps) {
       try {
         await downloadLocalEpisode(pid, ep);
         const items = await getLocalPodcastItems(st.currentLibraryId);
-        const eps = items.find(i => i.id === pid)
-          ? asPodcastItem(items.find(i => i.id === pid)!).media.episodes ?? []
-          : [];
+        const show = items.find(i => i.id === pid);
+        const eps = show ? asPodcastItem(show).media.episodes ?? [] : [];
         const match = eps.find(e => episodeKey(e) === key) ?? eps.find(e => e.title === ep.title);
         setDlState('idle');
         if (match?.id) {
           await st.refreshLibrary().catch(() => {});
           // Surface a post-download play failure — the user just watched the
           // download succeed, so a silent no-op reads as a dead play button.
-          await playEpisode(st, pid, match).catch(err => {
+          // The re-listed show (not just its id) travels along: it is the item
+          // carrying episodes[], which is what continuation walks at the end.
+          await playEpisode(st, show ?? pid, match).catch(err => {
             log.error('playback', 'play after local episode download failed', { itemId: pid, err: String(err) });
             st.setToast({ message: 'Downloaded, but playback could not start — tap the episode to retry', type: 'error' });
           });
@@ -330,8 +331,10 @@ export default function Player({ st }: PlayerProps) {
         if (match?.id) {
           setDlState('idle');
           // Same visibility rule as the local branch: a failed auto-play after
-          // a visible download must tell the user, not just the console.
-          await playEpisode(st, pid, match).catch(err => {
+          // a visible download must tell the user, not just the console. The
+          // expanded item just fetched is passed on, so continuation at the end
+          // of this episode has the show's episode list.
+          await playEpisode(st, item, match).catch(err => {
             log.error('playback', 'play after episode download failed', { itemId: pid, err: String(err) });
             st.setToast({ message: 'Downloaded, but playback could not start — tap the episode to retry', type: 'error' });
           });

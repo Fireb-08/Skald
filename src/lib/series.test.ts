@@ -5,7 +5,7 @@
 // natural/lexicographic sort would be wrong.
 import { describe, expect, it } from 'vitest';
 import type { LibraryItem, SeriesObject } from '../api/abs';
-import { nextInSeries, parseSequence, primarySeries } from './series';
+import { nextInSeries, parseSequence, primarySeries, sameSeries } from './series';
 
 /** Minimal item carrying just the series metadata the resolver reads. */
 function book(id: string, series: string, sequence?: SeriesObject['sequence']): LibraryItem {
@@ -47,13 +47,14 @@ describe('parseSequence — ABS CAST(sequence AS FLOAT) semantics', () => {
 
 describe('primarySeries', () => {
   it('prefers the series object over the flat seriesName', () => {
-    expect(primarySeries(book('b1', 'Mistborn', '2'))).toEqual({ name: 'Mistborn', sequence: 2 });
+    expect(primarySeries(book('b1', 'Mistborn', '2')))
+      .toEqual({ id: 's-Mistborn', name: 'Mistborn', sequence: 2 });
   });
 
   it('falls back to seriesName with no sequence when only the flat name exists', () => {
     const item = book('b1', 'Mistborn', '2');
     item.media.metadata.series = null;
-    expect(primarySeries(item)).toEqual({ name: 'Mistborn', sequence: null });
+    expect(primarySeries(item)).toEqual({ id: null, name: 'Mistborn', sequence: null });
   });
 
   it('returns null for a standalone book', () => {
@@ -61,6 +62,56 @@ describe('primarySeries', () => {
     item.media.metadata.series = null;
     item.media.metadata.seriesName = null;
     expect(primarySeries(item)).toBeNull();
+  });
+});
+
+describe('sameSeries — identity, not a shared name', () => {
+  /** Same display name, different library and different ABS series id: what the
+   *  combined "all libraries" shelf actually merges. */
+  function inLibrary(item: LibraryItem, libraryId: string, seriesId: string): LibraryItem {
+    const copy = JSON.parse(JSON.stringify(item)) as LibraryItem;
+    copy.libraryId = libraryId;
+    (copy.media.metadata.series as SeriesObject[])[0].id = seriesId;
+    return copy;
+  }
+
+  it('matches two entries of one series', () => {
+    expect(sameSeries(book('b1', 'Collected Works', '1'), book('b2', 'Collected Works', '2'))).toBe(true);
+  });
+
+  it('refuses a same-named series from another library', () => {
+    const mine = book('b1', 'Collected Works', '1');
+    const theirs = inLibrary(book('b2', 'Collected Works', '2'), 'lib2', 's-other');
+    expect(sameSeries(mine, theirs)).toBe(false);
+  });
+
+  it('refuses a same-named series with a different id in the same library', () => {
+    const mine = book('b1', 'Collected Works', '1');
+    const theirs = inLibrary(book('b2', 'Collected Works', '2'), 'lib1', 's-other');
+    expect(sameSeries(mine, theirs)).toBe(false);
+  });
+
+  it('falls back to the name for items with no series id, within one library', () => {
+    // Local-library items are filed by name alone; two libraries' worth of them
+    // must still not merge.
+    const strip = (item: LibraryItem, libraryId: string) => {
+      const copy = JSON.parse(JSON.stringify(item)) as LibraryItem;
+      copy.media.metadata.series = null;
+      copy.libraryId = libraryId;
+      return copy;
+    };
+    expect(sameSeries(strip(book('l1', 'The Expanse', '1'), 'lib1'),
+                      strip(book('l2', ' the expanse ', '2'), 'lib1'))).toBe(true);
+    expect(sameSeries(strip(book('l1', 'The Expanse', '1'), 'lib1'),
+                      strip(book('l2', 'The Expanse', '2'), 'lib2'))).toBe(false);
+  });
+
+  it('keeps a name-collided book out of the advance', () => {
+    const mine = book('b1', 'Collected Works', '1');
+    const theirs = inLibrary(book('other', 'Collected Works', '2'), 'lib2', 's-other');
+    const real = book('b3', 'Collected Works', '3');
+    // The unrelated book has the lower sequence, so a name-only match would take it.
+    expect(nextInSeries(mine, [theirs, real])?.id).toBe('b3');
   });
 });
 
