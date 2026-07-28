@@ -65,6 +65,10 @@ Mrmory/
 # to the repo root so it does NOT match src/assets/fonts/ (Git is case-
 # insensitive on Windows, so an unanchored "Fonts/" would catch "fonts/" too).
 /Fonts/
+# Local captures kept for reference while chasing a bug. They show real library
+# contents and account details, and this repo is public — anchored so it cannot
+# also swallow a "screenshots/" elsewhere in the tree (see the /Fonts/ note above).
+/Screenshots/
 Product Screenshots/Hero Shot.png
 Product Screenshots/Player Shot.png
 Product Screenshots/Podcasts Library.png
