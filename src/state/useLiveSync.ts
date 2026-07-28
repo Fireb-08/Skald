@@ -82,6 +82,18 @@ export interface LiveUserRecord {
   librariesAccessible?: string[];
 }
 
+/**
+ * One library-access refresh: the access set a `user_updated` payload carried, and
+ * the loaded ABS library ids it was judged against. The pair travels together
+ * because a refresh is decided from both, and because what a refresh actually
+ * loaded can only be told from the loaded ids afterwards — never from the set that
+ * triggered it (the server may have moved on by the time the request runs).
+ */
+interface AccessAttempt {
+  pushed: string;
+  loaded: string;
+}
+
 export interface PlaybackSyncConflict {
   libraryItemId: string;
   episodeId: string | null;
@@ -470,40 +482,47 @@ export function useLiveSync({
     if (!liveSyncEnabled || !serverUrl || !authToken) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    // The last access set that was actually reconciled with the server. Set only
-    // once a refresh has *succeeded*: marking it up front would turn a transient
-    // fetch failure into session-long suppression, because every later payload
-    // carries the same set and would be dismissed as already handled — leaving
-    // the switcher stale until a reconnect or relaunch.
-    let refreshedFor: string | undefined;
-    // The set being fetched right now, which deduplicates the burst of payloads a
+    // **There is deliberately no "reconciled for set X" marker.** A refresh does not
+    // fetch a requested access set — it fetches whatever the server has when the
+    // request runs — so its result can never be attributed to the payload that
+    // triggered it. A marker recording that attribution lies whenever access moves
+    // again mid-request, and then suppresses the payload that reports the move: a
+    // refresh queued for C but executed after a revert to B loads B while claiming C,
+    // and the next genuine change to C is dismissed as already done, leaving the
+    // shelf on B. What a refresh *did* load is instead read back from the loaded
+    // library list, which is ground truth (see the decision below).
+    //
+    // An attempt that reached the server, paired with the loaded ids it was decided
+    // against. Its only job is to stop a set that permanently disagrees with the
+    // server — a deleted library still listed in the account, say — from refreshing
+    // on every payload for the rest of the session. Recorded on success only, so a
+    // failed refresh is still retried by the next payload.
+    let settledAttempt: AccessAttempt | undefined;
+    // The attempt being fetched right now, which deduplicates the burst of payloads a
     // progress sync produces while that request is outstanding.
-    let refreshingNow: string | undefined;
-    // The newest set waiting its turn. Refreshes are serialized rather than run
+    let refreshingNow: AccessAttempt | undefined;
+    // The newest attempt waiting its turn. Refreshes are serialized rather than run
     // concurrently: two overlapping `refreshLibrary()` calls race on the very state
     // they both write — the library list and its items — so the one that happens to
     // finish last becomes authoritative, which need not be the newest access set.
     // Queueing also keeps a set that arrives mid-refresh from being mistaken for a
     // duplicate of the one in flight, which is how a third payload could otherwise
     // start a second request for a set already being fetched.
-    let queuedNext: string | undefined;
+    let queuedNext: AccessAttempt | undefined;
     let draining = false;
 
-    // Drain the queue one refresh at a time, newest set last.
-    const reconcileAccess = async (fingerprint: string) => {
-      queuedNext = fingerprint;
+    // Drain the queue one refresh at a time, newest attempt last.
+    const reconcileAccess = async (attempt: AccessAttempt) => {
+      queuedNext = attempt;
       if (draining) return;
       draining = true;
       try {
         while (queuedNext !== undefined && !disposed) {
-          const set = queuedNext;
+          const next = queuedNext;
           queuedNext = undefined;
-          refreshingNow = set;
+          refreshingNow = next;
           try {
-            // Only a refresh that reached the server counts as reconciled. On a
-            // failure the marker stays clear, so the next payload — one is due
-            // within about thirty seconds of playback — retries.
-            if (await refreshLibrary()) refreshedFor = set;
+            if (await refreshLibrary()) settledAttempt = next;
             else log.warn('sync', 'library access refresh could not reach the server — will retry');
           } finally {
             refreshingNow = undefined;
@@ -513,8 +532,9 @@ export function useLiveSync({
         draining = false;
       }
     };
-    // The previous payload's access set, needed only to recognise a restricted
-    // set becoming unrestricted (see below).
+    // The access set the previous payload carried — recorded for *every* payload,
+    // including the ones ignored below, because arrival order is the only evidence
+    // ABS gives that access has moved (the payload carries no revision).
     let lastPushedAccess: string | undefined;
 
     listen<string>('user-updated', event => {
@@ -544,12 +564,8 @@ export function useLiveSync({
         const fingerprint = [...librariesAccessible].sort().join(',');
         const previous = lastPushedAccess;
         lastPushedAccess = fingerprint;
-        // Already reconciled with the server, being reconciled right now, or waiting
-        // its turn — another progress-driven payload carrying a set already
-        // accounted for.
-        if (fingerprint === refreshedFor
-          || fingerprint === refreshingNow
-          || fingerprint === queuedNext) return;
+        // Being fetched right now, or already waiting its turn.
+        if (fingerprint === refreshingNow?.pushed || fingerprint === queuedNext?.pushed) return;
 
         const loaded = (librariesRef.current ?? [])
           .filter(library => library.source !== 'local')
@@ -560,21 +576,34 @@ export function useLiveSync({
         // right set on its own, so there is nothing to compare or correct.
         if (!loaded) return;
 
-        const changed = librariesAccessible.length
-          // A named set is directly comparable with what we hold.
-          ? fingerprint !== loaded
-          // Empty means unrestricted, which no id set can be compared against —
-          // the ids we hold are already everything this account can see. Only a
-          // previous *restricted* set proves access widened; with none, there is
-          // nothing to detect, and refreshing on spec would cost a shelf reload on
-          // the first progress tick of every full-access session.
-          : previous !== undefined && previous !== '';
-        if (!changed) return;
+        // Two independent reasons to refresh, because neither covers the other:
+        //
+        //  · the pushed set disagrees with what is loaded — ground truth, and the
+        //    only test available for the first payload of a session; and
+        //  · the pushed set differs from the one the previous payload carried, which
+        //    is the only evidence that access has *moved*. It is what catches a
+        //    change back to a set already loaded — nothing in ground truth
+        //    distinguishes that from a redelivery, and the payload carries no
+        //    revision to consult.
+        //
+        // An empty list means unrestricted, which no id set can be compared against
+        // (the ids we hold are already everything this account can see), so there
+        // only the second test can speak — which is also why a first-ever payload of
+        // `[]` refreshes nothing: with no previous set, nothing proves access widened,
+        // and refreshing on spec would reload the shelf on the first progress tick of
+        // every full-access session.
+        const disagrees = librariesAccessible.length > 0 && fingerprint !== loaded;
+        const announcesChange = previous !== undefined && fingerprint !== previous;
+        if (!disagrees && !announcesChange) return;
+        // Already asked the server for exactly this, against exactly this loaded
+        // state, and the two still disagree: that discrepancy is the server's to
+        // resolve, not ours to re-request every thirty seconds.
+        if (settledAttempt?.pushed === fingerprint && settledAttempt.loaded === loaded) return;
 
         log.info('sync', 'library access changed — refreshing libraries', {
           accessible: librariesAccessible.length || 'all',
         });
-        void reconcileAccess(fingerprint);
+        void reconcileAccess({ pushed: fingerprint, loaded });
       } catch (e) { log.error('sync', 'user-updated parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlisten = fn; });
 

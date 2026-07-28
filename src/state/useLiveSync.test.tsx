@@ -656,6 +656,54 @@ describe('useLiveSync socket event coverage', () => {
       expect(refresh.fn).toHaveBeenCalledTimes(2);
     });
 
+    it('treats a revert to the set being fetched as a change, not a duplicate', async () => {
+      // B → C → B where the last B is a genuine revert, which no payload field can
+      // distinguish from a redelivery. What must not happen is the mislabelling that
+      // follows: a refresh queued for C but executed after the revert loads B, and if
+      // "reconciled" were recorded as C from the triggering payload, the next real
+      // change to C would be dismissed as already done — leaving the shelf on B.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      const refresh = controllableRefresh();
+      stableDeps.refreshLibrary = refresh.fn;
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);            // B — starts
+      await push(['lib_a', 'lib_b', 'lib_c']);   // C — queued
+      await push(['lib_a', 'lib_b']);            // reverted to B, in flight already
+      expect(refresh.fn).toHaveBeenCalledTimes(1);
+
+      await act(async () => { refresh.settlers[0]?.(true); });
+      await act(async () => { refresh.settlers[1]?.(true); });
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+      // Both refreshes loaded whatever the server had, which is the reverted B.
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+
+      // A later genuine change to C must still be acted on.
+      await push(['lib_a', 'lib_b', 'lib_c']);
+      expect(refresh.fn).toHaveBeenCalledTimes(3);
+    });
+
+    it('asks once when the pushed set and the server permanently disagree', async () => {
+      // An account naming a library the server will not return — a deleted library
+      // still listed in `librariesAccessible`, say. Ground truth never catches up, so
+      // without a memory of the attempt every payload would refresh: a full shelf
+      // reload every thirty seconds for as long as playback lasts.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_ghost']);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+
+      // The refresh succeeded and changed nothing; the discrepancy is the server's.
+      await push(['lib_a', 'lib_ghost']);
+      await push(['lib_a', 'lib_ghost']);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps only the newest set when several queue up behind one refresh', async () => {
       // Every intermediate set is superseded by the time the queue drains, so the
       // queue holds one slot rather than a backlog of stale refreshes to replay.
