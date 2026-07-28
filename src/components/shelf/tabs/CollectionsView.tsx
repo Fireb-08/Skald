@@ -9,6 +9,7 @@ import BrowseList from '../BrowseList';
 import BrowseTile from '../BrowseTile';
 import Cover from '../../Cover';
 import CollectionDetail from '../CollectionDetail';
+import { useEntityChanges, removeById, upsertById } from '../../../state/liveEntities';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -24,9 +25,12 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<Collection | null>(null);
 
-  // Apply an updated collection to local state (and the active shelf filter).
+  // Apply a collection to local state (and the active shelf filter). Used for
+  // both our own edits and the ones arriving over the socket, so the two cannot
+  // drift apart. Upsert rather than replace-in-place: the socket path can carry
+  // a collection this view has never seen (another client created it).
   const applyUpdated = (updated: Collection) => {
-    setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setCollections(prev => upsertById(prev, updated));
     setDetail(d => d && d.id === updated.id ? updated : d);
     if (st.contextFilter?.kind === 'collection' && st.contextFilter.value === updated.name) {
       st.setContextFilter({ ...st.contextFilter, bookIds: (updated.books ?? []).map(b => b.id) });
@@ -49,6 +53,22 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
       .then(result => { setCollections(result); setLoading(false); })
       .catch(() => setLoading(false));
   }, [st.serverUrl, libraryId]);
+
+  // Live sync — ABS broadcasts collection changes to every client with the full
+  // expanded collection attached, so another client's edit is patched straight
+  // in with no re-fetch. Scoped to this library: the events are server-wide.
+  useEntityChanges<Collection>('collection', change => {
+    if (change.object && change.object.libraryId !== libraryId) return;
+    if (change.op === 'removed') {
+      setCollections(prev => removeById(prev, change.id));
+      setDetail(d => d && d.id === change.id ? null : d);
+      return;
+    }
+    // Both `_added` and `_updated` go through the same upsert rather than
+    // trusting the verb: an `_added` can arrive for one already held (a
+    // reconnect redelivery, or our own create echoing back).
+    if (change.object) applyUpdated(change.object);
+  });
 
   const booksFor = (c: Collection): LibraryItem[] =>
     (c.books ?? [])

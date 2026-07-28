@@ -10,6 +10,7 @@ import BrowseTile from '../BrowseTile';
 import Cover from '../../Cover';
 import PlaylistDetail from '../PlaylistDetail';
 import { log } from '../../../lib/log';
+import { useEntityChanges, removeById, upsertById } from '../../../state/liveEntities';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -41,6 +42,38 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
       .then(result => { setPlaylists(result); setLoading(false); })
       .catch(() => setLoading(false));
   }, [st.serverUrl, libraryId]);
+
+  // Apply a playlist to local state (and the active shelf filter). Shared by the
+  // detail pane's own edits and by the socket feed, so a reorder made here and
+  // one made on another device land the same way. Upsert, because the socket can
+  // carry a playlist this view has not seen (created on that other device).
+  const applyUpdated = (updated: Playlist) => {
+    setPlaylists(prev => upsertById(prev, updated));
+    // If the library shelf is currently filtered by this playlist, push the new
+    // bookIds into the contextFilter so the shelf re-sorts immediately.
+    if (st.contextFilter?.playlistId === updated.id) {
+      st.setContextFilter({
+        ...st.contextFilter,
+        bookIds: updated.items.map(it => it.libraryItemId),
+      });
+    }
+  };
+
+  // Live sync — the full expanded playlist rides on every playlist event, so
+  // changes patch straight in. Unlike collections these are sent only to the
+  // playlist's owner (ABS clientEmitter), which makes this same-account
+  // multi-device sync: another user's playlists never arrive here at all.
+  useEntityChanges<Playlist>('playlist', change => {
+    if (change.object && change.object.libraryId !== libraryId) return;
+    if (change.op === 'removed') {
+      setPlaylists(prev => removeById(prev, change.id));
+      setDetailPlaylistId(id => id === change.id ? null : id);
+      return;
+    }
+    // Add and update both upsert — a reconnect can redeliver an `_added` for a
+    // playlist already held, and our own create echoes back the same way.
+    if (change.object) applyUpdated(change.object);
+  });
 
   const booksFor = (p: Playlist): LibraryItem[] =>
     p.items
@@ -242,20 +275,9 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
           serverUrl={st.serverUrl}
           st={st}
           onClose={() => setDetailPlaylistId(null)}
-          onUpdated={updated => {
-            // Update the local playlist list so grid covers reflect the new order.
-            setPlaylists(prev => prev.map(p => p.id === updated.id ? updated : p));
-            // If the library shelf is currently filtered by this playlist, push
-            // the new bookIds into the contextFilter so the shelf re-sorts immediately.
-            if (st.contextFilter?.playlistId === updated.id) {
-              st.setContextFilter({
-                ...st.contextFilter,
-                bookIds: updated.items.map(it => it.libraryItemId),
-              });
-            }
-          }}
+          onUpdated={applyUpdated}
           onDeleted={() => {
-            setPlaylists(prev => prev.filter(p => p.id !== detailPlaylistId));
+            setPlaylists(prev => removeById(prev, detailPlaylistId));
             setDetailPlaylistId(null);
           }}
         />

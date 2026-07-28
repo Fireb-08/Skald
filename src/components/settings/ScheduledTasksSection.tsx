@@ -187,7 +187,24 @@ function ScheduledTasksSectionInner({ st }: ScheduledTasksSectionProps) {
               </div>
             </div>
             <div style={{ flexShrink: 0, textAlign: 'right' as const }}>
-              <div style={{ fontFamily: MONO, fontSize: 10, color: status.color }}>{status.label}</div>
+              <div style={{ fontFamily: MONO, fontSize: 10, color: status.color }}>
+                {status.label}
+                {/* Percent from the task_progress socket event. Only encode and
+                    embed jobs report it, and ABS sends it to admins only, so an
+                    absent bar means "not reported", never "stalled". */}
+                {!t.isFinished && typeof t.progress === 'number' && ` ${Math.round(t.progress)}%`}
+              </div>
+              {!t.isFinished && typeof t.progress === 'number' && (
+                <div style={{
+                  width: 72, height: 3, borderRadius: 2, marginTop: 4, marginLeft: 'auto',
+                  background: 'var(--onyx-line)', overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${t.progress}%`, height: '100%', background: status.color,
+                    transition: 'width 240ms linear',
+                  }} />
+                </div>
+              )}
               {when && <div style={{ fontFamily: MONO, fontSize: 10, color: 'var(--onyx-text-mute)', marginTop: 2 }}>{when}</div>}
             </div>
           </div>

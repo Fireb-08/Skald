@@ -510,6 +510,36 @@ export function useOnyxState(): OnyxState {
     setUserPermissions(me.permissions ?? null);
   }, [serverUrl, authToken]);
 
+  // Apply the account record ABS pushes on `user_updated` (Socket Event Coverage
+  // roadmap). Same shape as /api/me — both are User.toOldJSONForBrowser — so
+  // this is the push equivalent of refreshPermissions, and an admin revoking a
+  // permission or promoting an account takes effect without a relaunch.
+  //
+  // `type` drives isAdmin/canUpload and is merged into the stored user record,
+  // deliberately without the payload's `token`: that is the pre-2.26 non-expiring
+  // token, and the keyring is the only place a credential is kept.
+  const applyUserRecord = useCallback((record: {
+    id: string;
+    username?: string;
+    type?: string;
+    permissions?: UserPermissions | null;
+  }) => {
+    setUserPermissions(record.permissions ?? null);
+    if (record.type === undefined) return;
+    // Merge over the stored profile the same way the /api/me load below does,
+    // rather than over React state: this callback must stay dependency-free so
+    // the socket effect that closes over it never goes stale.
+    const storedRaw = localStorage.getItem('skald.user');
+    const base = storedRaw ? (JSON.parse(storedRaw) as User) : {} as User;
+    setUser({
+      ...base,
+      id: record.id || base.id,
+      username: record.username || base.username,
+      token: '',
+      type: record.type,
+    });
+  }, [setUser]);
+
   // Local-only mode (no server). Persisted so the app re-opens straight into the
   // shell on next launch without a login.
   const [localMode, setLocalModeRaw] = useState(() => localStorage.getItem('skald.localMode') === 'true');
@@ -1406,6 +1436,7 @@ export function useOnyxState(): OnyxState {
     setUploadPerm,
     refreshLibrary,
     applyServerProgress,
+    applyUserRecord,
   });
 
   useEffect(() => {

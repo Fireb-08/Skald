@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const tauri = vi.hoisted(() => {
   const listeners = new Map<string, Set<(event: { event: string; payload: unknown }) => void>>();
@@ -29,6 +29,7 @@ vi.mock('@tauri-apps/plugin-log', () => ({
 }));
 
 import { useLiveSync, type LiveSyncDeps } from './useLiveSync';
+import { resetEntityListeners, useEntityChanges } from './liveEntities';
 
 function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
   return {
@@ -57,6 +58,7 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     setUploadPerm: vi.fn(),
     refreshLibrary: vi.fn(async () => {}),
     applyServerProgress: vi.fn(),
+    applyUserRecord: vi.fn(),
   };
 }
 
@@ -265,5 +267,244 @@ describe('useLiveSync runtime preference lifecycle', () => {
     expect(stableDeps.applyServerProgress).not.toHaveBeenCalled();
     expect(stableDeps.setSyncConflict).not.toHaveBeenCalled();
     expect(stableDeps.setPosition).not.toHaveBeenCalled();
+  });
+});
+
+// Payload shapes below are the ones verified against the ABS server source at
+// v2.36.0 — the point of pinning them here is that a server release which
+// reshapes one fails a test rather than quietly leaving a pane stale.
+describe('useLiveSync socket event coverage', () => {
+  afterEach(() => resetEntityListeners());
+
+  /** Replay the functional updaters a mock setter collected, over a starting value. */
+  function replay<T>(setter: unknown, initial: T): T {
+    let value = initial;
+    for (const call of (setter as ReturnType<typeof vi.fn>).mock.calls) {
+      value = (call[0] as (prev: T) => T)(value);
+    }
+    return value;
+  }
+
+  it('routes a batch item event through the single-item handler, per element', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    // `items_updated` is an ARRAY of exactly the `item_updated` shape, so the
+    // batch must land as N single-item applications and nothing else — this is
+    // what keeps an author rename (which arrives as one batch) from needing a
+    // parallel code path that could drift from the single-item one.
+    await act(async () => {
+      tauri.emit('library-items-updated', JSON.stringify([
+        { id: 'a', libraryId: 'library', media: { metadata: { title: 'Renamed A' } } },
+        { id: 'b', libraryId: 'library', media: { metadata: { title: 'Renamed B' } } },
+      ]));
+    });
+
+    const shelf = replay<Array<{ id: string; libraryId: string; media: { metadata: { title: string } } }>>(
+      stableDeps.setLibraryRaw,
+      [
+        { id: 'a', libraryId: 'library', media: { metadata: { title: 'Old A' } } },
+        { id: 'b', libraryId: 'library', media: { metadata: { title: 'Old B' } } },
+      ],
+    );
+    expect(shelf.map(b => b.media.metadata.title)).toEqual(['Renamed A', 'Renamed B']);
+  });
+
+  it('ignores batch items belonging to a library the shelf is not showing', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    // Batch events are access-filtered by ABS but not library-filtered, so a scan
+    // of another library reaches us too. Applying those would append books the
+    // shelf must not show.
+    await act(async () => {
+      tauri.emit('library-items-added', JSON.stringify([
+        { id: 'other', libraryId: 'some-other-library', media: { metadata: {} } },
+      ]));
+    });
+
+    expect(replay(stableDeps.setLibraryRaw, [] as Array<{ id: string }>)).toEqual([]);
+  });
+
+  it('publishes collection, playlist, series and author changes to the entity feed', async () => {
+    const stableDeps = deps();
+    const onCollection = vi.fn();
+    const onSeries = vi.fn();
+    renderHook(() => {
+      useLiveSync({ ...stableDeps, liveSyncEnabled: true });
+      useEntityChanges('collection', onCollection);
+      useEntityChanges('series', onSeries);
+    });
+    await act(async () => {});
+
+    // All twelve kind/op pairs are registered, so a view for any of the four can
+    // subscribe without touching the transport again.
+    for (const event of ['collection', 'playlist', 'series', 'author']) {
+      for (const op of ['added', 'updated', 'removed']) {
+        expect(tauri.count(`${event}-${op}`)).toBe(1);
+      }
+    }
+
+    await act(async () => {
+      // A full collection: patchable in place.
+      tauri.emit('collection-updated', JSON.stringify({
+        id: 'col_1', libraryId: 'library', name: 'Winter Reading', books: [{ id: 'a' }],
+      }));
+      // A thin series removal: nothing to patch from, so `object` must be null
+      // and the subscriber re-fetches instead.
+      tauri.emit('series-removed', JSON.stringify({ id: 'ser_1', libraryId: 'library' }));
+    });
+
+    expect(onCollection).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'collection', op: 'updated', id: 'col_1',
+      object: expect.objectContaining({ name: 'Winter Reading' }),
+    }));
+    expect(onSeries).toHaveBeenCalledWith({
+      kind: 'series', op: 'removed', id: 'ser_1', object: null,
+    });
+  });
+
+  it('drops an entity event it cannot key rather than publishing a guess', async () => {
+    const stableDeps = deps();
+    const onCollection = vi.fn();
+    renderHook(() => {
+      useLiveSync({ ...stableDeps, liveSyncEnabled: true });
+      useEntityChanges('collection', onCollection);
+    });
+    await act(async () => {});
+
+    await act(async () => {
+      tauri.emit('collection-updated', 'not json');
+      tauri.emit('collection-updated', JSON.stringify({ name: 'no id here' }));
+    });
+
+    expect(onCollection).not.toHaveBeenCalled();
+  });
+
+  it('merges task_progress into the running task it belongs to', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    // task_progress carries `{ libraryItemId, progress }` and no task id, so the
+    // join is on `data.libraryItemId` — and it must reach only the task that is
+    // actually encoding that item.
+    await act(async () => {
+      tauri.emit('task-progress', JSON.stringify({ libraryItemId: 'li_1', progress: 42.4 }));
+    });
+
+    const tasks = replay(stableDeps.setTasks, [
+      { id: 'task_1', isFinished: false, data: { libraryItemId: 'li_1' } },
+      { id: 'task_2', isFinished: false, data: { libraryItemId: 'li_2' } },
+      { id: 'task_3', isFinished: true, data: { libraryItemId: 'li_1' } },
+    ] as Array<{ id: string; isFinished: boolean; progress?: number; data: { libraryItemId: string } }>);
+
+    expect(tasks.find(t => t.id === 'task_1')?.progress).toBeCloseTo(42.4);
+    expect(tasks.find(t => t.id === 'task_2')?.progress).toBeUndefined();
+    // A finished task is history; a late progress event must not reopen it.
+    expect(tasks.find(t => t.id === 'task_3')?.progress).toBeUndefined();
+  });
+
+  it('never hands the progress bar a width outside 0–100', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    // The encode/embed emitters scale raw ffmpeg progress by a fraction of the
+    // whole job, so a rounding overshoot is possible.
+    await act(async () => {
+      tauri.emit('task-progress', JSON.stringify({ libraryItemId: 'li_1', progress: 103 }));
+    });
+
+    const tasks = replay(stableDeps.setTasks, [
+      { id: 'task_1', isFinished: false, data: { libraryItemId: 'li_1' } },
+    ] as Array<{ id: string; isFinished: boolean; progress?: number; data: { libraryItemId: string } }>);
+    expect(tasks[0].progress).toBe(100);
+  });
+
+  it('ignores a progress payload with nothing usable in it', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    await act(async () => {
+      tauri.emit('task-progress', 'not json');
+      tauri.emit('task-progress', JSON.stringify({ progress: 50 }));
+      tauri.emit('task-progress', JSON.stringify({ libraryItemId: 'li_1' }));
+      tauri.emit('task-progress', JSON.stringify({ libraryItemId: 'li_1', progress: null }));
+    });
+
+    expect(stableDeps.setTasks).not.toHaveBeenCalled();
+  });
+
+  it('applies a pushed account record without a /api/me round-trip', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    await act(async () => {
+      tauri.emit('user-updated', JSON.stringify({
+        id: 'usr_1',
+        username: 'po',
+        type: 'admin',
+        token: 'pre-2.26-token',
+        permissions: { upload: true, download: true },
+        librariesAccessible: ['library'],
+        mediaProgress: [{ id: 'mp_1' }],
+      }));
+    });
+
+    expect(stableDeps.applyUserRecord).toHaveBeenCalledWith({
+      id: 'usr_1',
+      username: 'po',
+      type: 'admin',
+      permissions: { upload: true, download: true },
+      librariesAccessible: ['library'],
+    });
+    // The payload's `token` is the pre-2.26 non-expiring credential and its
+    // progress/bookmark arrays have their own event — neither may ride along.
+    const record = (stableDeps.applyUserRecord as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(record).not.toHaveProperty('token');
+    expect(record).not.toHaveProperty('mediaProgress');
+    expect(invokeMock).not.toHaveBeenCalledWith('get_me');
+  });
+
+  it('refetches libraries only when library access actually changed', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    const push = (librariesAccessible: string[]) => act(async () => {
+      tauri.emit('user-updated', JSON.stringify({ id: 'usr_1', type: 'user', librariesAccessible }));
+    });
+
+    // The first payload establishes what access looks like — it is not a change,
+    // and reading it as one would refetch the libraries for every settings save.
+    await push(['lib_a', 'lib_b']);
+    expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+
+    // Same set, different order: still not a change.
+    await push(['lib_b', 'lib_a']);
+    expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+
+    // An admin granting a third library is one — the ids are all we get, so the
+    // libraries themselves have to be fetched.
+    await push(['lib_a', 'lib_b', 'lib_c']);
+    expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a user_updated payload with no id', async () => {
+    const stableDeps = deps();
+    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+    await act(async () => {});
+
+    await act(async () => {
+      tauri.emit('user-updated', JSON.stringify({ username: 'po', type: 'admin' }));
+      tauri.emit('user-updated', 'not json');
+    });
+
+    expect(stableDeps.applyUserRecord).not.toHaveBeenCalled();
   });
 });

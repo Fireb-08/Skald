@@ -9,6 +9,13 @@ export interface Collection {
   name: string;
   description?: string | null;
   books?: Array<{ id: string }>;
+  /**
+   * Owning library. Present on every collection ABS returns (`Collection.toOldJSON`
+   * / `toOldJSONExpanded`) but optional here because the field was added for the
+   * socket path — `collection_*` events are broadcast server-wide, so a listener
+   * needs it to tell its own library's collections from another's.
+   */
+  libraryId?: string;
 }
 
 // ── Playlist types ─────────────────────────────────────────────────────────

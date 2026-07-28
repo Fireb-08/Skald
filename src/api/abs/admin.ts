@@ -331,6 +331,19 @@ export function applyBackup(serverUrl: string, id: string): Promise<void> {
 export interface Task {
   id: string;
   action: string;
+  /**
+   * Action-specific payload. ABS documents it as "additional info for the
+   * action like libraryItemId" — and `libraryItemId` is the only join key the
+   * `task_progress` socket event carries, so it is what progress merges on.
+   */
+  data?: { libraryItemId?: string } & Record<string, unknown>;
+  /**
+   * Percent complete, 0–100. Client-side only: ABS has no progress field on the
+   * task itself, so this is merged in from `task_progress` events and is absent
+   * on any task seeded from GET /api/tasks or on a server that never reports it
+   * (progress is admin-only).
+   */
+  progress?: number;
   title: string;
   titleKey?: string | null;
   description: string;

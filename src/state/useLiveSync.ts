@@ -11,11 +11,12 @@
 // this seam clean: the hook needs the refs and stable setters, nothing else.
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library } from '../api/abs';
+import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library, UserPermissions } from '../api/abs';
 import { getMe, getOfflineProgressCount, markServerDeleted } from '../api/abs';
 import { log } from '../lib/log';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
 import { patchLibraryItems } from './bookHelpers';
+import { parseEntityChange, publishEntityChange, type EntityKind, type EntityOp } from './liveEntities';
 
 export interface LiveSyncDeps {
   serverUrl: string;
@@ -48,6 +49,24 @@ export interface LiveSyncDeps {
   setUploadPerm: (v: boolean) => void;
   refreshLibrary: () => Promise<void>;
   applyServerProgress: (serverProgress: MediaProgress[]) => void;
+  // ABS pushes the whole browser-shaped user record on `user_updated`, so the
+  // permission set and account type can be applied without a /api/me round-trip.
+  applyUserRecord: (record: LiveUserRecord) => void;
+}
+
+/**
+ * The parts of ABS's `user_updated` payload (`User.toOldJSONForBrowser()`) that
+ * Skald acts on. The real payload also carries `token` — the pre-2.26 non-expiring
+ * one — plus the full mediaProgress and bookmark arrays; all three are
+ * deliberately absent here. The keyring is the only place a token belongs, and
+ * progress arrives on its own event.
+ */
+export interface LiveUserRecord {
+  id: string;
+  username?: string;
+  type?: string;
+  permissions?: UserPermissions | null;
+  librariesAccessible?: string[];
 }
 
 export interface PlaybackSyncConflict {
@@ -92,6 +111,7 @@ export function useLiveSync({
   setUploadPerm,
   refreshLibrary,
   applyServerProgress,
+  applyUserRecord,
 }: LiveSyncDeps): void {
   const refreshQueuedCount = () => {
     getOfflineProgressCount()
@@ -207,10 +227,12 @@ export function useLiveSync({
   useEffect(() => {
     if (!liveSyncEnabled || !serverUrl || !authToken) return;
 
-    // Three separate unlisten handles — each listener is torn down individually.
+    // One unlisten handle per listener — each is torn down individually.
     let unlistenAdded:   (() => void) | undefined;
     let unlistenUpdated: (() => void) | undefined;
     let unlistenRemoved: (() => void) | undefined;
+    let unlistenBatchAdded:   (() => void) | undefined;
+    let unlistenBatchUpdated: (() => void) | undefined;
     let disposed = false;
     const shelfAcceptsLibrary = (libraryId: string) => {
       if (libraryId === currentLibraryIdRef.current) return true;
@@ -226,28 +248,60 @@ export function useLiveSync({
     // on the shelf. Without this guard a repeat event appended a duplicate that
     // only cleared on a fresh fetch (relaunch). If the id is already present,
     // merge instead — same semantics as item_updated.
-    listen<string>('library-item-added', event => {
-      try {
-        const raw  = JSON.parse(event.payload) as LibraryItem;
-        // Only process items that belong to the currently loaded library.
-        if (!shelfAcceptsLibrary(raw.libraryId)) return;
-        const item = patchLibraryItems([raw])[0];
-        setLibraryRaw(prev => prev.some(b => b.id === item.id)
-          ? prev.map(b => b.id === item.id ? { ...b, ...item } : b)
-          : [...prev, item]);
-      } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
-    }).then(fn => { if (disposed) fn(); else unlistenAdded = fn; });
+    const applyItemAdded = (raw: LibraryItem) => {
+      // Only process items that belong to the currently loaded library.
+      if (!shelfAcceptsLibrary(raw.libraryId)) return;
+      const item = patchLibraryItems([raw])[0];
+      setLibraryRaw(prev => prev.some(b => b.id === item.id)
+        ? prev.map(b => b.id === item.id ? { ...b, ...item } : b)
+        : [...prev, item]);
+    };
 
     // item_updated — metadata, cover, or chapters changed; merge the new
     // data over the existing record so the shelf reflects it immediately.
+    const applyItemUpdated = (raw: LibraryItem) => {
+      if (!shelfAcceptsLibrary(raw.libraryId)) return;
+      const item = patchLibraryItems([raw])[0];
+      setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
+    };
+
+    listen<string>('library-item-added', event => {
+      try {
+        applyItemAdded(JSON.parse(event.payload) as LibraryItem);
+      } catch (e) { log.error('sync', 'library-item-added parse failed', { err: String(e) }); }
+    }).then(fn => { if (disposed) fn(); else unlistenAdded = fn; });
+
     listen<string>('library-item-updated', event => {
       try {
-        const raw  = JSON.parse(event.payload) as LibraryItem;
-        if (!shelfAcceptsLibrary(raw.libraryId)) return;
-        const item = patchLibraryItems([raw])[0];
-        setLibraryRaw(prev => prev.map(b => b.id === item.id ? { ...b, ...item } : b));
+        applyItemUpdated(JSON.parse(event.payload) as LibraryItem);
       } catch (e) { log.error('sync', 'library-item-updated parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlistenUpdated = fn; });
+
+    // items_added / items_updated — the batch forms, emitted by library scans
+    // and by any edit touching many items at once (an author rename, a batch
+    // metadata update). ABS sends an ARRAY of exactly the single-item shape
+    // (SocketAuthority.libraryItemsEmitter maps toOldJSONExpanded over the
+    // items the recipient may access), so each element routes through the
+    // handler above rather than through a parallel implementation that would
+    // drift from it. Order-independent: every element is applied by id.
+    const applyBatch = (rawPayload: string, apply: (item: LibraryItem) => void, what: string) => {
+      try {
+        const parsed = JSON.parse(rawPayload);
+        // Defensive: a future ABS release sending a bare object here would
+        // otherwise be silently dropped by a `.forEach` on a non-array.
+        const items = (Array.isArray(parsed) ? parsed : [parsed]) as LibraryItem[];
+        log.debug('sync', 'batch library event applied', { what, count: items.length });
+        for (const item of items) apply(item);
+      } catch (e) { log.error('sync', `${what} parse failed`, { err: String(e) }); }
+    };
+
+    listen<string>('library-items-added', event =>
+      applyBatch(event.payload, applyItemAdded, 'library-items-added'),
+    ).then(fn => { if (disposed) fn(); else unlistenBatchAdded = fn; });
+
+    listen<string>('library-items-updated', event =>
+      applyBatch(event.payload, applyItemUpdated, 'library-items-updated'),
+    ).then(fn => { if (disposed) fn(); else unlistenBatchUpdated = fn; });
 
     // item_removed — book deleted from the server; remove it from the shelf and
     // clear any focused/current references so the player doesn't try to play a ghost.
@@ -278,13 +332,107 @@ export function useLiveSync({
       } catch (e) { log.error('sync', 'library-item-removed parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlistenRemoved = fn; });
 
-    // Tear down all three listeners together on unmount or auth context change.
+    // Tear down every listener together on unmount or auth context change.
     return () => {
       disposed = true;
       unlistenAdded?.();
       unlistenUpdated?.();
       unlistenRemoved?.();
+      unlistenBatchAdded?.();
+      unlistenBatchUpdated?.();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSyncEnabled, serverUrl, authToken]);
+
+  // ── Live entity sync (collections · playlists · series · authors) ──────────
+  // These four are not held in shared state — each view fetches its own list on
+  // mount — so the events are normalized and published on the liveEntities feed
+  // for whichever views are currently mounted. See that module for why.
+  //
+  // Audience differs per family and is worth remembering when reading a bug
+  // report: collection/series/author events are broadcast to every client, but
+  // playlist events reach only the playlist's owner, so "my playlist did not
+  // update on the other machine" and "someone else's playlist did not appear"
+  // are entirely different questions — the second is ABS behaving as designed.
+  useEffect(() => {
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
+
+    const kinds: EntityKind[] = ['collection', 'playlist', 'series', 'author'];
+    const ops: EntityOp[] = ['added', 'updated', 'removed'];
+    const unlisteners: (() => void)[] = [];
+    let disposed = false;
+
+    for (const kind of kinds) {
+      for (const op of ops) {
+        // `collection` + `added` → the `collection-added` Tauri event emitted by
+        // socket.rs's FORWARDED_EVENTS table.
+        listen<string>(`${kind}-${op}`, event => {
+          const change = parseEntityChange(kind, op, event.payload);
+          if (!change) {
+            log.warn('sync', 'live entity event dropped', { kind, op });
+            return;
+          }
+          publishEntityChange(change);
+        }).then(fn => { if (disposed) fn(); else unlisteners.push(fn); });
+      }
+    }
+
+    return () => { disposed = true; unlisteners.forEach(fn => fn()); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSyncEnabled, serverUrl, authToken]);
+
+  // ── This user's account changed ────────────────────────────────────────────
+  // ABS sends `user_updated` only to the affected user, carrying the whole
+  // browser-shaped record. Permissions and account type are applied straight
+  // from it — no /api/me round-trip — which is what makes an admin revoking a
+  // permission take effect here without a restart.
+  //
+  // Library access is the exception: `librariesAccessible` names ids, and the
+  // libraries themselves still have to be fetched, so a change there triggers
+  // the same full refresh a reconnect does.
+  useEffect(() => {
+    if (!liveSyncEnabled || !serverUrl || !authToken) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    // Undefined until the first event: the *first* payload is not a change, so
+    // it must not be read as one and trigger a needless library refetch.
+    let knownLibraryAccess: string | undefined;
+
+    listen<string>('user-updated', event => {
+      try {
+        const raw = JSON.parse(event.payload) as Record<string, unknown>;
+        const id = typeof raw.id === 'string' ? raw.id : '';
+        if (!id) return;
+        const librariesAccessible = Array.isArray(raw.librariesAccessible)
+          ? (raw.librariesAccessible as string[])
+          : undefined;
+        // Never carry `token` or the progress/bookmark arrays out of this
+        // payload — the keyring owns the credential and progress has its own
+        // event. Narrowing to LiveUserRecord here is what enforces that.
+        applyUserRecord({
+          id,
+          username: typeof raw.username === 'string' ? raw.username : undefined,
+          type: typeof raw.type === 'string' ? raw.type : undefined,
+          permissions: (raw.permissions ?? null) as LiveUserRecord['permissions'],
+          librariesAccessible,
+        });
+        log.info('sync', 'account updated by the server', {
+          userId: id,
+          accountType: typeof raw.type === 'string' ? raw.type : null,
+        });
+
+        // An empty list means "all libraries" in ABS, so an id-set comparison
+        // over the sorted join is the whole test.
+        const fingerprint = librariesAccessible ? [...librariesAccessible].sort().join(',') : '';
+        if (knownLibraryAccess !== undefined && knownLibraryAccess !== fingerprint) {
+          log.info('sync', 'library access changed — refreshing libraries');
+          void refreshLibrary();
+        }
+        knownLibraryAccess = fingerprint;
+      } catch (e) { log.error('sync', 'user-updated parse failed', { err: String(e) }); }
+    }).then(fn => { if (disposed) fn(); else unlisten = fn; });
+
+    return () => { disposed = true; unlisten?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSyncEnabled, serverUrl, authToken]);
 
@@ -339,6 +487,7 @@ export function useLiveSync({
     if (!liveSyncEnabled || !serverUrl || !authToken) return;
     let unStart: (() => void) | undefined;
     let unFinish: (() => void) | undefined;
+    let unProgress: (() => void) | undefined;
     let disposed = false;
 
     // Upsert a task by id and cap growth: keep all running tasks plus the 25
@@ -361,7 +510,34 @@ export function useLiveSync({
     listen<string>('task-started',  e => handle(e.payload)).then(fn => { if (disposed) fn(); else unStart = fn; });
     listen<string>('task-finished', e => handle(e.payload)).then(fn => { if (disposed) fn(); else unFinish = fn; });
 
-    return () => { disposed = true; unStart?.(); unFinish?.(); };
+    // task_progress carries `{ libraryItemId, progress }` — despite the name it
+    // is NOT a Task and has no task id, so it is joined to the buffer on
+    // `data.libraryItemId`, which the encode/embed actions put there. Verified
+    // against AbMergeManager.js and AudioMetadataManager.js at ABS v2.36.0.
+    //
+    // Admin-only on the server side: a non-admin sees a task start and finish
+    // with no progress in between, which is the server's decision, not a bug.
+    // A progress event for an unknown item is dropped rather than synthesising a
+    // task — the id is not in the payload to synthesise one with, and a phantom
+    // row in the monitor is worse than a missing progress bar.
+    listen<string>('task-progress', e => {
+      try {
+        const { libraryItemId, progress } = JSON.parse(e.payload) as {
+          libraryItemId?: string;
+          progress?: number;
+        };
+        if (!libraryItemId || typeof progress !== 'number' || !Number.isFinite(progress)) return;
+        setTasks(prev => prev.map(t =>
+          !t.isFinished && t.data?.libraryItemId === libraryItemId
+            // Clamp: the encode/embed emitters scale their raw ffmpeg progress by
+            // a fraction of the whole job, and a rounding overshoot must not hand
+            // the progress bar a width above 100%.
+            ? { ...t, progress: Math.max(0, Math.min(100, progress)) }
+            : t));
+      } catch { /* ignore malformed progress payload */ }
+    }).then(fn => { if (disposed) fn(); else unProgress = fn; });
+
+    return () => { disposed = true; unStart?.(); unFinish?.(); unProgress?.(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSyncEnabled, serverUrl, authToken]);
 

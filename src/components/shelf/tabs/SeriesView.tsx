@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { OnyxState, LibraryItem } from '../../../state/onyx';
 import { groupMatchesFilter } from '../../../lib/shelfFilters';
 import { bookTitle, bookAuthor, bookDurSecs } from '../../../state/onyx';
@@ -9,6 +9,7 @@ import BrowseList from '../BrowseList';
 import BrowseTile from '../BrowseTile';
 import Cover from '../../Cover';
 import { log } from '../../../lib/log';
+import { useEntityInvalidation } from '../../../state/liveEntities';
 
 const SERIF = '"Source Serif 4", "Iowan Old Style", Georgia, serif';
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
@@ -54,12 +55,20 @@ export default function SeriesView({ st, inline = false }: SeriesViewProps) {
 
   // Fetch the canonical series list from the dedicated endpoint — gives clean names and IDs.
   const [fetchedSeries, setFetchedSeries] = useState<Series[]>([]);
-  useEffect(() => {
+  const loadSeries = useCallback(() => {
     if (deriveClientSide || !st.serverUrl || !st.currentLibraryId) return;
     getLibrarySeries(st.serverUrl, st.currentLibraryId)
       .then(setFetchedSeries)
       .catch(e => log.error('library', 'series list fetch failed', { err: String(e) }));
   }, [deriveClientSide, st.serverUrl, st.currentLibraryId]);
+  useEffect(loadSeries, [loadSeries]);
+
+  // Live sync — unlike collections, `series_removed` carries only `{ id,
+  // libraryId }`, and a rename changes the membership this view groups by, so
+  // there is nothing to patch from: the list is re-fetched instead. Coalesced,
+  // because a library scan emits series events in bursts and one fetch per
+  // event would answer a scanning server with a request storm.
+  useEntityInvalidation('series', loadSeries);
 
   let seriesList: SeriesGroup[];
   if (deriveClientSide) {
