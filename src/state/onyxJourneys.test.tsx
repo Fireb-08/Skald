@@ -295,6 +295,29 @@ describe('playback-state regression guards', () => {
     expect(result.current.playing).toBe(false);
   });
 
+  it('leaves modified Space to the configurable global shortcut', async () => {
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+
+    act(() => {
+      result.current.setCurrentBookId('abs-book');
+      result.current.setPlaying(true);
+    });
+    const pausesBefore = tauri.calls.filter(call => call.cmd === 'pause_audio').length;
+    const resumesBefore = tauri.calls.filter(call => call.cmd === 'resume_audio').length;
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', {
+        key: ' ', code: 'Space', ctrlKey: true, altKey: true,
+        bubbles: true, cancelable: true,
+      }));
+    });
+
+    expect(tauri.calls.filter(call => call.cmd === 'pause_audio')).toHaveLength(pausesBefore);
+    expect(tauri.calls.filter(call => call.cmd === 'resume_audio')).toHaveLength(resumesBefore);
+    expect(result.current.playing).toBe(true);
+  });
+
   it('surfaces offline-progress corruption discovered after the registry poll', async () => {
     let resolveFlush: ((value: number) => void) | undefined;
     const pendingFlush = new Promise<number>(resolve => { resolveFlush = resolve; });
