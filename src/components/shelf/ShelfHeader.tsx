@@ -259,12 +259,36 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
           )}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', justifyContent: 'center' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
-            background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
-            borderRadius: 10, flexWrap: 'nowrap',
-          }}>
+        {/* The wrapper CLIPS and the pill scrolls inside it. Both halves matter: the
+            pill is nowrap and centered, so without `overflow: hidden` here and a
+            shrinkable (`minWidth: 0`) scroll container below, a tab row wider than
+            its share of this row overflows in both directions at once and paints
+            over the shelf title on the left and the view/filter controls on the
+            right. That is a real regression this file has already had once — the
+            clipping was dropped in favour of hiding tabs at narrow widths, and the
+            row started colliding again as soon as a tab was added. */}
+        <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
+          <div
+            className="shelf-tab-pill"
+            onWheel={e => {
+              // A hidden scrollbar needs another way to reach the overflow, and a
+              // horizontal strip is where a vertical wheel gesture means "sideways".
+              // Only claim the gesture when there is somewhere to go, so an
+              // unscrollable pill still lets the page scroll underneath.
+              const el = e.currentTarget;
+              if (el.scrollWidth <= el.clientWidth) return;
+              e.preventDefault();
+              el.scrollLeft += e.deltaY + e.deltaX;
+            }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '4px',
+              background: 'var(--onyx-glass)', border: '1px solid var(--onyx-glass-edge)',
+              borderRadius: 10, flexWrap: 'nowrap',
+              minWidth: 0, overflowX: 'auto',
+              scrollbarWidth: 'none',            // Firefox
+              msOverflowStyle: 'none' as 'none', // legacy Edge; WebView2 uses ::-webkit-scrollbar in index.css
+            }}
+          >
             {TABS
               .filter(t => {
                 // Optional tabs are shown only when enabled in Settings → Library → Display.
@@ -273,10 +297,11 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
                 // (Series/Authors/…) aggregate loaded items client-side and stay.
                 if ((isAllLibraries || isLocalLibrary) && isServerOnlyShelfTab(t.id)) return false;
                 if (t.optional && !st.optionalTabs[t.id]) return false;
-                // Hide Collections and Playlists tabs when horizontal space is insufficient.
-                // containerWidth measures the full ShelfHeader; 400px leaves enough room
-                // for all other tabs. Adjust threshold after testing if needed.
-                if ((t.id === 'collections' || t.id === 'playlists') && containerWidth <= 400) return false;
+                // No width-based hiding here. Collections and Playlists used to drop
+                // out below 400px to "prevent cutoff", which silently removed the
+                // only way to reach them on a narrow window — and measured the whole
+                // header rather than the space the pill actually gets, so it never
+                // fired in the case that was overflowing. The pill scrolls instead.
                 return true;
               })
               .map(t => {
@@ -293,7 +318,9 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
                     border: `1px solid ${active ? 'var(--onyx-accent-edge)' : 'transparent'}`,
                     color: active ? 'var(--onyx-accent)' : 'var(--onyx-text-dim)',
                     fontSize: 12, fontWeight: active ? 600 : 500,
-                    whiteSpace: 'nowrap',
+                    // Keep each tab at its natural size so the strip scrolls rather
+                    // than squeezing labels toward illegibility.
+                    whiteSpace: 'nowrap', flexShrink: 0,
                   }}>
                     {t.label}
                   </button>
