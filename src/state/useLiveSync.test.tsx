@@ -597,19 +597,87 @@ describe('useLiveSync socket event coverage', () => {
       expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
     });
 
-    it('does not let an in-flight refresh swallow a second, different change', async () => {
+    /** A refreshLibrary mock whose calls are settled by hand, in the order chosen. */
+    function controllableRefresh() {
+      const settlers: Array<(reachable: boolean) => void> = [];
+      const fn = vi.fn(() => new Promise<boolean>(resolve => { settlers.push(resolve); }));
+      return { fn, settlers };
+    }
+
+    it('runs overlapping access changes one at a time, newest last', async () => {
+      // An admin editing access twice inside one round-trip. The second set is a
+      // real change and must not be swallowed — but it must not run *concurrently*
+      // either: both calls write the library list and its items, so whichever
+      // happened to finish last would become authoritative, which need not be the
+      // newer set.
       const stableDeps = deps();
       stableDeps.librariesRef.current = [absLibrary('lib_a')];
-      stableDeps.refreshLibrary = vi.fn(() => new Promise<boolean>(() => {}));
+      const refresh = controllableRefresh();
+      stableDeps.refreshLibrary = refresh.fn;
       renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
       await act(async () => {});
 
-      // An admin editing access twice in quick succession: the second set is a
-      // real change, not a duplicate of the one being fetched.
       await push(['lib_a', 'lib_b']);
       await push(['lib_a', 'lib_b', 'lib_c']);
+      // The second set is queued, not started alongside the first.
+      expect(refresh.fn).toHaveBeenCalledTimes(1);
 
-      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(2);
+      await act(async () => { refresh.settlers[0]?.(true); });
+      // Now its turn comes, so the newer set is fetched last and wins.
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+
+      await act(async () => { refresh.settlers[1]?.(true); });
+      // And once it has landed, routine payloads carrying it are quiet again.
+      await push(['lib_a', 'lib_b', 'lib_c']);
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not start a second request for a set already being fetched', async () => {
+      // The B → C → B interleaving: a routine payload redelivers the set that is
+      // still in flight while a newer one waits behind it. Tracking only the set
+      // currently being fetched would let that B through as unaccounted-for.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      const refresh = controllableRefresh();
+      stableDeps.refreshLibrary = refresh.fn;
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);            // B — starts
+      await push(['lib_a', 'lib_b', 'lib_c']);   // C — queued
+      await push(['lib_a', 'lib_b']);            // B again — in flight already
+
+      expect(refresh.fn).toHaveBeenCalledTimes(1);
+
+      // Draining the queue runs C, and only C.
+      await act(async () => { refresh.settlers[0]?.(true); });
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+      await act(async () => { refresh.settlers[1]?.(true); });
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps only the newest set when several queue up behind one refresh', async () => {
+      // Every intermediate set is superseded by the time the queue drains, so the
+      // queue holds one slot rather than a backlog of stale refreshes to replay.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      const refresh = controllableRefresh();
+      stableDeps.refreshLibrary = refresh.fn;
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_a', 'lib_b', 'lib_c']);
+      await push(['lib_a', 'lib_b', 'lib_c', 'lib_d']);
+      await push(['lib_a', 'lib_b', 'lib_c', 'lib_d', 'lib_e']);
+
+      await act(async () => { refresh.settlers[0]?.(true); });
+      await act(async () => { refresh.settlers[1]?.(true); });
+
+      // Two refreshes in total: the one that was running, then the newest set.
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
+      await push(['lib_a', 'lib_b', 'lib_c', 'lib_d', 'lib_e']);
+      expect(refresh.fn).toHaveBeenCalledTimes(2);
     });
 
     it('treats an empty list as unrestricted rather than as a change', async () => {

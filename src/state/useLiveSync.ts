@@ -476,11 +476,43 @@ export function useLiveSync({
     // carries the same set and would be dismissed as already handled — leaving
     // the switcher stale until a reconnect or relaunch.
     let refreshedFor: string | undefined;
-    // The set a refresh is in flight for, which is what deduplicates the burst of
-    // payloads a progress sync produces while that request is outstanding. A
-    // *different* set arriving mid-flight is a real second change and gets its own
-    // refresh.
-    let refreshingFor: string | undefined;
+    // The set being fetched right now, which deduplicates the burst of payloads a
+    // progress sync produces while that request is outstanding.
+    let refreshingNow: string | undefined;
+    // The newest set waiting its turn. Refreshes are serialized rather than run
+    // concurrently: two overlapping `refreshLibrary()` calls race on the very state
+    // they both write — the library list and its items — so the one that happens to
+    // finish last becomes authoritative, which need not be the newest access set.
+    // Queueing also keeps a set that arrives mid-refresh from being mistaken for a
+    // duplicate of the one in flight, which is how a third payload could otherwise
+    // start a second request for a set already being fetched.
+    let queuedNext: string | undefined;
+    let draining = false;
+
+    // Drain the queue one refresh at a time, newest set last.
+    const reconcileAccess = async (fingerprint: string) => {
+      queuedNext = fingerprint;
+      if (draining) return;
+      draining = true;
+      try {
+        while (queuedNext !== undefined && !disposed) {
+          const set = queuedNext;
+          queuedNext = undefined;
+          refreshingNow = set;
+          try {
+            // Only a refresh that reached the server counts as reconciled. On a
+            // failure the marker stays clear, so the next payload — one is due
+            // within about thirty seconds of playback — retries.
+            if (await refreshLibrary()) refreshedFor = set;
+            else log.warn('sync', 'library access refresh could not reach the server — will retry');
+          } finally {
+            refreshingNow = undefined;
+          }
+        }
+      } finally {
+        draining = false;
+      }
+    };
     // The previous payload's access set, needed only to recognise a restricted
     // set becoming unrestricted (see below).
     let lastPushedAccess: string | undefined;
@@ -512,9 +544,12 @@ export function useLiveSync({
         const fingerprint = [...librariesAccessible].sort().join(',');
         const previous = lastPushedAccess;
         lastPushedAccess = fingerprint;
-        // Already reconciled with the server, or being reconciled right now — this
-        // is another progress-driven payload carrying the same set.
-        if (fingerprint === refreshedFor || fingerprint === refreshingFor) return;
+        // Already reconciled with the server, being reconciled right now, or waiting
+        // its turn — another progress-driven payload carrying a set already
+        // accounted for.
+        if (fingerprint === refreshedFor
+          || fingerprint === refreshingNow
+          || fingerprint === queuedNext) return;
 
         const loaded = (librariesRef.current ?? [])
           .filter(library => library.source !== 'local')
@@ -539,16 +574,7 @@ export function useLiveSync({
         log.info('sync', 'library access changed — refreshing libraries', {
           accessible: librariesAccessible.length || 'all',
         });
-        refreshingFor = fingerprint;
-        void refreshLibrary()
-          .then(reachable => {
-            // Only a refresh that reached the server counts as reconciled. On a
-            // failure the marker stays clear, so the next payload — one is due
-            // within about thirty seconds of playback — retries.
-            if (reachable) refreshedFor = fingerprint;
-            else log.warn('sync', 'library access refresh could not reach the server — will retry');
-          })
-          .finally(() => { if (refreshingFor === fingerprint) refreshingFor = undefined; });
+        void reconcileAccess(fingerprint);
       } catch (e) { log.error('sync', 'user-updated parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlisten = fn; });
 
