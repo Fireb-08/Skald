@@ -10,6 +10,7 @@ import ViewModeToggle from './ViewModeToggle';
 import FilterPopover from './FilterPopover';
 import { log } from '../../lib/log';
 import { isServerOnlyShelfTab } from '../../lib/shelfTabs';
+import { useEntityInvalidation } from '../../state/liveEntities';
 import { seriesGroupName } from './tabs/SeriesView';
 import { recentlyAddedItems } from '../../lib/recentlyAdded';
 
@@ -99,15 +100,31 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
   // series names over st.library miscounts (the bulk library response omits
   // series objects for many books and falls back to the flat seriesName string),
   // so we fetch the real list and use its length for the subtitle.
-  const [seriesCount, setSeriesCount] = useState<number | null>(null);
+  // Tagged with the library it counts, so a count fetched for the previous library
+  // is never briefly shown for the new one.
+  const [seriesCount, setSeriesCount] = useState<{ libraryId: string; count: number } | null>(null);
+  // Bumped by a live series event. A token rather than a bare callback so the
+  // fetch below keeps its cancellation guard, which is what stops a slow reply
+  // from overwriting a newer one.
+  const [seriesReloadToken, setSeriesReloadToken] = useState(0);
+  // SeriesView re-fetches its list on a series event, and while that tab is open
+  // this header is mounted alongside it — so without the same subscription the
+  // subtitle would keep rendering the old number and the screen would state two
+  // different series counts at once. Coalesced by the feed, like every other
+  // invalidation. The header is mounted on *every* tab, so the fetch itself is
+  // gated on the Series tab being the one on screen; arriving on that tab
+  // re-fetches anyway, which covers changes that happened while it was closed.
+  useEntityInvalidation('series', () => setSeriesReloadToken(token => token + 1));
   useEffect(() => {
     if (isLocalLibrary || isAllLibraries || !st.serverUrl || !st.currentLibraryId) { setSeriesCount(null); return; }
+    if (st.shelfTab !== 'series') return;
     let cancelled = false;
-    getLibrarySeries(st.serverUrl, st.currentLibraryId)
-      .then(list => { if (!cancelled) setSeriesCount(list.length); })
+    const libraryId = st.currentLibraryId;
+    getLibrarySeries(st.serverUrl, libraryId)
+      .then(list => { if (!cancelled) setSeriesCount({ libraryId, count: list.length }); })
       .catch(e => log.error('library', 'series count fetch failed', { err: String(e) }));
     return () => { cancelled = true; };
-  }, [st.serverUrl, st.currentLibraryId, isLocalLibrary, isAllLibraries]);
+  }, [st.serverUrl, st.currentLibraryId, isLocalLibrary, isAllLibraries, st.shelfTab, seriesReloadToken]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -176,7 +193,8 @@ export default function ShelfHeader({ st }: ShelfHeaderProps) {
       case 'series': {
         // Prefer the canonical count from the series endpoint; fall back to the
         // library-derived estimate only while that fetch is still in flight.
-        const n = seriesCount ?? new Set(st.library.map(b => seriesNameOf(b)).filter(Boolean)).size;
+        const canonical = seriesCount?.libraryId === st.currentLibraryId ? seriesCount.count : null;
+        const n = canonical ?? new Set(st.library.map(b => seriesNameOf(b)).filter(Boolean)).size;
         return `${n} series`;
       }
       case 'authors': {

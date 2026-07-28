@@ -236,7 +236,10 @@ export interface OnyxState {
   // Hide the partial-coverage notice until the next partial combined load.
   dismissAllLibrariesPartial: () => void;
   updateLibraryItem: (item: LibraryItem) => void;
-  refreshLibrary: () => Promise<void>;
+  // Resolves false when the ABS library list could not be fetched. Most callers
+  // fire and forget; anything reconciling against the server needs to tell a real
+  // answer from an unreachable one.
+  refreshLibrary: () => Promise<boolean>;
   mediaProgress: MediaProgress[];
   setMediaProgress: (progress: MediaProgress[]) => void;
   // Apply a server mediaProgress payload while preserving local-library progress.
@@ -607,11 +610,21 @@ export function useOnyxState(): OnyxState {
       ?? libs[0];
   }, []);
 
-  const refreshLibrary = useCallback(async () => {
+  // Returns whether the ABS library list was actually retrieved. Callers that
+  // reconcile against the server need to tell "the server said this" from "the
+  // server could not be reached": the ABS fetch below degrades a failure to an
+  // empty list so local libraries still load, which on its own is indistinguishable
+  // from an account that genuinely has no ABS libraries.
+  const refreshLibrary = useCallback(async (): Promise<boolean> => {
+    let absReachable = true;
     try {
       // Merge ABS libraries (when a server is configured) with local libraries
       // (always available — catalog read, no server). Either source may be empty.
-      const absLibs = serverUrl ? await fetchLibraries(serverUrl).catch(() => [] as Library[]) : [];
+      const absLibs = serverUrl ? await fetchLibraries(serverUrl).catch(e => {
+        absReachable = false;
+        log.error('library', 'library list fetch failed during refresh', { err: String(e) });
+        return [] as Library[];
+      }) : [];
       const localLibs = await getLocalLibraries().catch(() => [] as Library[]);
       const libs = [...absLibs, ...localLibs];
       setLibraries(libs);
@@ -620,7 +633,7 @@ export function useOnyxState(): OnyxState {
       const target = currentLibraryId === ALL_LIBRARIES_ID
         ? allLibrariesShelf(libs) ?? pickActiveLibrary(libs)
         : libs.find(l => l.id === currentLibraryId) ?? pickActiveLibrary(libs);
-      if (!target) return;
+      if (!target) return absReachable;
       setCurrentLibraryId(target.id);
       const items = target.id === ALL_LIBRARIES_ID
         ? applyAllLibrariesResult(await loadAllLibraryItems(libs, serverUrl))
@@ -629,8 +642,10 @@ export function useOnyxState(): OnyxState {
       // A successful refresh means the server is reachable — clear the OFFLINE
       // indicator (it may have been set if the app launched from disk cache).
       setIsOffline(false);
+      return absReachable;
     } catch (e) {
       log.error('library', 'refreshLibrary failed', { err: String(e) });
+      return false;
     }
   }, [serverUrl, currentLibraryId, pickActiveLibrary]);
 

@@ -58,7 +58,9 @@ export interface LiveSyncDeps {
   surfaceCorruptPersistenceNotices: () => Promise<void>;
   setUploadPerm: (v: boolean) => void;
   setContextFilter: (filter: ContextFilter | null) => void;
-  refreshLibrary: () => Promise<void>;
+  // Resolves false when the ABS library list could not be fetched — the access
+  // reconciler needs that to know a retry is still owed.
+  refreshLibrary: () => Promise<boolean>;
   applyServerProgress: (serverProgress: MediaProgress[]) => void;
   // ABS pushes the whole browser-shaped user record on `user_updated`, so the
   // permission set and account type can be applied without a /api/me round-trip.
@@ -468,10 +470,17 @@ export function useLiveSync({
     if (!liveSyncEnabled || !serverUrl || !authToken) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    // The last access set a refresh was already issued for. Without it, events
-    // arriving while that refresh is still in flight — or after one that failed —
-    // would each queue another.
+    // The last access set that was actually reconciled with the server. Set only
+    // once a refresh has *succeeded*: marking it up front would turn a transient
+    // fetch failure into session-long suppression, because every later payload
+    // carries the same set and would be dismissed as already handled — leaving
+    // the switcher stale until a reconnect or relaunch.
     let refreshedFor: string | undefined;
+    // The set a refresh is in flight for, which is what deduplicates the burst of
+    // payloads a progress sync produces while that request is outstanding. A
+    // *different* set arriving mid-flight is a real second change and gets its own
+    // refresh.
+    let refreshingFor: string | undefined;
     // The previous payload's access set, needed only to recognise a restricted
     // set becoming unrestricted (see below).
     let lastPushedAccess: string | undefined;
@@ -503,9 +512,9 @@ export function useLiveSync({
         const fingerprint = [...librariesAccessible].sort().join(',');
         const previous = lastPushedAccess;
         lastPushedAccess = fingerprint;
-        // Already handled — either the refresh is still in flight or it has landed
-        // and this is another progress-driven payload carrying the same set.
-        if (fingerprint === refreshedFor) return;
+        // Already reconciled with the server, or being reconciled right now — this
+        // is another progress-driven payload carrying the same set.
+        if (fingerprint === refreshedFor || fingerprint === refreshingFor) return;
 
         const loaded = (librariesRef.current ?? [])
           .filter(library => library.source !== 'local')
@@ -530,8 +539,16 @@ export function useLiveSync({
         log.info('sync', 'library access changed — refreshing libraries', {
           accessible: librariesAccessible.length || 'all',
         });
-        refreshedFor = fingerprint;
-        void refreshLibrary();
+        refreshingFor = fingerprint;
+        void refreshLibrary()
+          .then(reachable => {
+            // Only a refresh that reached the server counts as reconciled. On a
+            // failure the marker stays clear, so the next payload — one is due
+            // within about thirty seconds of playback — retries.
+            if (reachable) refreshedFor = fingerprint;
+            else log.warn('sync', 'library access refresh could not reach the server — will retry');
+          })
+          .finally(() => { if (refreshingFor === fingerprint) refreshingFor = undefined; });
       } catch (e) { log.error('sync', 'user-updated parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlisten = fn; });
 

@@ -68,7 +68,7 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     setUploadPerm: vi.fn(),
     contextFilterRef: { current: null } as { current: ContextFilter | null },
     setContextFilter: vi.fn(),
-    refreshLibrary: vi.fn(async () => {}),
+    refreshLibrary: vi.fn(async () => true),
     applyServerProgress: vi.fn(),
     applyUserRecord: vi.fn(),
   };
@@ -540,6 +540,8 @@ describe('useLiveSync socket event coverage', () => {
     it('refreshes once, not once per payload, while the refresh is in flight', async () => {
       const stableDeps = deps();
       stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      // Never settles: the point is what happens while the request is outstanding.
+      stableDeps.refreshLibrary = vi.fn(() => new Promise<boolean>(() => {}));
       renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
       await act(async () => {});
 
@@ -550,6 +552,64 @@ describe('useLiveSync socket event coverage', () => {
       await push(['lib_a', 'lib_b']);
 
       expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries the same access set after a refresh that could not reach the server', async () => {
+      // The failure is reachable: refreshLibrary degrades an unreachable ABS list
+      // to an empty one so local libraries still load. If the set were marked
+      // handled up front, every later payload would carry it and be dismissed as
+      // already done — suppressing the retry for the whole session and leaving the
+      // switcher stale until a reconnect or relaunch.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      let settle: ((reachable: boolean) => void) | undefined;
+      stableDeps.refreshLibrary = vi.fn(() => new Promise<boolean>(resolve => { settle = resolve; }));
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+
+      // The server could not be reached, so nothing was reconciled.
+      await act(async () => { settle?.(false); });
+
+      await push(['lib_a', 'lib_b']);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops retrying once a refresh has actually reconciled the set', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      let settle: ((reachable: boolean) => void) | undefined;
+      stableDeps.refreshLibrary = vi.fn(() => new Promise<boolean>(resolve => { settle = resolve; }));
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);
+      await act(async () => { settle?.(true); });
+      // What a real refresh does: the loaded list now holds the granted library.
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+
+      // Routine progress-driven payloads from here on carry the reconciled set.
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_a', 'lib_b']);
+
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not let an in-flight refresh swallow a second, different change', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      stableDeps.refreshLibrary = vi.fn(() => new Promise<boolean>(() => {}));
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      // An admin editing access twice in quick succession: the second set is a
+      // real change, not a duplicate of the one being fetched.
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_a', 'lib_b', 'lib_c']);
+
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(2);
     });
 
     it('treats an empty list as unrestricted rather than as a change', async () => {
