@@ -61,6 +61,10 @@ export interface ContextFilter {
   seriesId?: string;
   // For playlist filters: the ABS playlist ID.
   playlistId?: string;
+  // For collection filters: the ABS collection ID. Carried for the same reason
+  // as playlistId — a live `collection_updated` has to find the active filter by
+  // something stable, and `value` is the display name, which a rename changes.
+  collectionId?: string;
 }
 
 // ─── Library source routing (Local Library) ──────────────────────────────────
@@ -1039,6 +1043,12 @@ export function useOnyxState(): OnyxState {
   const [focusCollapsed, setFocusCollapsed] = useState(false);
   const [filter, setFilter] = useState('all');
   const [contextFilter, setContextFilter] = useState<ContextFilter | null>(null);
+  // Live ref for useLiveSync's active-filter reconciler: opening a collection or
+  // playlist unmounts the tab that fetched it, so the socket-driven update of the
+  // filter has to be owned by the always-mounted hook, which needs the current
+  // filter rather than the one present when it subscribed.
+  const contextFilterRef = useRef<ContextFilter | null>(null);
+  contextFilterRef.current = contextFilter;
   const [advFilter, setAdvFilter] = useState<AdvFilter>(EMPTY_ADV_FILTER);
   // Search belongs to a shelf, not to the entire app: restoring an author query
   // in an unrelated library is more confusing than useful. Only query text is
@@ -1421,6 +1431,7 @@ export function useOnyxState(): OnyxState {
     currentLibraryIdRef,
     librariesRef,
     isOfflineRef,
+    contextFilterRef,
     setMediaProgress,
     setPosition,
     setSyncConflict,
@@ -1434,6 +1445,7 @@ export function useOnyxState(): OnyxState {
     recordActivity,
     surfaceCorruptPersistenceNotices,
     setUploadPerm,
+    setContextFilter,
     refreshLibrary,
     applyServerProgress,
     applyUserRecord,
@@ -1459,7 +1471,11 @@ export function useOnyxState(): OnyxState {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       // Call the LibVLC pause/resume command directly.
       // setPlaying alone only updates the React icon — LibVLC keeps running.
-      if (e.code === 'Space') {
+      // Plain Space is the in-window transport key. Modified Space belongs to
+      // the configurable global shortcut (Ctrl+Alt+Space by default); handling
+      // it here as well sends pause twice while the window is focused, and
+      // LibVLC's pause call is a toggle, so the second command resumes it.
+      if (e.code === 'Space' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
         e.preventDefault();
         if (playingRef.current) { pauseAudio().catch(e => log.error('playback', 'transport command failed', { err: String(e) })); setPlaying(false); }
         else {

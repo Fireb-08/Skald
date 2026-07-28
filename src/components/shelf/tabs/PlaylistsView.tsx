@@ -50,10 +50,13 @@ export default function PlaylistsView({ st, inline = false }: PlaylistsViewProps
   const applyUpdated = (updated: Playlist) => {
     setPlaylists(prev => upsertById(prev, updated));
     // If the library shelf is currently filtered by this playlist, push the new
-    // bookIds into the contextFilter so the shelf re-sorts immediately.
+    // name and bookIds into the contextFilter so the shelf re-sorts immediately.
+    // (useLiveSync reconciles the filter for socket-sourced changes, since opening
+    // a playlist unmounts this view; this path is what still works offline.)
     if (st.contextFilter?.playlistId === updated.id) {
       st.setContextFilter({
         ...st.contextFilter,
+        value: updated.name,
         bookIds: updated.items.map(it => it.libraryItemId),
       });
     }

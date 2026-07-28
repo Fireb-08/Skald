@@ -32,8 +32,18 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
   const applyUpdated = (updated: Collection) => {
     setCollections(prev => upsertById(prev, updated));
     setDetail(d => d && d.id === updated.id ? updated : d);
-    if (st.contextFilter?.kind === 'collection' && st.contextFilter.value === updated.name) {
-      st.setContextFilter({ ...st.contextFilter, bookIds: (updated.books ?? []).map(b => b.id) });
+    // Keep an active shelf filter for this collection in step. Matched by id, not
+    // by name: `value` still holds the *old* name during a rename, so the name
+    // comparison this replaces silently skipped exactly that case. (The socket
+    // path reconciles the filter too, from useLiveSync, because opening a
+    // collection unmounts this view — see the reconciler there. Doing it in both
+    // places is idempotent, and this one is what still works with live sync off.)
+    if (st.contextFilter?.kind === 'collection' && st.contextFilter.collectionId === updated.id) {
+      st.setContextFilter({
+        ...st.contextFilter,
+        value: updated.name,
+        bookIds: (updated.books ?? []).map(b => b.id),
+      });
     }
   };
 
@@ -97,6 +107,7 @@ export default function CollectionsView({ st, inline = false }: CollectionsViewP
     st.setContextFilter({
       kind: 'collection',
       value: c.name,
+      collectionId: c.id,
       bookIds: (c.books ?? []).map(b => b.id),
     });
     st.setShelfTab('library');

@@ -30,6 +30,16 @@ vi.mock('@tauri-apps/plugin-log', () => ({
 
 import { useLiveSync, type LiveSyncDeps } from './useLiveSync';
 import { resetEntityListeners, useEntityChanges } from './liveEntities';
+import type { ContextFilter } from './onyx';
+import type { Library } from '../api/abs';
+
+/** A loaded ABS library, which is also the access baseline `user_updated` is judged against. */
+function absLibrary(id: string): Library {
+  return {
+    id, name: id, mediaType: 'book', icon: null, provider: null, displayOrder: null,
+    folders: [], settings: null, lastScan: null, createdAt: null, lastUpdate: null,
+  };
+}
 
 function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
   return {
@@ -56,6 +66,8 @@ function deps(): Omit<LiveSyncDeps, 'liveSyncEnabled'> {
     recordActivity: vi.fn(),
     surfaceCorruptPersistenceNotices: vi.fn(async () => {}),
     setUploadPerm: vi.fn(),
+    contextFilterRef: { current: null } as { current: ContextFilter | null },
+    setContextFilter: vi.fn(),
     refreshLibrary: vi.fn(async () => {}),
     applyServerProgress: vi.fn(),
     applyUserRecord: vi.fn(),
@@ -471,28 +483,222 @@ describe('useLiveSync socket event coverage', () => {
     expect(invokeMock).not.toHaveBeenCalledWith('get_me');
   });
 
-  it('refetches libraries only when library access actually changed', async () => {
-    const stableDeps = deps();
-    renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
-    await act(async () => {});
-
-    const push = (librariesAccessible: string[]) => act(async () => {
-      tauri.emit('user-updated', JSON.stringify({ id: 'usr_1', type: 'user', librariesAccessible }));
+  // ABS emits `user_updated` on every media-progress write and every bookmark
+  // change, not only on account changes, so these two properties have to hold at
+  // once: a genuine access change must refresh on the *first* payload that reports
+  // it, and the routine payloads must not refresh at all.
+  describe('library access', () => {
+    const push = (librariesAccessible?: string[]) => act(async () => {
+      tauri.emit('user-updated', JSON.stringify({
+        id: 'usr_1', type: 'user',
+        ...(librariesAccessible ? { librariesAccessible } : {}),
+      }));
     });
 
-    // The first payload establishes what access looks like — it is not a change,
-    // and reading it as one would refetch the libraries for every settings save.
-    await push(['lib_a', 'lib_b']);
-    expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+    it('refreshes on the first payload that reports a grant', async () => {
+      // The baseline is the loaded library list, not an earlier event: GET
+      // /api/libraries returns only accessible libraries, so the ids on hand are
+      // the accessible set. An idle session receives no earlier `user_updated`,
+      // and treating this one as a baseline would swallow the change entirely.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
 
-    // Same set, different order: still not a change.
-    await push(['lib_b', 'lib_a']);
-    expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+      await push(['lib_a', 'lib_b', 'lib_c']);
 
-    // An admin granting a third library is one — the ids are all we get, so the
-    // libraries themselves have to be fetched.
-    await push(['lib_a', 'lib_b', 'lib_c']);
-    expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('refreshes on the first payload that reports a revocation', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a']);
+
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh for the routine payloads a progress sync emits', async () => {
+      // This is the storm guard. During playback ABS pushes `user_updated` every
+      // time progress is written; each carries the unchanged access set, and
+      // refetching the library on each would reload the shelf every 30 seconds.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_b', 'lib_a']); // same set, different order
+      await push();                   // no librariesAccessible field at all
+
+      expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+    });
+
+    it('refreshes once, not once per payload, while the refresh is in flight', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      // The loaded list does not update until the refresh lands, so without a
+      // guard every payload in between would queue another one.
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_a', 'lib_b']);
+      await push(['lib_a', 'lib_b']);
+
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats an empty list as unrestricted rather than as a change', async () => {
+      // `librariesAccessible: []` means "all libraries" in ABS. There is no id set
+      // to compare it against, and refreshing on spec would reload the shelf on
+      // the first progress tick of every admin's session.
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [absLibrary('lib_a'), absLibrary('lib_b')];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push([]);
+      expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+
+      // A restricted set becoming unrestricted *is* detectable, and is a grant.
+      await push(['lib_a']);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(1);
+      await push([]);
+      expect(stableDeps.refreshLibrary).toHaveBeenCalledTimes(2);
+    });
+
+    it('waits for the initial library load rather than comparing against nothing', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a']);
+
+      expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+    });
+
+    it('ignores local libraries when comparing, since ABS never names them', async () => {
+      const stableDeps = deps();
+      stableDeps.librariesRef.current = [
+        absLibrary('lib_a'),
+        { ...absLibrary('local_1'), source: 'local' },
+      ];
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await push(['lib_a']);
+
+      expect(stableDeps.refreshLibrary).not.toHaveBeenCalled();
+    });
+  });
+
+  // The state these exist for: opening a collection or playlist switches the
+  // shelf to the library tab, which unmounts the view that fetched it — so the
+  // filtered shelf a user is looking at has no view-level subscriber at all.
+  // Nothing below mounts CollectionsView or PlaylistsView, which is exactly the
+  // lifecycle the earlier feed-level tests could not reach.
+  describe('active shelf filter', () => {
+    it('applies a remote membership change to the open collection', async () => {
+      const stableDeps = deps();
+      stableDeps.contextFilterRef.current = {
+        kind: 'collection', value: 'Winter Reading', collectionId: 'col_1', bookIds: ['a'],
+      };
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await act(async () => {
+        tauri.emit('collection-updated', JSON.stringify({
+          id: 'col_1', libraryId: 'library', name: 'Deep Winter', books: [{ id: 'a' }, { id: 'b' }],
+        }));
+      });
+
+      // The rename lands too — the shelf header shows `value`.
+      expect(stableDeps.setContextFilter).toHaveBeenLastCalledWith({
+        kind: 'collection', value: 'Deep Winter', collectionId: 'col_1', bookIds: ['a', 'b'],
+      });
+    });
+
+    it('clears the filter, and says so, when the open collection is deleted', async () => {
+      const stableDeps = deps();
+      stableDeps.contextFilterRef.current = {
+        kind: 'collection', value: 'Winter Reading', collectionId: 'col_1', bookIds: ['a'],
+      };
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await act(async () => {
+        tauri.emit('collection-removed', JSON.stringify({
+          id: 'col_1', libraryId: 'library', name: 'Winter Reading', books: [{ id: 'a' }],
+        }));
+      });
+
+      // Leaving the user on a filtered shelf whose source no longer exists is the
+      // worse failure; the toast is why the view changed under them.
+      expect(stableDeps.setContextFilter).toHaveBeenCalledWith(null);
+      expect(stableDeps.setToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'info' }));
+    });
+
+    it('applies a remote reorder to the open playlist, order included', async () => {
+      const stableDeps = deps();
+      stableDeps.contextFilterRef.current = {
+        kind: 'playlist', value: 'Bedtime', playlistId: 'pl_1', bookIds: ['a', 'b'],
+      };
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await act(async () => {
+        tauri.emit('playlist-updated', JSON.stringify({
+          id: 'pl_1', libraryId: 'library', name: 'Bedtime',
+          items: [{ libraryItemId: 'b' }, { libraryItemId: 'a' }],
+        }));
+      });
+
+      // bookIds is the play order for a playlist shelf, not just a membership set.
+      expect(stableDeps.setContextFilter).toHaveBeenLastCalledWith({
+        kind: 'playlist', value: 'Bedtime', playlistId: 'pl_1', bookIds: ['b', 'a'],
+      });
+    });
+
+    it('leaves a filter alone when the change is for something else', async () => {
+      const stableDeps = deps();
+      stableDeps.contextFilterRef.current = {
+        kind: 'collection', value: 'Winter Reading', collectionId: 'col_1', bookIds: ['a'],
+      };
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await act(async () => {
+        // A different collection, and a playlist while a collection is open.
+        tauri.emit('collection-updated', JSON.stringify({
+          id: 'col_2', libraryId: 'library', name: 'Other', books: [{ id: 'z' }],
+        }));
+        tauri.emit('playlist-updated', JSON.stringify({
+          id: 'pl_1', libraryId: 'library', name: 'Bedtime', items: [{ libraryItemId: 'z' }],
+        }));
+        tauri.emit('collection-removed', JSON.stringify({ id: 'col_2', libraryId: 'library' }));
+      });
+
+      expect(stableDeps.setContextFilter).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when no filter is open', async () => {
+      const stableDeps = deps();
+      renderHook(() => useLiveSync({ ...stableDeps, liveSyncEnabled: true }));
+      await act(async () => {});
+
+      await act(async () => {
+        tauri.emit('collection-updated', JSON.stringify({
+          id: 'col_1', libraryId: 'library', name: 'Winter Reading', books: [],
+        }));
+      });
+
+      expect(stableDeps.setContextFilter).not.toHaveBeenCalled();
+    });
   });
 
   it('ignores a user_updated payload with no id', async () => {

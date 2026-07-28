@@ -11,12 +11,18 @@
 // this seam clean: the hook needs the refs and stable setters, nothing else.
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import type { LibraryItem, MediaProgress, Task, DownloadRecord, Library, UserPermissions } from '../api/abs';
+import type {
+  LibraryItem, MediaProgress, Task, DownloadRecord, Library, UserPermissions,
+  Collection, Playlist,
+} from '../api/abs';
 import { getMe, getOfflineProgressCount, markServerDeleted } from '../api/abs';
 import { log } from '../lib/log';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
 import { patchLibraryItems } from './bookHelpers';
-import { parseEntityChange, publishEntityChange, type EntityKind, type EntityOp } from './liveEntities';
+import { parseEntityChange, publishEntityChange, useEntityChanges, type EntityKind, type EntityOp } from './liveEntities';
+// Type-only, so it erases at build time and no import cycle exists with onyx.ts
+// (which imports this hook).
+import type { ContextFilter } from './onyx';
 
 export interface LiveSyncDeps {
   serverUrl: string;
@@ -33,6 +39,10 @@ export interface LiveSyncDeps {
   currentLibraryIdRef: RefObject<string>;
   librariesRef: RefObject<Library[]>;
   isOfflineRef: RefObject<boolean>;
+  // The shelf's active collection/playlist filter. Read through a ref because the
+  // reconciler below is installed once and must see the current filter, not the
+  // one that existed when it subscribed.
+  contextFilterRef: RefObject<ContextFilter | null>;
   // Stable setters / callbacks from useOnyxState.
   setMediaProgress: Dispatch<SetStateAction<MediaProgress[]>>;
   setPosition: Dispatch<SetStateAction<number>>;
@@ -47,6 +57,7 @@ export interface LiveSyncDeps {
   recordActivity: (entry: { category: 'sync'; outcome: 'success' | 'error' | 'info'; message: string }) => void;
   surfaceCorruptPersistenceNotices: () => Promise<void>;
   setUploadPerm: (v: boolean) => void;
+  setContextFilter: (filter: ContextFilter | null) => void;
   refreshLibrary: () => Promise<void>;
   applyServerProgress: (serverProgress: MediaProgress[]) => void;
   // ABS pushes the whole browser-shaped user record on `user_updated`, so the
@@ -109,9 +120,11 @@ export function useLiveSync({
   recordActivity,
   surfaceCorruptPersistenceNotices,
   setUploadPerm,
+  setContextFilter,
   refreshLibrary,
   applyServerProgress,
   applyUserRecord,
+  contextFilterRef,
 }: LiveSyncDeps): void {
   const refreshQueuedCount = () => {
     getOfflineProgressCount()
@@ -381,6 +394,56 @@ export function useLiveSync({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSyncEnabled, serverUrl, authToken]);
 
+  // ── The shelf's active collection/playlist filter ──────────────────────────
+  // Opening a collection or playlist puts its book ids in the shared
+  // `contextFilter` and switches to the library tab — which UNMOUNTS the view
+  // that fetched it, because Library renders one shelf tab at a time. So the
+  // filtered shelf, the surface most in need of a live update, is exactly the
+  // state in which CollectionsView/PlaylistsView are gone.
+  //
+  // The filter is shared state, so it needs an owner that outlives the tab: this
+  // one, subscribed here in the always-mounted hook. The views keep applying
+  // changes to their own lists and to the filter as well — that path still has to
+  // work with live sync switched off, and applying the same object twice is
+  // idempotent.
+  useEntityChanges<Collection>('collection', change => {
+    const filter = contextFilterRef.current;
+    // Match on id, never on `value`: that is the display name, and a rename is
+    // one of the changes this exists to handle.
+    if (filter?.kind !== 'collection' || filter.collectionId !== change.id) return;
+    if (change.op === 'removed') {
+      log.info('sync', 'active collection filter cleared — removed on the server', { id: change.id });
+      setContextFilter(null);
+      setToast({ message: `Collection “${filter.value}” was deleted on the server.`, type: 'info' });
+      return;
+    }
+    if (!change.object) return;
+    setContextFilter({
+      ...filter,
+      value: change.object.name,
+      bookIds: (change.object.books ?? []).map(b => b.id),
+    });
+  });
+
+  useEntityChanges<Playlist>('playlist', change => {
+    const filter = contextFilterRef.current;
+    if (filter?.kind !== 'playlist' || filter.playlistId !== change.id) return;
+    if (change.op === 'removed') {
+      log.info('sync', 'active playlist filter cleared — removed on the server', { id: change.id });
+      setContextFilter(null);
+      setToast({ message: `Playlist “${filter.value}” was deleted on the server.`, type: 'info' });
+      return;
+    }
+    if (!change.object) return;
+    // bookIds is also the play order for a playlist shelf, so a remote reorder
+    // has to land here or the shelf keeps showing the old sequence.
+    setContextFilter({
+      ...filter,
+      value: change.object.name,
+      bookIds: change.object.items.map(item => item.libraryItemId),
+    });
+  });
+
   // ── This user's account changed ────────────────────────────────────────────
   // ABS sends `user_updated` only to the affected user, carrying the whole
   // browser-shaped record. Permissions and account type are applied straight
@@ -390,13 +453,28 @@ export function useLiveSync({
   // Library access is the exception: `librariesAccessible` names ids, and the
   // libraries themselves still have to be fetched, so a change there triggers
   // the same full refresh a reconnect does.
+  //
+  // Deciding whether access *changed* needs a baseline, and the loaded ABS
+  // library list is one: `GET /api/libraries` returns only what the user may
+  // access (`LibraryController.findAll` filters on `librariesAccessible`), so the
+  // ids already on hand are the accessible set. That matters because
+  // `user_updated` is **not** rare — ABS emits it on every media-progress write
+  // and every bookmark change (`MeController`) — so there are two failure modes
+  // to avoid at once: refreshing on every payload would refetch the library
+  // during playback every thirty seconds, and learning the baseline from the
+  // first payload would swallow the very event that reports the change, since a
+  // session with no playback yet has received no earlier one.
   useEffect(() => {
     if (!liveSyncEnabled || !serverUrl || !authToken) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    // Undefined until the first event: the *first* payload is not a change, so
-    // it must not be read as one and trigger a needless library refetch.
-    let knownLibraryAccess: string | undefined;
+    // The last access set a refresh was already issued for. Without it, events
+    // arriving while that refresh is still in flight — or after one that failed —
+    // would each queue another.
+    let refreshedFor: string | undefined;
+    // The previous payload's access set, needed only to recognise a restricted
+    // set becoming unrestricted (see below).
+    let lastPushedAccess: string | undefined;
 
     listen<string>('user-updated', event => {
       try {
@@ -421,14 +499,39 @@ export function useLiveSync({
           accountType: typeof raw.type === 'string' ? raw.type : null,
         });
 
-        // An empty list means "all libraries" in ABS, so an id-set comparison
-        // over the sorted join is the whole test.
-        const fingerprint = librariesAccessible ? [...librariesAccessible].sort().join(',') : '';
-        if (knownLibraryAccess !== undefined && knownLibraryAccess !== fingerprint) {
-          log.info('sync', 'library access changed — refreshing libraries');
-          void refreshLibrary();
-        }
-        knownLibraryAccess = fingerprint;
+        if (!librariesAccessible) return;
+        const fingerprint = [...librariesAccessible].sort().join(',');
+        const previous = lastPushedAccess;
+        lastPushedAccess = fingerprint;
+        // Already handled — either the refresh is still in flight or it has landed
+        // and this is another progress-driven payload carrying the same set.
+        if (fingerprint === refreshedFor) return;
+
+        const loaded = (librariesRef.current ?? [])
+          .filter(library => library.source !== 'local')
+          .map(library => library.id)
+          .sort()
+          .join(',');
+        // Nothing loaded yet: an initial load is in flight and will produce the
+        // right set on its own, so there is nothing to compare or correct.
+        if (!loaded) return;
+
+        const changed = librariesAccessible.length
+          // A named set is directly comparable with what we hold.
+          ? fingerprint !== loaded
+          // Empty means unrestricted, which no id set can be compared against —
+          // the ids we hold are already everything this account can see. Only a
+          // previous *restricted* set proves access widened; with none, there is
+          // nothing to detect, and refreshing on spec would cost a shelf reload on
+          // the first progress tick of every full-access session.
+          : previous !== undefined && previous !== '';
+        if (!changed) return;
+
+        log.info('sync', 'library access changed — refreshing libraries', {
+          accessible: librariesAccessible.length || 'all',
+        });
+        refreshedFor = fingerprint;
+        void refreshLibrary();
       } catch (e) { log.error('sync', 'user-updated parse failed', { err: String(e) }); }
     }).then(fn => { if (disposed) fn(); else unlisten = fn; });
 
