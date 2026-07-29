@@ -8,6 +8,7 @@ import type { OnyxState, LibraryItem } from '../state/onyx';
 import { fmtRemaining, fmtTime } from '../state/onyx';
 import { asPodcastItem, fetchItem, type PodcastEpisode, type RecentEpisode } from '../api/abs';
 import { resolvePodcastFeed, cachedFeedEpisodes, cachedPodcastImage, episodeKey } from '../lib/podcastCover';
+import { offlinePodcastItem } from '../lib/offlinePodcasts';
 import { playEpisode, togglePlayback } from '../api/playbook';
 import { log } from '../lib/log';
 import Cover from '../components/Cover';
@@ -43,6 +44,11 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   // Episode right-click menu + the Add-to-Playlist picker it can open.
   const [epMenu, setEpMenu] = useState<{ x: number; y: number; ep: PodcastEpisode; downloaded: boolean } | null>(null);
   const [playlistEp, setPlaylistEp] = useState<PodcastEpisode | null>(null);
+  // Episode ordering — shares the browse feed's preference key so the choice is
+  // consistent across both podcast surfaces (and works offline).
+  const [episodeSort, setEpisodeSort] = useState<'newest' | 'oldest' | 'title'>(
+    () => (localStorage.getItem('onyx.podcast.episodeSort') as 'newest' | 'oldest' | 'title' | null) ?? 'newest',
+  );
   // Which way auto-play-next walks this show. Per show, because it is a property
   // of the show: a back catalogue is worked forwards, a news feed backwards.
   const [advanceDir, setAdvanceDir] = useState<EpisodeDirection>(
@@ -57,7 +63,11 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
 
   // The library list returns MINIFIED podcast items (numEpisodes but no
   // episodes[]). Fetch the expanded item for the downloaded episode list.
-  const libEntry = st.library.find(i => i.id === st.podcastDetailId);
+  // Offline, the podcast may not be in st.library at all — fall back to a
+  // synthetic item built from the downloads registry so its downloaded episodes
+  // still render and play with no server.
+  const libEntry = st.library.find(i => i.id === st.podcastDetailId)
+    ?? (st.podcastDetailId ? offlinePodcastItem(st.podcastDetailId, st.downloads) ?? undefined : undefined);
   const libEpisodeCount = libEntry
     ? (asPodcastItem(libEntry).media.numEpisodes ?? asPodcastItem(libEntry).media.episodes?.length ?? 0)
     : 0;
@@ -78,21 +88,25 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   const isLocal = st.activeLibrary?.source === 'local';
 
   useEffect(() => {
-    if (isLocal) { setFull(null); return; }
+    // Offline (and local) libraries render from libEntry directly — there is no
+    // server item to expand, and attempting the fetch would only log a failure.
+    if (isLocal || st.isOffline) { setFull(null); return; }
     if (!st.podcastDetailId || !st.serverUrl) { setFull(null); return; }
     let cancelled = false;
     fetchItem(st.serverUrl, st.podcastDetailId)
       .then(it => { if (!cancelled) setFull(it); })
       .catch(e => log.error('library', 'podcast detail fetchItem failed', { itemId: st.podcastDetailId, err: String(e) }));
     return () => { cancelled = true; };
-  }, [st.podcastDetailId, st.serverUrl, libEpisodeCount, refreshTick, isLocal]);
+  }, [st.podcastDetailId, st.serverUrl, libEpisodeCount, refreshTick, isLocal, st.isOffline]);
 
   // Auto "find episodes": resolve the live feed on open (cached) so the screen
   // shows the latest published episodes, not just the downloaded ones.
   const metaFeedUrl = ((full ?? libEntry) as unknown as { media?: { metadata?: Record<string, unknown> } })?.media?.metadata?.feedUrl as string | undefined;
   useEffect(() => {
     const id = st.podcastDetailId;
-    if (!id || !metaFeedUrl) return;
+    // Offline the feed is unreachable — skip it and render the downloaded
+    // episodes (from libEntry.media.episodes) alone.
+    if (!id || !metaFeedUrl || st.isOffline) return;
     let cancelled = false;
     resolvePodcastFeed(st.serverUrl, id, metaFeedUrl, isLocal).then(d => {
       if (cancelled || !d) return;
@@ -100,7 +114,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
       if (d.image) setFeedImg(prev => prev ?? d.image ?? undefined);
     });
     return () => { cancelled = true; };
-  }, [st.podcastDetailId, st.serverUrl, metaFeedUrl, isLocal]);
+  }, [st.podcastDetailId, st.serverUrl, metaFeedUrl, isLocal, st.isOffline]);
 
   const item = full ?? libEntry;
 
@@ -116,8 +130,20 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
   const meta = p.media.metadata;
   const autoOn = p.media.autoDownloadEpisodes ?? false;
 
-  // Merge downloaded episodes (playable, with progress) with the published feed.
-  const downloadedEps = p.media.episodes ?? [];
+  // Downloaded episodes come from the item's media.episodes (the expanded /
+  // server / cached item). Offline, a cached podcast item is MINIFIED — it has
+  // numEpisodes but no episodes[] — so fold in the episodes from the offline
+  // downloads registry too, or the downloaded episodes wouldn't render at all
+  // (they'd show only in Settings → Downloads). Deduped by episode id so an
+  // online item, which already lists them, never double-counts.
+  const mediaEps = p.media.episodes ?? [];
+  const registryItem = st.podcastDetailId ? offlinePodcastItem(st.podcastDetailId, st.downloads) : null;
+  const registryEps = registryItem ? asPodcastItem(registryItem).media.episodes ?? [] : [];
+  const haveEpisodeIds = new Set(mediaEps.map(e => e.id).filter(Boolean));
+  const downloadedEps: PodcastEpisode[] = [
+    ...mediaEps,
+    ...registryEps.filter(re => re.id && !haveEpisodeIds.has(re.id)),
+  ];
   const dlMap = new Map<string, PodcastEpisode>();
   downloadedEps.forEach(e => dlMap.set(episodeKey(e), e));
   const byKey = new Map<string, { ep: PodcastEpisode; downloaded: boolean }>();
@@ -130,7 +156,11 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
     const k = episodeKey(e);
     if (!byKey.has(k)) byKey.set(k, { ep: e, downloaded: true });
   });
-  const episodes = [...byKey.values()].sort((a, b) => episodeTime(b.ep) - episodeTime(a.ep));
+  const episodes = [...byKey.values()].sort((a, b) => {
+    if (episodeSort === 'title') return a.ep.title.localeCompare(b.ep.title);
+    if (episodeSort === 'oldest') return episodeTime(a.ep) - episodeTime(b.ep);
+    return episodeTime(b.ep) - episodeTime(a.ep); // newest
+  });
   const pendingCount = episodes.filter(e => !e.downloaded).length;
 
   const back = () => { st.setScreen('library'); st.setPodcastDetailId(null); };
@@ -255,6 +285,26 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
         </div>
       </div>
 
+      {/* Episode sort toggle */}
+      {episodes.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+          <span style={{ fontFamily: mono, fontSize: 10, color: 'var(--onyx-text-mute)', letterSpacing: '0.08em', marginRight: 2 }}>SORT</span>
+          {(['newest', 'oldest', 'title'] as const).map(opt => (
+            <button
+              key={opt}
+              onClick={() => { setEpisodeSort(opt); localStorage.setItem('onyx.podcast.episodeSort', opt); }}
+              style={{
+                padding: '3px 9px', borderRadius: 6, cursor: 'pointer',
+                fontFamily: mono, fontSize: 10, letterSpacing: '0.04em',
+                background: episodeSort === opt ? 'var(--onyx-accent-dim)' : 'transparent',
+                color: episodeSort === opt ? 'var(--onyx-accent)' : 'var(--onyx-text-mute)',
+                border: `1px solid ${episodeSort === opt ? 'var(--onyx-accent-edge)' : 'var(--onyx-glass-edge)'}`,
+              }}
+            >{opt === 'newest' ? 'Newest' : opt === 'oldest' ? 'Oldest' : 'Name'}</button>
+          ))}
+        </div>
+      )}
+
       {/* Episode list */}
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 2, paddingRight: 4 }}>
         {episodes.length === 0 && (
@@ -268,6 +318,9 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
           const pct = mp ? Math.min(100, Math.round((mp.progress ?? 0) * 100)) : 0;
           const finished = mp?.isFinished ?? false;
           const nowPlaying = downloaded && st.currentEpisodeId === ep.id && st.currentBookId === item.id;
+          // Available offline on THIS device (a registry record keyed by item+episode),
+          // distinct from `downloaded` which only means the server holds the file.
+          const offline = downloaded && !!st.downloads.find(d => d.itemId === item.id && d.episodeId === ep.id);
           const date = episodeDate(ep);
           return (
             <div
@@ -305,6 +358,7 @@ export default function PodcastDetail({ st }: PodcastDetailProps) {
                   {!downloaded ? <span style={{ color: 'var(--onyx-text-mute)' }}>not downloaded</span>
                     : finished ? <span style={{ color: 'var(--onyx-accent)' }}>finished</span>
                     : pct > 0 ? <span>{fmtTime((mp?.currentTime ?? 0))} · {pct}%</span> : null}
+                  {offline && <span style={{ color: 'var(--onyx-accent)' }} title="Available offline on this device">↓ offline</span>}
                 </div>
                 {pct > 0 && !finished && (
                   <div style={{ height: 2, background: 'var(--onyx-line)', borderRadius: 1, marginTop: 6, overflow: 'hidden' }}>

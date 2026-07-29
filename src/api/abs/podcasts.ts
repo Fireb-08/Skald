@@ -44,6 +44,25 @@ export interface PodcastEpisode {
   guid?: string;
 }
 
+/** Extract the offline-download inputs from a downloaded ABS episode's
+ *  loosely-typed `audioFile`. Returns null for a feed-only episode (the server
+ *  has no audio file yet), which is exactly the gate for whether an episode can
+ *  be taken offline — you can only download to disk what the server already holds.
+ *  The `ino` addresses the file on the server; `fileName` is stored verbatim on disk. */
+export function episodeAudioFileInfo(
+  ep: PodcastEpisode,
+): { ino: string; fileName: string; size: number } | null {
+  const af = ep.audioFile as
+    | { ino?: string | number; metadata?: { filename?: string; size?: number } }
+    | undefined;
+  const ino = af?.ino != null ? String(af.ino) : undefined;
+  if (!ino) return null;
+  // Fall back to an id-based name if the server omits the filename metadata.
+  const fileName = af?.metadata?.filename || `${ep.id ?? 'episode'}.mp3`;
+  const size = af?.metadata?.size ?? ep.size ?? 0;
+  return { ino, fileName, size };
+}
+
 /** An episode as returned by the recent-episodes feed: the expanded episode
  *  plus a reference back to its parent podcast (id + metadata) for display. */
 export interface RecentEpisode extends PodcastEpisode {

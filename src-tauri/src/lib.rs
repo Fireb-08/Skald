@@ -407,6 +407,8 @@ pub fn run() {
             commands::get_library_stats,
             // Downloads — Phase A/B/C: stream to disk, progress events, cancellation, registry
             commands::download_item,
+            commands::download_episode, // offline podcast episode (single-file, no ZIP)
+            commands::list_offline_progress, // whole offline queue — hydrates progress offline
             commands::get_downloads,
             commands::take_corrupt_persistence_notices,
             commands::remove_download,

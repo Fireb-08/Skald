@@ -420,6 +420,9 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
           const pct = mp ? Math.min(100, Math.round((mp.progress ?? 0) * 100)) : 0;
           const finished = mp?.isFinished ?? false;
           const nowPlaying = downloaded && st.currentEpisodeId === ep.id && st.currentBookId === pid;
+          // Available offline on THIS device — a registry record keyed by item+episode
+          // (distinct from `downloaded`, which only means the server holds the file).
+          const offline = downloaded && !!pid && !!st.downloads.find(d => d.itemId === pid && d.episodeId === ep.id);
           const transfer = ep.id ? downloadProgress.get(ep.id) : undefined;
           const podTitle = ep.podcast?.metadata?.title
             ?? (podItem ? asPodcastItem(podItem).media?.metadata?.title : '')
@@ -466,6 +469,7 @@ export default function PodcastBrowse({ st }: PodcastBrowseProps) {
                   {!downloaded && <><span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /><span style={{ color: 'rgba(235,231,223,0.5)' }}>not downloaded</span></>}
                   {downloaded && finished && <><span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /><span style={{ color: 'var(--onyx-accent)' }}>finished</span></>}
                   {downloaded && pct > 0 && !finished && <><span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /><span>{fmtTime(mp?.currentTime ?? 0)} · {pct}%</span></>}
+                  {offline && <><span style={{ margin: '0 5px', display: 'inline-flex', width: 2, height: 2, borderRadius: '50%', background: 'rgba(235,231,223,0.2)', flexShrink: 0 }} /><span style={{ color: 'var(--onyx-accent)' }} title="Available offline on this device">↓ offline</span></>}
                 </div>
                 {pct > 0 && !finished && (
                   <div style={{ height: 2, background: 'var(--onyx-line)', borderRadius: 1, marginTop: 5, overflow: 'hidden' }}>

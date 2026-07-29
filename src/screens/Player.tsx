@@ -108,6 +108,10 @@ export default function Player({ st }: PlayerProps) {
   useEffect(() => {
     const fid = st.focusedBookId;
     if (!fid) return;
+    // Podcasts carry their chapters on the episode (episodeChapters below), so
+    // this book-item fetch is unused for them — and for a downloaded episode it
+    // would hit the server and fail offline. Skip it.
+    if (isPodcast) { setFetchedFocusedChapters([]); return; }
     if (fid === st.currentBookId && st.currentBookChapters.length > 0) {
       setFetchedFocusedChapters(st.currentBookChapters);
       return;

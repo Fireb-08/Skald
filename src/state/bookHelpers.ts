@@ -110,6 +110,13 @@ export function bookTitle(b: LibraryItem): string {
 }
 
 export function bookAuthor(b: LibraryItem): string {
+  // Podcasts keep their author in metadata.author (a plain string), not the
+  // book-only authorName field — and a podcast with no author should show an
+  // empty byline, never the book fallback "Unknown Author".
+  if (b.mediaType === 'podcast') {
+    const pa = (b.media.metadata as { author?: string | null }).author;
+    return pa ?? '';
+  }
   const a = b.media.metadata.authorName;
   if (!a) return 'Unknown Author';
   if (typeof a === 'string') return a;
@@ -126,7 +133,10 @@ export function bookNarrator(b: LibraryItem): string {
 }
 
 export function bookGenre(b: LibraryItem): string {
-  return b.media.metadata.genres[0] ?? '';
+  // Guard the index: some items (e.g. synthetic offline podcast entries, or
+  // minified payloads) carry no genres array — genres[0] on undefined throws and,
+  // since this runs per shelf tile, would blank the whole shelf.
+  return b.media.metadata.genres?.[0] ?? '';
 }
 
 export function bookGenres(b: LibraryItem): string[] {

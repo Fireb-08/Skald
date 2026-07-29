@@ -8,6 +8,7 @@ import { hasRememberedSpeed, rememberSpeed, speedForItem } from '../lib/speedMem
 import type { LibraryItem, MediaProgress, PodcastEpisode } from './abs';
 import { asPodcastItem } from './abs';
 import { closeActiveSession, closeActiveSessionWithoutSync, openPlaybackSession, playAudio, pauseAudio, resumeAudio, setSpeed as setAudioSpeed, setVolume as setAudioVolume, playLocalFile, getOfflineProgress, getLocalProgress, getMe, seekAudio } from './abs';
+import { offlinePodcastItem } from '../lib/offlinePodcasts';
 import { log } from '../lib/log';
 
 // Shared boundary logger for fire-and-forget transport calls — routes through
@@ -345,9 +346,9 @@ function expandedPodcast(
 }
 
 // Canonical entry point for starting playback of a podcast episode (cluster E).
-// Mirrors playBook's online path but opens the session on the episode so the
-// server tracks per-episode progress. Podcast episodes are not part of the
-// offline download registry, so there is no local-file branch here.
+// Mirrors playBook: two local-file branches (a scanned local-library episode, or
+// a downloaded ABS episode played offline) before the online session path that
+// opens the session on the episode so the server tracks per-episode progress.
 export async function playEpisode(
   st: OnyxState,
   podcast: string | LibraryItem,
@@ -368,10 +369,12 @@ export async function playEpisode(
     // so auto-play-next has an episode list when this one ends. Callers that
     // already hold the EXPANDED item pass it, because the shelf entry is the
     // minified ABS shape: numEpisodes, but no episodes[] to advance through.
+    // Offline the podcast isn't in st.library, so fall back to the synthetic item
+    // from the downloads registry — otherwise the player resolves to a book.
     const podItem = expandedPodcast(
       typeof podcast === 'string' ? undefined : podcast,
       st.library.find(b => b.id === podcastItemId),
-    );
+    ) ?? offlinePodcastItem(podcastItemId, st.downloads) ?? undefined;
     if (podItem) st.setPlayingItem(podItem);
     // ── Local podcast path: play a downloaded episode from disk (no server) ──────
     // A local podcast episode carries `localPath` (the downloaded audio file) and
@@ -416,6 +419,66 @@ export async function playEpisode(
       st.setCurrentBookId(podcastItemId);
       st.setFocusedBookId(podcastItemId);
       st.setPlaying(true);
+      return;
+    }
+
+    // ── Offline path: play a downloaded ABS episode from disk (no server) ────────
+    // A downloaded ABS episode has a registry record keyed by (itemId, episodeId).
+    // Play from the local file and resume from the offline queue — the same shape
+    // as playBook's downloaded-book branch, but episode-scoped. localLibrary=false
+    // routes the tick's progress to the server-bound offline queue (which flushes
+    // on reconnect), not the catalog.
+    const episodeDownload = st.downloads.find(
+      d => d.itemId === podcastItemId && d.episodeId === episodeId,
+    );
+    if (episodeDownload?.filePath) {
+      await closeActiveSession().catch(e =>
+        log.error('playback', 'closeActiveSession (offline episode switch) failed', { err: String(e) }),
+      );
+      st.setSessionReady(false);
+      st.setSessionId('');
+
+      // Read the offline queue once up front so corruption is surfaced before the
+      // tick task can overwrite the damaged file (mirrors playBook).
+      let offlineProgress: Awaited<ReturnType<typeof getOfflineProgress>> = null;
+      try {
+        offlineProgress = await getOfflineProgress(podcastItemId, episodeId);
+      } catch {
+        // Resume still has the server-cache / zero fallbacks below.
+      } finally {
+        await st.surfaceCorruptPersistenceNotices();
+      }
+
+      // Resolve start: explicit override > server-cached progress > offline queue > 0.
+      let startTime = startTimeOverride;
+      if (startTime === undefined) {
+        const saved = st.mediaProgress.find(
+          p => p.libraryItemId === podcastItemId && p.episodeId === episodeId,
+        );
+        if (saved) {
+          startTime = saved.isFinished ? 0 : saved.currentTime;
+        } else {
+          startTime = offlineProgress && !offlineProgress.isFinished ? offlineProgress.currentTime : 0;
+        }
+      }
+
+      // Mirror the downloaded-book / local-episode calls: carry the playback rate,
+      // and capture the account (serverUrl/userId) so the offline session this
+      // accrues is credited correctly when it later reaches ABS. localLibrary=false
+      // routes the tick's progress to the server-bound offline queue.
+      await playLocalFile(
+        episodeDownload.filePath, podcastItemId, startTime, false, episodeId,
+        false, undefined, resolveItemSpeed(st, podcastItemId),
+        st.serverUrl, st.userId,
+      );
+      st.setIsLocalPlayback(true);
+      st.setPosition(startTime);
+      st.setCurrentEpisodeId(episodeId);
+      st.setCurrentEpisode(episode);
+      st.setCurrentBookId(podcastItemId);
+      st.setFocusedBookId(podcastItemId);
+      st.setPlaying(true);
+      log.info('playback', 'playEpisode offline', { podcastItemId, episodeId });
       return;
     }
 

@@ -7,7 +7,8 @@ import {
   getCacheDir, setDownloadsDir, setCacheDir, revealPath, revealDownloadLocation,
 } from '../../api/abs';
 import { log } from '../../lib/log';
-import type { DownloadRecord } from '../../api/abs';
+import type { DownloadRecord, PodcastEpisode } from '../../api/abs';
+import { playBook, playEpisode } from '../../api/playbook';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import Cover from '../Cover';
 import { SectionHead, Row, MONO, SERIF, Panel, Toggle, useLocal } from './shared';
@@ -43,6 +44,13 @@ function relativeTime(ms: number): string {
   const months = Math.floor(days / 30);
   if (months < 12) return `${months}mo ago`;
   return `${Math.floor(months / 12)}y ago`;
+}
+
+// A download record's identity: (itemId, episodeId). Book records have no
+// episodeId; a podcast's episodes share one itemId, so the episode id is what
+// keeps their rows, deletes, and reveals distinct.
+function recordKey(r: DownloadRecord): string {
+  return r.episodeId ? `${r.itemId}|${r.episodeId}` : r.itemId;
 }
 
 // Read-only path field + Open/Change buttons for a relocatable storage root.
@@ -201,20 +209,42 @@ export default function DownloadsSection({ st }: Props) {
       ? b.fileSize - a.fileSize
       : b.downloadedAt - a.downloadedAt);
 
-  // Confirm and execute deletion of a single downloaded book.
+  // Play a downloaded item directly from the Downloads pane. This is the
+  // offline-reliable entry point: it reads only the on-disk registry, so it
+  // works when the server is unreachable and the shelf / podcast screens (which
+  // rebuild their lists from server + feed fetches) are empty. Both playBook and
+  // playEpisode already resolve the local file from st.downloads and play with no
+  // server session — a minimal synthesized episode (correct id + title) is enough.
+  const playRecord = async (record: DownloadRecord) => {
+    try {
+      if (record.episodeId) {
+        await playEpisode(st, record.itemId, { id: record.episodeId, title: record.title } as PodcastEpisode);
+      } else {
+        await playBook(st, record.itemId);
+      }
+      st.setScreen('player');
+    } catch (e) {
+      log.error('downloads', 'play from downloads failed', { itemId: record.itemId, episodeId: record.episodeId, err: String(e) });
+      st.setToast({ message: `Could not start playback: ${String(e)}`, type: 'error' });
+    }
+  };
+
+  // Confirm and execute deletion of a single downloaded book or podcast episode.
   const handleConfirmDelete = async () => {
     if (!pendingDelete) return;
     const record = pendingDelete;
     setPendingDelete(null);
     // Optimistic update: remove from local display and global state immediately.
     // The Rust command always clears the registry entry even when the file is gone,
-    // so the UI stays consistent regardless of the actual disk outcome.
-    setRecords(prev => prev.filter(r => r.itemId !== record.itemId));
+    // so the UI stays consistent regardless of the actual disk outcome. Match on the
+    // (itemId, episodeId) identity so deleting one episode leaves its siblings.
+    const isSame = (r: DownloadRecord) => recordKey(r) === recordKey(record);
+    setRecords(prev => prev.filter(r => !isSame(r)));
     // Sync to global st.downloads so the offline playback router stops routing to
     // the now-deleted file without requiring a full app reload.
-    st.setDownloads(prev => prev.filter(r => r.itemId !== record.itemId));
+    st.setDownloads(prev => prev.filter(r => !isSame(r)));
     try {
-      await removeDownload(record.itemId);
+      await removeDownload(record.itemId, record.episodeId ?? undefined);
       st.setToast({ message: `"${record.title}" removed from downloads`, type: 'success' });
     } catch {
       // File was already deleted outside the app — registry is still cleaned up by Rust.
@@ -231,7 +261,7 @@ export default function DownloadsSection({ st }: Props) {
     st.setDownloads([]);
     let failed = 0;
     for (const record of snapshot) {
-      try { await removeDownload(record.itemId); }
+      try { await removeDownload(record.itemId, record.episodeId ?? undefined); }
       // Count failures but continue — registry is cleaned up by Rust even when file is gone.
       catch { failed++; }
     }
@@ -343,7 +373,7 @@ export default function DownloadsSection({ st }: Props) {
                 <option value="largest">Largest</option>
               </select>
             )}
-            <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>{records.length} book{records.length === 1 ? '' : 's'}</span>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: 'var(--onyx-text-mute)', letterSpacing: '0.04em' }}>{records.length} item{records.length === 1 ? '' : 's'}</span>
           </div>
         }
       >
@@ -358,7 +388,7 @@ export default function DownloadsSection({ st }: Props) {
               const libraryItem = st.library.find(b => b.id === record.itemId);
               return (
                 <div
-                  key={record.itemId}
+                  key={recordKey(record)}
                   style={{ display: 'flex', alignItems: 'center', padding: '13px 0', borderBottom: i < sortedRecords.length - 1 ? '1px solid var(--onyx-line)' : 'none', gap: 14 }}
                 >
                   {/* Cover thumbnail */}
@@ -381,9 +411,10 @@ export default function DownloadsSection({ st }: Props) {
                       {record.author || 'Unknown Author'}
                     </div>
                     <div style={{ marginTop: 7, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {record.episodeId && <Chip>Episode</Chip>}
                       <Chip>{fmtSize(record.fileSize)}</Chip>
                       <Chip><time dateTime={new Date(record.downloadedAt).toISOString()} title={new Date(record.downloadedAt).toLocaleString()}>{relativeTime(record.downloadedAt)}</time></Chip>
-                      <button onClick={() => revealDownloadLocation(record.itemId).catch(e => log.error('downloads', 'reveal downloaded file failed', { itemId: record.itemId, err: String(e) }))} title={record.filePath} style={{ padding: '2px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>Open location</button>
+                      <button onClick={() => revealDownloadLocation(record.itemId, record.episodeId ?? undefined).catch(e => log.error('downloads', 'reveal downloaded file failed', { itemId: record.itemId, episodeId: record.episodeId, err: String(e) }))} title={record.filePath} style={{ padding: '2px 7px', borderRadius: 5, border: '1px solid var(--onyx-glass-edge)', background: 'transparent', color: 'var(--onyx-text-dim)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>Open location</button>
                     </div>
                     {/* Server-deleted warning — local copy retained and still playable offline. */}
                     {record.serverDeleted && (
@@ -392,6 +423,19 @@ export default function DownloadsSection({ st }: Props) {
                       </div>
                     )}
                   </div>
+
+                  {/* Play — the offline-reliable entry point (works with no server). */}
+                  <button
+                    onClick={() => playRecord(record)}
+                    title={`Play "${record.title}"`}
+                    style={{
+                      flexShrink: 0, padding: '6px 13px', fontSize: 10, fontFamily: MONO, letterSpacing: '0.08em',
+                      textTransform: 'uppercase' as const, background: 'var(--onyx-accent-dim)',
+                      border: '1px solid var(--onyx-accent-edge)', borderRadius: 6, color: 'var(--onyx-accent)', cursor: 'pointer',
+                    }}
+                  >
+                    Play
+                  </button>
 
                   {/* Delete (danger) */}
                   <button

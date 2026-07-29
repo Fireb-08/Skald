@@ -14,6 +14,10 @@ Built with **Tauri 2 + React 19 + TypeScript + Rust**, with audio handled native
 
 A summary of every release since 1.0. For the full commit-level changelog, see [`CHANGELOG.md`](CHANGELOG.md).
 
+### Version 1.2.1
+
+- **Offline podcast episodes:** Download individual episodes from your Audiobookshelf server to your device, play them while offline, and have your listening position sync back to the server when you reconnect. Use "Download for offline" in an episode's right-click menu; downloaded episodes show a `↓ offline` badge and appear in Settings → Downloads alongside your books. When you're offline, the library shelf shows an entry for every podcast that has downloaded episodes — open it to see and play those episodes — and every downloaded item has a Play button in Settings → Downloads. Removal on finish follows the same "keep downloads after finishing" preference as books.
+
 ### Version 1.2.0
 
 The biggest release since 1.0, with work spread across multiple libraries, accessibility, and reliability.
@@ -43,7 +47,7 @@ The biggest release since 1.0, with work spread across multiple libraries, acces
 - **Audiobookshelf Client:** Log in with a password or API key (tokens are safely stored in Windows Credential Manager or a Linux Secret Service keyring). Browse your library by grid or list, explore 3D cover layouts, and sort by Series, Authors, Narrators, Collections, Playlists, Genres, or Publishers using advanced filters and scoped search.
 - **Advanced Player:** Enjoy gapless playback for multi-file books. The player includes a waveform scrubber, chapter navigation, variable speed, a sleep timer, bookmarks, and an audiobook-tuned equalizer.
 - **Live Sync:** Progress syncs over Socket.IO every 30 seconds. The app handles reconnect resyncs and cross-device progress reconciliation automatically.
-- **Offline Mode:** Download books for offline playback. Your progress is saved locally and flushes back to the server the next time you connect.
+- **Offline Mode:** Download books and individual podcast episodes for offline playback. Your progress is saved locally and flushes back to the server the next time you connect.
 - **Local Libraries (No Server):** Scan folders on your disk to build a catalog organized by Author, Series, and Title. The app matches metadata against Google Books, iTunes, or Open Library. You can play these files with catalog-backed progress, resume, and bookmarks. A background watcher auto-imports new files dropped in your staging folder.
 - **Local Podcasts (No Server):** Subscribe to feeds via RSS or OPML. You can browse and download episodes, track your progress per episode, and use the auto-download scheduler.
 - **Admin Tools:** Manage your library, server settings, notifications (Apprise), backups, and scheduled tasks. Admins also get access to a server log viewer, user management, an item metadata and chapter editor, cover management, custom metadata providers, per-item public share links or RSS feeds, per-user access-control editing, and streamed server uploads with progress and cancel.

@@ -2,6 +2,36 @@
 
 Notable user-facing changes to Skald. Dates are the build cut dates.
 
+## 1.2.1 (2026-07-21)
+
+### Podcasts
+- Offline podcast episodes: download an individual episode from your
+  Audiobookshelf server to your device via the "Download for offline" entry in
+  an episode's right-click menu.
+- Downloaded episodes play with the server unreachable, and per-episode
+  listening progress is queued locally and synced back to the server on
+  reconnect.
+- Downloaded episodes show a `↓ offline` badge on the episode list and browse
+  feed, and appear in Settings → Downloads (with size, open-location, and
+  remove) alongside downloaded books.
+- Removal on finish honors the same "keep downloads after finishing" preference
+  (Settings → Downloads) as books — default is to keep the local copy.
+- Downloaded episodes stay reachable with no server: each downloaded item has a
+  Play button in Settings → Downloads, and when offline the shelf shows an entry
+  for every podcast with downloaded episodes, opening to its downloaded-episode
+  list.
+
+### Offline
+- The offline library shelf now shows only what's actually available on the
+  device — downloaded books, downloaded-podcast entries, and local-library files
+  — instead of the full cached server library (most of which had no audio on the
+  device and failed to play). The complete library returns when you reconnect.
+- Downloaded podcasts now show the podcast author offline (captured at download),
+  and each episode's saved listening position + percentage now appears offline
+  (hydrated from the local progress queue), not just after playing it.
+- The podcast detail screen gained a sort control (newest / oldest / name),
+  matching the browse feed and available offline.
+
 ## 1.2.0 (2026-07-11)
 
 The first build since 1.1.0 (the Server Upload release). This one focuses on

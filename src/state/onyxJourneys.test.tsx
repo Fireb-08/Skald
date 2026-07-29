@@ -33,9 +33,9 @@ vi.mock('@tauri-apps/plugin-log', () => ({
 }));
 
 import { useOnyxState } from './onyx';
-import { playBook } from '../api/playbook';
+import { playBook, playEpisode } from '../api/playbook';
 import { ALL_LIBRARIES_ID } from '../lib/allLibraries';
-import type { Library, LibraryItem } from '../api/abs';
+import type { Library, LibraryItem, PodcastEpisode } from '../api/abs';
 
 const SERVER = 'http://abs.local';
 
@@ -116,6 +116,47 @@ describe('journey: combined shelf → local item → playback → source library
     // The now-playing snapshot survives the switch (cross-library MiniPlayer).
     expect(result.current.playingItem?.id).toBe('local-book');
     expect(result.current.currentBookId).toBe('local-book');
+  });
+});
+
+describe('journey: downloaded ABS podcast episode plays offline', () => {
+  it('routes episode playback to the local file and resumes from the offline queue', async () => {
+    // A downloaded ABS episode: a registry record keyed by (itemId, episodeId).
+    tauri.handlers.set('get_downloads', () => [{
+      itemId: 'abs-pod', episodeId: 'ep-1', title: 'Ep One', author: 'The Podcast',
+      filePath: 'C:/DL/episodes/abs-pod/ep-1/ep1.mp3', fileSize: 100, downloadedAt: 1,
+    }]);
+    tauri.handlers.set('close_active_session', () => undefined);
+    // Server progress is unavailable offline; the resume comes from the queue.
+    tauri.handlers.set('get_offline_progress', () => ({
+      itemId: 'abs-pod', episodeId: 'ep-1', currentTime: 120, duration: 1800,
+      progress: 120 / 1800, isFinished: false, recordedAt: 1,
+    }));
+    tauri.handlers.set('play_local_file', () => undefined);
+
+    const { result } = renderHook(() => useOnyxState());
+    await waitFor(() => expect(result.current.libraryLoading).toBe(false));
+    // The registry record reaches state so the offline lookup can match on it.
+    await waitFor(() => expect(result.current.downloads.some(d => d.episodeId === 'ep-1')).toBe(true));
+
+    const episode = { id: 'ep-1', title: 'Ep One' } as PodcastEpisode;
+    await act(async () => { await playEpisode(result.current, 'abs-pod', episode); });
+
+    // Plays the local file (no server session), resumes from the queued position,
+    // and localLibrary:false routes the tick's progress to the offline queue (which
+    // flushes to the server on reconnect) rather than the local catalog.
+    const play = tauri.calls.find(c => c.cmd === 'play_local_file');
+    expect(play?.args).toMatchObject({
+      filePath: 'C:/DL/episodes/abs-pod/ep-1/ep1.mp3',
+      itemId: 'abs-pod',
+      startTime: 120,
+      localLibrary: false,
+      episodeId: 'ep-1',
+    });
+    expect(tauri.calls.some(c => c.cmd === 'open_playback_session')).toBe(false);
+    expect(result.current.isLocalPlayback).toBe(true);
+    expect(result.current.currentEpisodeId).toBe('ep-1');
+    expect(result.current.currentBookId).toBe('abs-pod');
   });
 });
 

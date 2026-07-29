@@ -4,6 +4,7 @@ import type { PodcastEpisode } from '../../api/abs';
 import {
   updateProgress, setLocalProgress, deleteEpisode, deleteLocalEpisode,
   closeActiveSession, seekAudio, pauseAudio,
+  downloadEpisode, removeDownload, episodeAudioFileInfo,
 } from '../../api/abs';
 import { log } from '../../lib/log';
 
@@ -53,11 +54,69 @@ export function buildEpisodeContextMenu(
     : undefined;
   const dur = ep.duration ?? mp?.duration ?? 0;
 
+  // Offline-download state for an ABS episode: a registry record keyed by
+  // (itemId, episodeId) means it is on THIS device. audioInfo (the audioFile ino)
+  // is what makes a download possible — you can only take offline what the server
+  // already holds the audio file for, so a feed-only episode has none.
+  const offlineRecord = hasId
+    ? st.downloads.find(d => d.itemId === item.id && d.episodeId === ep.id)
+    : undefined;
+  const audioInfo = episodeAudioFileInfo(ep);
+
   // ── PLAYBACK ───────────────────────────────────────────────────────────────
   const playback: ContextMenuItem[] = [
     downloaded && hasId
       ? { label: 'Play Episode', icon: 'play', primary: true, onClick: () => opts.play(ep) }
       : { label: 'Download & Play', icon: 'download', primary: true, onClick: () => opts.openUndownloaded(ep) },
+    // Offline download toggle — ABS only (local episodes already live on disk).
+    // Flips to "Remove download" once a local copy exists. Mirrors the book menu's
+    // Download / Delete-Download item.
+    ...((!isLocal && downloaded && hasId && (offlineRecord || audioInfo)
+      ? [offlineRecord
+          ? {
+              label: 'Remove download',
+              icon: 'trash',
+              danger: true,
+              onClick: () => {
+                st.setConfirmDialog({
+                  title: `Remove downloaded copy of "${ep.title}"?`,
+                  message: 'This removes the local audio file from this device. The episode stays on your server and can be downloaded again.',
+                  confirmLabel: 'Remove',
+                  onConfirm: async () => {
+                    try {
+                      await removeDownload(item.id, ep.id!);
+                      st.setDownloads(prev => prev.filter(d => !(d.itemId === item.id && d.episodeId === ep.id)));
+                      st.setToast({ message: `Removed offline copy of "${ep.title}"`, type: 'success' });
+                      log.info('downloads', 'episode offline copy removed', { itemId: item.id, episodeId: ep.id });
+                    } catch (e) {
+                      st.setToast({ message: `Remove failed: ${String(e)}`, type: 'error' });
+                    }
+                  },
+                });
+              },
+            }
+          : {
+              label: 'Download for offline',
+              icon: 'download',
+              onClick: () => {
+                // author = the podcast title, shown as the parent line in the
+                // Downloads list; title = the episode title. podcastAuthor is the
+                // podcast's real author (metadata.author), kept for the offline byline.
+                const meta = (item.media?.metadata ?? {}) as { title?: string; author?: string | null };
+                const podcastTitle = meta.title ?? '';
+                const podcastAuthor = meta.author ?? null;
+                // The episode's real publish date (ms) so offline ordering/date
+                // reflect it, not the download time. publishedAt > parsed pubDate.
+                const publishedAt = ep.publishedAt ?? (ep.pubDate ? Date.parse(ep.pubDate) || null : null);
+                downloadEpisode(st.serverUrl, item.id, ep.id!, audioInfo!.ino, audioInfo!.fileName, ep.title, podcastTitle, podcastAuthor, publishedAt)
+                  .then(() => log.info('downloads', 'episode download completed', { itemId: item.id, episodeId: ep.id }))
+                  .catch(e => {
+                    log.error('downloads', 'episode download failed', { itemId: item.id, episodeId: ep.id, err: String(e) });
+                    st.setToast({ message: `Download failed: ${String(e)}`, type: 'error' });
+                  });
+              },
+            }]
+      : []) as ContextMenuItem[]),
   ];
 
   if (downloaded && hasId) {

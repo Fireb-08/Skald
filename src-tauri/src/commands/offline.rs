@@ -13,6 +13,156 @@ async fn delete_partial(file: tokio::fs::File, path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
 }
 
+// Sanitize a server-originated id for safe use as a single path component:
+// keep ASCII alphanumerics, '-' and '_'; everything else (separators, "..",
+// unicode) becomes '_'. Same posture as the file_name sanitization — a
+// malformed/hostile id cannot escape the downloads root.
+fn sanitize_path_component(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
+        .collect()
+}
+
+// Identity + retry context echoed on every download-* event. episode_id lets the
+// frontend key cards by (item, episode); ino/file_name are echoed on
+// download-failed so it can re-issue an episode download without re-deriving them
+// (books leave them None — their retry rebuilds from the title).
+struct DownloadEvent<'a> {
+    item_id: &'a str,
+    episode_id: Option<&'a str>,
+    title: &'a str,
+    ino: Option<&'a str>,
+    file_name: Option<&'a str>,
+}
+
+// Stream an HTTP response body to `file_path`, chunking so multi-GB files never
+// exhaust memory. Shared by download_item (whole-item ZIP) and download_episode
+// (a single podcast episode file). Runs a disk-space preflight, emits
+// download-progress per chunk, and on a non-success exit emits
+// download-cancelled / download-failed keyed by the (item, episode) identity —
+// the caller emits download-complete after any post-processing. The partial file
+// is deleted and the OS handle released on every failure path. This does NOT
+// touch the cancel registry; the caller owns the token's lifetime.
+async fn stream_response_to_file(
+    response: reqwest::Response,
+    file_path: &std::path::Path,
+    dl_dir: &std::path::Path,
+    cancel_token: &CancellationToken,
+    app_handle: &tauri::AppHandle,
+    ev: &DownloadEvent<'_>,
+) -> Result<u64, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    // Bind the identity fields locally so the emit/log blocks below read cleanly.
+    let item_id = ev.item_id;
+    let episode_id = ev.episode_id;
+    let title = ev.title;
+
+    // 0 signals an unknown length — the frontend shows an indeterminate bar.
+    let total_bytes = response.content_length().unwrap_or(0);
+
+    // Preflight: ensure the incoming bytes fit before creating the output file.
+    // (download_item runs a second extraction preflight once the ZIP is on disk.)
+    if total_bytes > 0 {
+        let available = fs2::available_space(dl_dir).map_err(|e| {
+            let msg = format!("Failed to inspect download disk space: {e}");
+            log::error!(target: "skald::downloads",
+                "download preflight failed for item {item_id}: {msg}");
+            let _ = app_handle.emit("download-failed", serde_json::json!({
+                "itemId": item_id, "episodeId": episode_id, "title": title, "error": msg,
+                "ino": ev.ino, "fileName": ev.file_name,
+            }));
+            msg
+        })?;
+        if total_bytes > available {
+            let msg = format!("Insufficient disk space: need {total_bytes} bytes, only {available} bytes available");
+            log::warn!(target: "skald::downloads",
+                "download preflight rejected item {item_id}: need={total_bytes} available={available}");
+            let _ = app_handle.emit("download-failed", serde_json::json!({
+                "itemId": item_id, "episodeId": episode_id, "title": title, "error": msg,
+                "ino": ev.ino, "fileName": ev.file_name,
+            }));
+            return Err(msg);
+        }
+    }
+
+    // Signal the start immediately so the progress toast appears before chunk 1.
+    let _ = app_handle.emit("download-progress", serde_json::json!({
+        "itemId": item_id, "episodeId": episode_id, "title": title,
+        "bytesDownloaded": 0u64, "totalBytes": total_bytes,
+    }));
+
+    let mut file = tokio::fs::File::create(file_path).await
+        .map_err(|e| format!("Failed to create file: {e}"))?;
+
+    // An enum captures the loop's exit reason so file ownership can move to
+    // delete_partial() in error/cancel branches without a borrow-checker fight.
+    enum LoopExit { Done, Cancelled, NetworkError(String), WriteError(String) }
+
+    let mut stream = response.bytes_stream();
+    let mut bytes_downloaded: u64 = 0;
+
+    let exit = loop {
+        let chunk_result = stream.next().await;
+        // Lock-free atomic read — no await needed to check cancellation.
+        if cancel_token.is_cancelled() { break LoopExit::Cancelled; }
+        let chunk = match chunk_result {
+            None => break LoopExit::Done,
+            Some(Ok(c)) => c,
+            Some(Err(e)) => break LoopExit::NetworkError(format!("Network error: {e}")),
+        };
+        bytes_downloaded += chunk.len() as u64;
+        if let Err(e) = file.write_all(&chunk).await {
+            // OS error 112 is ERROR_DISK_FULL on Windows; 28 is ENOSPC elsewhere.
+            let msg = match e.raw_os_error() {
+                Some(112) | Some(28) => "Not enough disk space to complete the download.".to_string(),
+                _ => format!("Write error: {e}"),
+            };
+            break LoopExit::WriteError(msg);
+        }
+        let _ = app_handle.emit("download-progress", serde_json::json!({
+            "itemId": item_id, "episodeId": episode_id, "title": title,
+            "bytesDownloaded": bytes_downloaded, "totalBytes": total_bytes,
+        }));
+    };
+
+    match exit {
+        LoopExit::Cancelled => {
+            delete_partial(file, file_path).await;
+            let _ = app_handle.emit("download-cancelled", serde_json::json!({
+                "itemId": item_id, "episodeId": episode_id, "title": title,
+            }));
+            return Err("cancelled".to_string());
+        }
+        LoopExit::NetworkError(msg) | LoopExit::WriteError(msg) => {
+            delete_partial(file, file_path).await;
+            let _ = app_handle.emit("download-failed", serde_json::json!({
+                "itemId": item_id, "episodeId": episode_id, "title": title, "error": msg.clone(),
+                "ino": ev.ino, "fileName": ev.file_name,
+            }));
+            return Err(msg);
+        }
+        LoopExit::Done => {}
+    }
+
+    // Flush pending buffer bytes, then release the OS handle before the caller
+    // reads metadata / extracts. into_std().await hands off to blocking I/O;
+    // dropping the returned std::fs::File closes the handle immediately.
+    let flush_result = file.flush().await;
+    drop(file.into_std().await);
+    if let Err(e) = flush_result {
+        let _ = std::fs::remove_file(file_path);
+        let msg = format!("Flush error: {e}");
+        let _ = app_handle.emit("download-failed", serde_json::json!({
+            "itemId": item_id, "episodeId": episode_id, "title": title, "error": msg.clone(),
+            "ino": ev.ino, "fileName": ev.file_name,
+        }));
+        return Err(msg);
+    }
+
+    Ok(bytes_downloaded)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum DownloadRevealTarget {
     Directory(std::path::PathBuf),
@@ -27,9 +177,10 @@ fn resolve_download_reveal_target(
     downloads_dir: &std::path::Path,
     records: &[downloads::DownloadRecord],
     item_id: &str,
+    episode_id: Option<&str>,
 ) -> Result<DownloadRevealTarget, String> {
     let record = records.iter()
-        .find(|record| record.item_id == item_id)
+        .find(|record| record.item_id == item_id && record.episode_id.as_deref() == episode_id)
         .ok_or_else(|| "Download record not found".to_string())?;
     let display_path = std::path::PathBuf::from(&record.file_path);
     if !display_path.is_absolute() {
@@ -101,10 +252,10 @@ pub fn reveal_downloads_dir() -> Result<(), String> {
 /// backend resolves and contains the durable registry path under the downloads
 /// root before invoking Explorer.
 #[tauri::command]
-pub fn reveal_download_location(item_id: String) -> Result<(), String> {
+pub fn reveal_download_location(item_id: String, episode_id: Option<String>) -> Result<(), String> {
     let dir = downloads::downloads_dir()?;
     let records = downloads::load_registry(&dir);
-    let target = resolve_download_reveal_target(&dir, &records, &item_id)
+    let target = resolve_download_reveal_target(&dir, &records, &item_id, episode_id.as_deref())
         .map_err(|e| {
             log::warn!(target: "skald::downloads",
                 "reveal_download_location refused item {item_id}: {e}");
@@ -653,13 +804,29 @@ pub fn mark_server_deleted(item_id: String) -> Result<(), String> {
 // no entry exists. Used by the offline playback path to restore the last
 // known position when st.mediaProgress is empty (server unreachable and no
 // cached server progress available).
+/// Returns the entire offline progress queue. Used on an offline launch to
+/// hydrate st.mediaProgress from locally-queued positions (the server /api/me
+/// fetch is unavailable), so downloaded books/episodes show their resume point
+/// and percentage in the UI. Online, the server payload takes precedence.
 #[tauri::command]
-pub fn get_offline_progress(item_id: String) -> Result<Option<downloads::OfflineProgressEntry>, String> {
+pub fn list_offline_progress() -> Result<Vec<downloads::OfflineProgressEntry>, String> {
+    let dl_dir = downloads::downloads_dir()?;
+    Ok(downloads::load_progress_queue(&dl_dir))
+}
+
+#[tauri::command]
+pub fn get_offline_progress(
+    item_id: String,
+    episode_id: Option<String>,
+) -> Result<Option<downloads::OfflineProgressEntry>, String> {
     let dl_dir = downloads::downloads_dir()?;
     let queue = downloads::load_progress_queue(&dl_dir);
-    // Downloaded-book resume reads only the book-level entry; failed online
-    // podcast syncs remain distinct in the same queue until reconnect flush.
-    Ok(queue.into_iter().find(|e| e.item_id == item_id && e.episode_id.is_none()))
+    // Resolve the exact (item, episode) identity: a book passes episode_id=None
+    // and matches the book-level entry; a downloaded podcast episode passes its
+    // id and matches only that episode's entry, leaving siblings untouched.
+    Ok(queue.into_iter().find(|e| {
+        e.item_id == item_id && e.episode_id.as_deref() == episode_id.as_deref()
+    }))
 }
 
 /// Exposes only queue size for Settings diagnostics; progress payloads remain local.
@@ -752,12 +919,10 @@ pub async fn download_item(
     app_handle: tauri::AppHandle,
     cancel_registry: tauri::State<'_, downloads::DownloadCancelRegistry>,
 ) -> Result<String, String> {
-    use futures_util::StreamExt;
-    use tokio::io::AsyncWriteExt;
-
-    // Refresh first if the access token is near expiry: ABS authorizes this
-    // request once, at the start, but a download can run for a long time and
-    // starting it on a token with seconds left is a needless way to fail.
+    // Refresh first if the access token is near expiry (from main): ABS authorizes
+    // this request once, at the start, but a download can run for a long time and
+    // starting it on a token with seconds left is a needless way to fail. Streaming
+    // itself lives in stream_response_to_file, so no futures/io imports are needed here.
     let token = crate::token_refresh::fresh_tokens(&server_url)
         .await?
         .effective()
@@ -774,10 +939,12 @@ pub async fn download_item(
     let file_path = dl_dir.join(&safe_name);
 
     // Create a cancellation token for this download and insert it into the shared
-    // registry so cancel_download() can signal this stream loop by item_id.
-    // The token is cloned into the registry; the original is checked in the loop.
+    // registry so cancel_download() can signal this stream loop. Books key on the
+    // item id alone (episode_id = None); download_episode folds the episode in via
+    // the same downloads::cancel_key so sibling episodes are independent.
+    let cancel_id = downloads::cancel_key(&item_id, None);
     let cancel_token = CancellationToken::new();
-    cancel_registry.lock().await.insert(item_id.clone(), cancel_token.clone());
+    cancel_registry.lock().await.insert(cancel_id.clone(), cancel_token.clone());
 
     // The token-in-header pattern is fine for file downloads (unlike media streaming
     // where we use token-in-URL per CLAUDE.md critical lesson 2). The bounded
@@ -793,169 +960,30 @@ pub async fn download_item(
     {
         Ok(r) => r,
         Err(e) => {
-            cancel_registry.lock().await.remove(&item_id);
+            cancel_registry.lock().await.remove(&cancel_id);
             return Err(format!("Download request failed: {e}"));
         }
     };
 
     // Non-2xx status — clean up registry and report.
     if !response.status().is_success() {
-        cancel_registry.lock().await.remove(&item_id);
+        cancel_registry.lock().await.remove(&cancel_id);
         return Err(format!("Download failed: HTTP {}", response.status()));
     }
 
-    // 0 signals an unknown length — frontend shows an indeterminate progress bar.
-    let total_bytes = response.content_length().unwrap_or(0);
-
-    // Check that the incoming ZIP itself fits before touching the output path.
-    // A second preflight after download reads the ZIP's uncompressed total and
-    // ensures extraction also fits while this archive remains on disk.
-    if total_bytes > 0 {
-        let available = match fs2::available_space(&dl_dir) {
-            Ok(available) => available,
-            Err(e) => {
-                cancel_registry.lock().await.remove(&item_id);
-                let msg = format!("Failed to inspect download disk space: {e}");
-                log::error!(target: "skald::downloads",
-                    "download preflight failed for item {item_id}: {msg}");
-                let _ = app_handle.emit("download-failed", serde_json::json!({
-                    "itemId": item_id, "title": title, "error": msg,
-                }));
-                return Err(msg);
-            }
-        };
-        if total_bytes > available {
-            cancel_registry.lock().await.remove(&item_id);
-            let msg = format!("Insufficient disk space: need {total_bytes} bytes, only {available} bytes available");
-            log::warn!(target: "skald::downloads",
-                "download ZIP preflight rejected item {item_id}: need={total_bytes} available={available}");
-            let _ = app_handle.emit("download-failed", serde_json::json!({
-                "itemId": item_id, "title": title, "error": msg,
-            }));
-            return Err(msg);
-        }
-    }
-
-    // Signal the start immediately so the progress toast appears before the first chunk.
-    let _ = app_handle.emit("download-progress", serde_json::json!({
-        "itemId": item_id,
-        "title": title,
-        "bytesDownloaded": 0u64,
-        "totalBytes": total_bytes,
-    }));
-
-    // Create the output file. Clean up registry on failure (no partial file yet).
-    let mut file = match tokio::fs::File::create(&file_path).await {
-        Ok(f) => f,
+    // Stream the ZIP to disk (disk preflight, progress events, cancel + disk-full
+    // handling all live in the shared helper). bytes_downloaded is the archive
+    // size, reused by the extraction preflight and the fallback size below.
+    let bytes_downloaded = match stream_response_to_file(
+        response, &file_path, &dl_dir, &cancel_token, &app_handle,
+        &DownloadEvent { item_id: &item_id, episode_id: None, title: &title, ino: None, file_name: None },
+    ).await {
+        Ok(b) => b,
         Err(e) => {
-            cancel_registry.lock().await.remove(&item_id);
-            return Err(format!("Failed to create file: {e}"));
+            cancel_registry.lock().await.remove(&cancel_id);
+            return Err(e);
         }
     };
-
-    // ── Stream loop ───────────────────────────────────────────────────────────
-    // An enum captures the reason the loop exited so file ownership can be
-    // transferred to delete_partial() in error/cancel branches without hitting
-    // the borrow checker's "potentially moved" restriction on loop variables.
-    enum LoopExit {
-        Done,
-        Cancelled,
-        NetworkError(String),
-        WriteError(String),
-    }
-
-    let mut stream = response.bytes_stream();
-    let mut bytes_downloaded: u64 = 0;
-
-    let exit = loop {
-        let chunk_result = stream.next().await;
-
-        // Check cancellation at the top of each iteration before processing the chunk.
-        // CancellationToken::is_cancelled() is a lock-free atomic read — no await needed.
-        if cancel_token.is_cancelled() {
-            break LoopExit::Cancelled;
-        }
-
-        let chunk = match chunk_result {
-            None => break LoopExit::Done, // stream exhausted — all bytes received
-            Some(Ok(c)) => c,
-            Some(Err(e)) => break LoopExit::NetworkError(format!("Network error: {e}")),
-        };
-
-        bytes_downloaded += chunk.len() as u64;
-
-        if let Err(e) = file.write_all(&chunk).await {
-            // Detect disk-full before falling through to the generic write error.
-            // OS error 112 is ERROR_DISK_FULL on Windows; 28 is ENOSPC on Linux/macOS.
-            let msg = if let Some(os_err) = e.raw_os_error() {
-                if os_err == 112 || os_err == 28 {
-                    "Not enough disk space to complete the download.".to_string()
-                } else {
-                    format!("Write error: {e}")
-                }
-            } else {
-                format!("Write error: {e}")
-            };
-            break LoopExit::WriteError(msg);
-        }
-
-        // Fire-and-forget progress event — a slow frontend cannot stall the download.
-        let _ = app_handle.emit("download-progress", serde_json::json!({
-            "itemId": item_id,
-            "title": title,
-            "bytesDownloaded": bytes_downloaded,
-            "totalBytes": total_bytes,
-        }));
-    };
-
-    // ── Error/cancel cleanup ──────────────────────────────────────────────────
-    // delete_partial() takes ownership of `file`, releases the OS handle via
-    // into_std().await, then calls remove_file — required order on Windows
-    // where an open handle blocks deletion.
-    match exit {
-        LoopExit::Cancelled => {
-            delete_partial(file, &file_path).await;
-            cancel_registry.lock().await.remove(&item_id);
-            let _ = app_handle.emit("download-cancelled", serde_json::json!({
-                "itemId": item_id,
-                "title": title,
-            }));
-            return Err("cancelled".to_string());
-        }
-        LoopExit::NetworkError(msg) | LoopExit::WriteError(msg) => {
-            delete_partial(file, &file_path).await;
-            cancel_registry.lock().await.remove(&item_id);
-            let _ = app_handle.emit("download-failed", serde_json::json!({
-                "itemId": item_id,
-                "title": title,
-                "error": msg.clone(),
-            }));
-            return Err(msg);
-        }
-        // Normal completion — fall through to the flush + registry upsert below.
-        LoopExit::Done => {}
-    }
-
-    // ── Normal completion ─────────────────────────────────────────────────────
-    // Flush pending write-buffer bytes, then move the async handle into a
-    // synchronous one so the OS file handle is released before metadata reads.
-    let flush_result = file.flush().await;
-    // into_std().await hands the file to the blocking thread pool; dropping the
-    // returned std::fs::File closes the OS handle immediately.
-    drop(file.into_std().await);
-
-    if let Err(e) = flush_result {
-        // Flush failed after all chunks were received — treat as a write failure.
-        let _ = std::fs::remove_file(&file_path);
-        cancel_registry.lock().await.remove(&item_id);
-        let msg = format!("Flush error: {e}");
-        let _ = app_handle.emit("download-failed", serde_json::json!({
-            "itemId": item_id,
-            "title": title,
-            "error": msg.clone(),
-        }));
-        return Err(msg);
-    }
 
     // ── ZIP extraction ────────────────────────────────────────────────────────
     // The ABS download endpoint returns a ZIP archive. Extract it into a
@@ -965,13 +993,10 @@ pub async fn download_item(
     // so a malformed/hostile id (separators, "..") cannot escape the downloads
     // root — same posture as the file_name sanitization above. Normal ABS ids
     // are alphanumeric UUIDs, so this is a no-op for well-formed servers.
-    let safe_item_dir: String = item_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') { c } else { '_' })
-        .collect();
+    let safe_item_dir = sanitize_path_component(&item_id);
     if safe_item_dir.is_empty() {
         let _ = std::fs::remove_file(&file_path);
-        cancel_registry.lock().await.remove(&item_id);
+        cancel_registry.lock().await.remove(&cancel_id);
         let msg = "Download failed: empty item id".to_string();
         let _ = app_handle.emit("download-failed", serde_json::json!({
             "itemId": item_id, "title": title, "error": msg,
@@ -1034,7 +1059,7 @@ pub async fn download_item(
             let _ = std::fs::remove_dir_all(&extract_dir); // partial extracted files
         }
         let _ = std::fs::remove_file(&file_path);      // the ZIP itself
-        cancel_registry.lock().await.remove(&item_id);
+        cancel_registry.lock().await.remove(&cancel_id);
         log::warn!(target: "skald::downloads",
             "download extraction failed for item {item_id}: {e}");
         let _ = app_handle.emit("download-failed", serde_json::json!({
@@ -1098,8 +1123,11 @@ pub async fn download_item(
     // Store the audio file path (or directory for multi-file books), not the ZIP.
     downloads::upsert_record(&dl_dir, downloads::DownloadRecord {
         item_id: item_id.clone(),
+        episode_id: None, // whole-item book download — see download_episode for podcasts
         title: title.clone(),
         author,
+        podcast_author: None, // books keep their author in `author`
+        published_at: None,    // books have no episode publish date
         file_path: playback_path.clone(),
         file_size,
         downloaded_at,
@@ -1108,7 +1136,7 @@ pub async fn download_item(
     })?;
 
     // Remove the cancellation token now that the download completed successfully.
-    cancel_registry.lock().await.remove(&item_id);
+    cancel_registry.lock().await.remove(&cancel_id);
 
     let _ = app_handle.emit("download-complete", serde_json::json!({
         "itemId": item_id,
@@ -1120,26 +1148,148 @@ pub async fn download_item(
     Ok(playback_path)
 }
 
+/// Streams a single podcast episode's audio file to local storage for offline
+/// playback. Unlike download_item (whole-item ZIP + extraction), this fetches one
+/// file verbatim via the ABS per-file endpoint
+/// `GET /api/items/{id}/file/{ino}/download` and stores it as-is. The registry
+/// record carries the episode id, so a podcast's episodes are tracked
+/// independently under one library-item id. Each episode gets its own directory
+/// (episodes/<item>/<episode>/) so sibling downloads never clobber each other and
+/// a single-episode removal deletes only its own folder.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn download_episode(
+    server_url: String,
+    item_id: String,
+    episode_id: String,
+    ino: String,              // the episode audioFile inode — addresses the file on the server
+    file_name: String,
+    title: String,            // episode title — progress events + registry
+    author: String,           // podcast title — registry (shown as the parent line)
+    podcast_author: Option<String>, // parent podcast's author — offline byline
+    published_at: Option<i64>, // episode publish date (Unix ms) — offline ordering/date
+    app_handle: tauri::AppHandle,
+    cancel_registry: tauri::State<'_, downloads::DownloadCancelRegistry>,
+) -> Result<String, String> {
+    // Refresh a near-expiry token before the download (same rationale as
+    // download_item) so a slow episode fetch doesn't fail on a stale token.
+    let token = crate::token_refresh::fresh_tokens(&server_url)
+        .await?
+        .effective()
+        .ok_or_else(|| "Not authenticated: no token stored".to_string())?
+        .to_string();
+
+    let dl_dir = downloads::downloads_dir()?;
+
+    // Per-episode directory under episodes/<item>/<episode>/. Both id components
+    // are server-originated, so sanitize before using them as path segments.
+    let safe_item = sanitize_path_component(&item_id);
+    let safe_episode = sanitize_path_component(&episode_id);
+    if safe_item.is_empty() || safe_episode.is_empty() {
+        return Err("Download failed: empty item or episode id".to_string());
+    }
+    let episode_dir = dl_dir.join("episodes").join(&safe_item).join(&safe_episode);
+    std::fs::create_dir_all(&episode_dir)
+        .map_err(|e| format!("Failed to create episode directory: {e}"))?;
+    let safe_name = file_name.replace(['/', '\\', ':'], "_");
+    let file_path = episode_dir.join(&safe_name);
+
+    let cancel_id = downloads::cancel_key(&item_id, Some(&episode_id));
+    let cancel_token = CancellationToken::new();
+    cancel_registry.lock().await.insert(cancel_id.clone(), cancel_token.clone());
+
+    log::info!(target: "skald::downloads",
+        "episode download start item={item_id} episode={episode_id} ino={ino}");
+
+    let client = crate::api::bounded_client();
+    let response = match client
+        .get(format!("{}/api/items/{}/file/{}/download",
+            server_url.trim_end_matches('/'), item_id, ino))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            cancel_registry.lock().await.remove(&cancel_id);
+            return Err(format!("Download request failed: {e}"));
+        }
+    };
+    if !response.status().is_success() {
+        cancel_registry.lock().await.remove(&cancel_id);
+        return Err(format!("Download failed: HTTP {}", response.status()));
+    }
+
+    let bytes = match stream_response_to_file(
+        response, &file_path, &dl_dir, &cancel_token, &app_handle,
+        &DownloadEvent {
+            item_id: &item_id, episode_id: Some(episode_id.as_str()), title: &title,
+            ino: Some(ino.as_str()), file_name: Some(file_name.as_str()),
+        },
+    ).await {
+        Ok(b) => b,
+        Err(e) => {
+            cancel_registry.lock().await.remove(&cancel_id);
+            return Err(e);
+        }
+    };
+
+    cancel_registry.lock().await.remove(&cancel_id);
+
+    // Prefer the on-disk size; fall back to the streamed byte count if the stat
+    // fails for any reason.
+    let file_size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(bytes);
+    let downloaded_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let playback_path = file_path.to_string_lossy().to_string();
+
+    downloads::upsert_record(&dl_dir, downloads::DownloadRecord {
+        item_id: item_id.clone(),
+        episode_id: Some(episode_id.clone()),
+        title: title.clone(),
+        author,
+        podcast_author,
+        published_at,
+        file_path: playback_path.clone(),
+        file_size,
+        downloaded_at,
+        server_deleted: false,
+    })?;
+
+    let _ = app_handle.emit("download-complete", serde_json::json!({
+        "itemId": item_id, "episodeId": episode_id, "title": title,
+    }));
+    log::info!(target: "skald::downloads",
+        "episode download complete item={item_id} episode={episode_id} bytes={file_size}");
+
+    Ok(playback_path)
+}
+
 /// Signals an in-progress download to abort on its next chunk boundary.
-/// The streaming loop in download_item polls the token at the start of each
-/// chunk iteration; on detection it deletes the partial file and emits
-/// download-cancelled. Safe to call when the item_id is not in the registry
-/// (download already complete or not started) — returns Ok in that case.
+/// The streaming loop polls the token at the start of each chunk iteration; on
+/// detection it deletes the partial file and emits download-cancelled. Pass the
+/// same (item_id, episode_id) used to start the download so the composite key
+/// resolves. Safe to call when the key is absent (download already complete or
+/// not started) — returns Ok in that case.
 #[tauri::command]
 pub async fn cancel_download(
     item_id: String,
+    episode_id: Option<String>,
     cancel_registry: tauri::State<'_, downloads::DownloadCancelRegistry>,
 ) -> Result<(), String> {
+    let key = downloads::cancel_key(&item_id, episode_id.as_deref());
     // Lock briefly to read the token and call cancel().
     // The streaming loop holds no lock during I/O, so contention here is negligible.
     let map = cancel_registry.lock().await;
-    if let Some(token) = map.get(&item_id) {
+    if let Some(token) = map.get(&key) {
         // Sets an atomic flag; the streaming loop detects it on the next iteration
         // and performs its own cleanup (file deletion, registry removal, event).
         token.cancel();
     }
-    // No error if item_id is absent — download may have already completed or
-    // the cancel arrived after the loop exited but before the token was removed.
+    // No error if the key is absent — download may have already completed or the
+    // cancel arrived after the loop exited but before the token was removed.
     Ok(())
 }
 
@@ -1174,13 +1324,17 @@ pub fn take_corrupt_persistence_notices() -> Vec<String> {
 /// deleted; callers should still remove the row from local state because the
 /// registry is already clean.
 #[tauri::command]
-pub fn remove_download(item_id: String) -> Result<(), String> {
+pub fn remove_download(item_id: String, episode_id: Option<String>) -> Result<(), String> {
     let dir = downloads::downloads_dir()?;
     let records = downloads::load_registry(&dir);
 
     // Capture any directory-removal error without short-circuiting —
     // the registry entry must be removed even when the files are already gone.
-    let dir_err = if let Some(record) = records.iter().find(|r| r.item_id == item_id) {
+    // A podcast episode's file lives in its own episodes/<item>/<episode>/ folder,
+    // so the walk-up-to-parent delete below removes only that episode.
+    let dir_err = if let Some(record) = records.iter()
+        .find(|r| r.item_id == item_id && r.episode_id.as_deref() == episode_id.as_deref())
+    {
         // The download registry stores the audio file path (or directory path for
         // multi-file books). The actual download lives in a directory named after
         // item_id that also contains the cover image and other extracted files.
@@ -1234,7 +1388,7 @@ pub fn remove_download(item_id: String) -> Result<(), String> {
     };
 
     // Always remove the registry entry so the downloads list stays consistent.
-    downloads::remove_record(&dir, &item_id)?;
+    downloads::remove_record(&dir, &item_id, episode_id.as_deref())?;
 
     // Propagate the directory error only after the registry is already clean.
     if let Some(e) = dir_err {
@@ -1352,7 +1506,10 @@ mod tests {
     fn record(item_id: &str, path: &std::path::Path) -> downloads::DownloadRecord {
         downloads::DownloadRecord {
             item_id: item_id.to_string(),
+            episode_id: None,
             title: "Test book".to_string(),
+            podcast_author: None,
+            published_at: None,
             author: "Test author".to_string(),
             file_path: path.to_string_lossy().into_owned(),
             file_size: 0,
@@ -1372,8 +1529,8 @@ mod tests {
         std::fs::create_dir_all(&multi_dir).unwrap();
         let records = vec![record("single", &single_file), record("multi", &multi_dir)];
 
-        let single = resolve_download_reveal_target(temp.path(), &records, "single").unwrap();
-        let multi = resolve_download_reveal_target(temp.path(), &records, "multi").unwrap();
+        let single = resolve_download_reveal_target(temp.path(), &records, "single", None).unwrap();
+        let multi = resolve_download_reveal_target(temp.path(), &records, "multi", None).unwrap();
 
         assert_eq!(single, DownloadRevealTarget::File(single_file));
         assert_eq!(multi, DownloadRevealTarget::Directory(multi_dir));
@@ -1387,7 +1544,7 @@ mod tests {
         std::fs::write(&outside_file, b"audio").unwrap();
         let records = vec![record("outside", &outside_file)];
 
-        let error = resolve_download_reveal_target(root.path(), &records, "outside").unwrap_err();
+        let error = resolve_download_reveal_target(root.path(), &records, "outside", None).unwrap_err();
 
         assert!(error.contains("outside the downloads folder"));
     }

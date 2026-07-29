@@ -313,7 +313,7 @@ export default function App() {
       <OnyxWash isDark={isDark} />
       {/* isOffline is true when the library loaded from disk cache (server unreachable);
           isUnencrypted flags a plain-http ABS connection (review L6 — visible, never blocked) */}
-      <Titlebar isDark={isDark} isOffline={st.isOffline} lastRefresh={st.lastLibraryRefresh} isUnencrypted={!!st.authToken && st.serverUrl.startsWith('http://')} trailing={<ActivityCenter st={st} />} />
+      <Titlebar isDark={isDark} isOffline={st.isOffline} lastRefresh={st.lastLibraryRefresh} isUnencrypted={!!st.authToken && st.serverUrl.startsWith('http://')} trailing={<ActivityCenter st={st} />} onRetry={async () => { await st.refreshLibrary(); }} />
 
       {/* Screen content area — sits below the 44px titlebar */}
       <div style={{

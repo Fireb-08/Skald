@@ -35,8 +35,21 @@ export function SectionHead({ title, subtitle }: SectionHeadProps) {
   );
 }
 
-export interface RowProps { label: string; hint?: string; children?: ReactNode; align?: 'center' | 'top'; }
-export function Row({ label, hint, children, align = 'center' }: RowProps) {
+export interface RowProps { label: string; hint?: string; children?: ReactNode; align?: 'center' | 'top'; stack?: boolean; }
+export function Row({ label, hint, children, align = 'center', stack = false }: RowProps) {
+  // Stacked variant: label/hint on their own line with the controls below,
+  // left-aligned and wrapping. Used for control groups too wide to sit beside
+  // the label (e.g. the 6 cover-size pills), which otherwise squeeze the label
+  // into a cramped wrap. Children render bare here (no SegGroup right-align).
+  if (stack) {
+    return (
+      <div style={{ padding: '16px 0', borderBottom: '1px solid var(--onyx-line)' }}>
+        <div style={{ fontSize: 13.5, color: 'var(--onyx-text)', fontWeight: 500 }}>{label}</div>
+        {hint && <div style={{ marginTop: 4, fontSize: 12, color: 'var(--onyx-text-mute)', maxWidth: 480, lineHeight: 1.45 }}>{hint}</div>}
+        <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 6 }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ display: 'flex', alignItems: align === 'top' ? 'flex-start' : 'center', justifyContent: 'space-between', padding: '16px 0', borderBottom: '1px solid var(--onyx-line)', gap: 24 }}>
       <div style={{ flex: 1, minWidth: 0 }}>

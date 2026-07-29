@@ -22,6 +22,7 @@ import PlaylistPicker from '../PlaylistPicker';
 import FileTrackInspectorModal from '../player/FileTrackInspectorModal';
 import ShareModal from '../ShareModal';
 import { shelfScrollDecision } from './scrollState';
+import { offlinePodcastItems } from '../../lib/offlinePodcasts';
 import { recentlyAddedItems } from '../../lib/recentlyAdded';
 // Shared series group key — the same normalization the client-derived Series
 // views (local + combined) use to build their groups, so drill-ins match.
@@ -561,6 +562,9 @@ export default function LibraryShelf({ st, items, sortMode, groupBySeries }: Lib
 
   const onContextMenu = (e: React.MouseEvent, item: LibraryItem) => {
     e.preventDefault();
+    // Podcast entries have no book actions — their per-episode menu lives on the
+    // detail screen. Suppress the book context menu so no wrong action is offered.
+    if ((item as { mediaType?: string }).mediaType === 'podcast') return;
     setSelectedId(item.id);
     st.setFocusedBookId(item.id);
     // clientX/Y, not pageX/Y: the menu is position:fixed (viewport-anchored),
@@ -577,11 +581,28 @@ export default function LibraryShelf({ st, items, sortMode, groupBySeries }: Lib
   const baseBooks = items ?? st.library;
   const effectiveSort = sortMode ?? st.librarySort;
   const effectiveGroupBySeries = groupBySeries ?? st.groupBySeries;
-  const sourceBooks = (st.contextFilter?.kind === 'series')
+  let sourceBooks = (st.contextFilter?.kind === 'series')
     ? (st.contextFilter.seriesId
         ? (seriesBooks ?? [])
         : baseBooks.filter(b => seriesGroupName(bookSeries(b)) === st.contextFilter?.value))
     : baseBooks;
+  // Offline, the base shelf is a cached snapshot of the server library — most of
+  // which has no audio on this device. Showing all of it presents books that
+  // can't actually play offline (they'd attempt a server session and fail), so
+  // restrict the offline shelf to what is genuinely available: downloaded books
+  // (a book-level download record) and true local-library files (localPath).
+  // Then append the downloaded-podcast entry tiles (always available; plain
+  // library view only — series/collection contexts are book scopes). Online,
+  // everything shows and podcasts live in their own library.
+  if (st.isOffline) {
+    sourceBooks = sourceBooks.filter(b =>
+      !!b.localPath || st.downloads.some(d => d.itemId === b.id && !d.episodeId),
+    );
+    if (!st.contextFilter) {
+      const podcasts = offlinePodcastItems(st.downloads).filter(p => !sourceBooks.some(b => b.id === p.id));
+      sourceBooks = [...sourceBooks, ...podcasts];
+    }
+  }
   // In-flight series drill-in: the body source is deliberately empty while the
   // server fetch resolves, so show a loading placeholder instead of the
   // misleading "No titles match" empty state (UI Bugs Follow-up, 2026-07-08).
@@ -700,6 +721,13 @@ export default function LibraryShelf({ st, items, sortMode, groupBySeries }: Lib
   };
 
   const onActionMenu = (trigger: HTMLElement, item: LibraryItem) => {
+    // Podcast entries: open the detail (per-episode actions live there) instead
+    // of the book action menu.
+    if ((item as { mediaType?: string }).mediaType === 'podcast') {
+      st.setPodcastDetailId(item.id);
+      st.setScreen('podcast');
+      return;
+    }
     const rect = trigger.getBoundingClientRect();
     setSelectedId(item.id);
     st.setFocusedBookId(item.id);
@@ -707,6 +735,14 @@ export default function LibraryShelf({ st, items, sortMode, groupBySeries }: Lib
   };
 
   const openBook = (id: string) => {
+    // Podcast entries (e.g. the offline downloaded-podcast stand-ins) open their
+    // episode list rather than the book focus/player flow.
+    const item = shelfBooks.find(b => b.id === id);
+    if ((item as { mediaType?: string } | undefined)?.mediaType === 'podcast') {
+      st.setPodcastDetailId(id);
+      st.setScreen('podcast');
+      return;
+    }
     if (selectedId === id) {
       st.setScreen('player');
     } else {
