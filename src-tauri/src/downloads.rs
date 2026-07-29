@@ -10,9 +10,22 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-// Maps item_id to a CancellationToken so any in-progress download can be
-// cancelled by its item_id from the cancel_download command.
+// Maps a download key to a CancellationToken so any in-progress download can be
+// cancelled from the cancel_download command. The key is composite
+// (see cancel_key) so a podcast's sibling episodes — which share one item_id —
+// never collide on a single token.
 pub type DownloadCancelRegistry = Arc<Mutex<HashMap<String, CancellationToken>>>;
+
+// Build the cancel-registry / progress-event key for a download. Books pass
+// episode_id=None and key purely on the item id; a podcast episode folds its
+// episode id in so two episodes of the same podcast are cancellable
+// independently and don't overwrite each other's token.
+pub fn cancel_key(item_id: &str, episode_id: Option<&str>) -> String {
+    match episode_id {
+        Some(ep) => format!("{item_id}|{ep}"),
+        None => item_id.to_string(),
+    }
+}
 
 // Resolves the downloads directory. Delegates to the paths module so a user
 // relocation (set_downloads_dir) is honoured here too; the default remains
@@ -27,8 +40,26 @@ pub fn downloads_dir() -> Result<std::path::PathBuf, String> {
 #[serde(rename_all = "camelCase")]
 pub struct DownloadRecord {
     pub item_id: String,
+    // Set for a downloaded podcast episode; None for a book (whole-item download).
+    // The registry is keyed by (item_id, episode_id) so a podcast's episodes are
+    // distinct records under one library-item id. #[serde(default)] keeps existing
+    // book-only registry files (written before episode support) deserialising fine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode_id: Option<String>,
     pub title: String,
     pub author: String,
+    // For a podcast episode: the parent podcast's author (ABS metadata.author),
+    // captured at download so the offline shelf can show a byline with no server.
+    // None for books (their author is in `author`) and for episodes downloaded
+    // before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub podcast_author: Option<String>,
+    // For a podcast episode: the episode's own publish date (Unix ms), captured at
+    // download so offline ordering and the row date reflect the episode's real
+    // date — not its download time. None for books and for episodes downloaded
+    // before this field existed (those fall back to downloaded_at).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<i64>,
     pub file_path: String,  // absolute path to the downloaded audio file on disk
     pub file_size: u64,     // bytes — used to compute storage totals in the UI
     pub downloaded_at: i64, // Unix timestamp ms — shown as relative time in the Downloads list
@@ -127,35 +158,43 @@ pub fn save_registry(downloads_dir: &Path, records: &[DownloadRecord]) -> Result
     Ok(())
 }
 
-// Add or replace the record for the given item_id.
-// If an entry for this item already exists it is updated in place; otherwise
-// it is appended, so the list stays insertion-ordered by time for Phase F.
+// Add or replace the record for the given (item_id, episode_id) identity.
+// If an entry for this exact book/episode already exists it is updated in place;
+// otherwise it is appended, so the list stays insertion-ordered by time for Phase F.
+// Matching on the episode id too keeps a podcast's sibling episodes as separate
+// records under one library-item id.
 pub fn upsert_record(downloads_dir: &Path, record: DownloadRecord) -> Result<(), String> {
     let mut records = load_registry(downloads_dir);
-    match records.iter().position(|r| r.item_id == record.item_id) {
+    match records
+        .iter()
+        .position(|r| r.item_id == record.item_id && r.episode_id == record.episode_id)
+    {
         Some(pos) => records[pos] = record,
         None => records.push(record),
     }
     save_registry(downloads_dir, &records)
 }
 
-// Update the server_deleted flag for a single registry entry without touching
-// the other fields. Called when a library-item-removed socket event fires for
-// a book that has a local download — the file is kept but flagged as orphaned.
+// Update the server_deleted flag without touching the other fields. Called when
+// a library-item-removed socket event fires for an item that has local
+// download(s) — the files are kept but flagged as orphaned. A removed podcast
+// takes all of its downloaded episodes with it, so every record sharing the
+// item id is flagged (books have exactly one such record).
 pub fn set_server_deleted(downloads_dir: &Path, item_id: &str, deleted: bool) -> Result<(), String> {
     let mut records = load_registry(downloads_dir);
     // Update in place — avoids overwriting fields we don't have in this call context.
-    if let Some(record) = records.iter_mut().find(|r| r.item_id == item_id) {
+    for record in records.iter_mut().filter(|r| r.item_id == item_id) {
         record.server_deleted = deleted;
     }
     save_registry(downloads_dir, &records)
 }
 
-// Remove a record by item_id.
-// No-op and not an error if the id is not in the registry.
-pub fn remove_record(downloads_dir: &Path, item_id: &str) -> Result<(), String> {
+// Remove the record for a single (item_id, episode_id) identity. Pass
+// episode_id=None to remove a book; Some(id) to remove one podcast episode
+// while leaving its siblings in place. No-op and not an error if absent.
+pub fn remove_record(downloads_dir: &Path, item_id: &str, episode_id: Option<&str>) -> Result<(), String> {
     let mut records = load_registry(downloads_dir);
-    records.retain(|r| r.item_id != item_id);
+    records.retain(|r| !(r.item_id == item_id && r.episode_id.as_deref() == episode_id));
     save_registry(downloads_dir, &records)
 }
 
@@ -477,11 +516,29 @@ mod tests {
     fn record(id: &str) -> DownloadRecord {
         DownloadRecord {
             item_id: id.to_string(),
+            episode_id: None,
             title: format!("Title {id}"),
             author: "Author".to_string(),
+            podcast_author: None,
+            published_at: None,
             file_path: format!("C:/nowhere/{id}.m4b"),
             file_size: 123,
             downloaded_at: 1_000,
+            server_deleted: false,
+        }
+    }
+
+    fn episode_record(item_id: &str, episode_id: &str) -> DownloadRecord {
+        DownloadRecord {
+            item_id: item_id.to_string(),
+            episode_id: Some(episode_id.to_string()),
+            title: format!("{item_id} / {episode_id}"),
+            author: "Podcast".to_string(),
+            podcast_author: Some("Podcast Author".to_string()),
+            published_at: None,
+            file_path: format!("C:/nowhere/{item_id}/{episode_id}.mp3"),
+            file_size: 456,
+            downloaded_at: 2_000,
             server_deleted: false,
         }
     }
@@ -578,11 +635,46 @@ mod tests {
         assert!(out.iter().find(|r| r.item_id == "a").unwrap().server_deleted);
         assert!(!out.iter().find(|r| r.item_id == "b").unwrap().server_deleted);
 
-        remove_record(dir.path(), "a").unwrap();
-        remove_record(dir.path(), "missing").unwrap(); // no-op, not an error
+        remove_record(dir.path(), "a", None).unwrap();
+        remove_record(dir.path(), "missing", None).unwrap(); // no-op, not an error
         let out = load_registry(dir.path());
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].item_id, "b");
+    }
+
+    // A podcast's episodes share one item_id but must be independent records:
+    // upsert keys on (item_id, episode_id), and removing one leaves its siblings.
+    #[test]
+    fn registry_keeps_sibling_episodes_distinct() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_record(dir.path(), episode_record("pod", "ep-1")).unwrap();
+        upsert_record(dir.path(), episode_record("pod", "ep-2")).unwrap();
+        // An update to one episode must replace, not duplicate.
+        upsert_record(
+            dir.path(),
+            DownloadRecord { title: "updated".to_string(), ..episode_record("pod", "ep-1") },
+        )
+        .unwrap();
+        assert_eq!(load_registry(dir.path()).len(), 2, "two distinct episode records");
+
+        // Removing one episode spares the sibling; a book-style None remove does
+        // not touch episode rows.
+        remove_record(dir.path(), "pod", None).unwrap();
+        assert_eq!(load_registry(dir.path()).len(), 2, "None does not match episode rows");
+        remove_record(dir.path(), "pod", Some("ep-1")).unwrap();
+        let out = load_registry(dir.path());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].episode_id.as_deref(), Some("ep-2"));
+    }
+
+    // A removed podcast flags every downloaded episode as orphaned, not just one.
+    #[test]
+    fn server_deleted_flags_all_sibling_episodes() {
+        let dir = tempfile::tempdir().unwrap();
+        upsert_record(dir.path(), episode_record("pod", "ep-1")).unwrap();
+        upsert_record(dir.path(), episode_record("pod", "ep-2")).unwrap();
+        set_server_deleted(dir.path(), "pod", true).unwrap();
+        assert!(load_registry(dir.path()).iter().all(|r| r.server_deleted));
     }
 
     #[test]

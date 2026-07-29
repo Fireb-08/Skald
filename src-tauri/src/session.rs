@@ -1162,7 +1162,8 @@ impl SessionManager {
         // fails (unlikely) so the tick loop still runs without queue writes.
         let dl_dir_tick     = crate::downloads::downloads_dir().ok();
         // Local-library items persist progress to the SQLite catalog; downloaded
-        // ABS books persist to the offline queue (which later flushes to the server).
+        // ABS books and podcast episodes persist to the offline queue (which later
+        // flushes to the server, episode id included).
         let local_library_tick = local_library;
         let downloaded_revision_tick = self.local_downloaded_revision.clone();
         // Listening-stats accumulation — the credit channel decides where the
@@ -1192,7 +1193,10 @@ impl SessionManager {
                     let revision = revision.lock().unwrap_or_else(|error| error.into_inner());
                     let entry = crate::downloads::OfflineProgressEntry {
                         item_id: item_id_tick.clone(),
-                        episode_id: None,
+                        // Some for a downloaded podcast episode (set by play_local
+                        // from the episodeId), None for a downloaded book — so the
+                        // reconnect flush targets the right media-progress record.
+                        episode_id: episode_id_tick.clone(),
                         current_time: pos,
                         duration: dur,
                         progress: if dur > 0.0 { pos / dur } else { 0.0 },

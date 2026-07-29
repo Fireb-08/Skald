@@ -6,13 +6,21 @@
 // cancel button remains clickable.
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { cancelDownload, downloadItem } from '../../api/abs';
+import { cancelDownload, downloadItem, downloadEpisode } from '../../api/abs';
 import { log } from '../../lib/log';
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace";
 
-// Shape of a single active download tracked in local state.
+// Cards are keyed by (itemId, episodeId) so a podcast's sibling episodes — which
+// share one itemId — never overwrite each other's card. Books have no episodeId.
+const dlKey = (itemId: string, episodeId?: string | null): string =>
+  episodeId ? `${itemId}|${episodeId}` : itemId;
+
+// Shape of a single active download tracked in local state. Carries the identity
+// so the cancel button can address the right (item, episode).
 interface ProgressEntry {
+  itemId: string;
+  episodeId?: string | null;
   title: string;
   bytesDownloaded: number;
   totalBytes: number; // 0 when the server did not send Content-Length
@@ -21,6 +29,7 @@ interface ProgressEntry {
 // Mirrors the Rust serde_json payload for "download-progress".
 interface DownloadProgressPayload {
   itemId: string;
+  episodeId?: string | null;
   title: string;
   bytesDownloaded: number;
   totalBytes: number;
@@ -30,14 +39,20 @@ interface DownloadProgressPayload {
 // "download-cancelled" (same shape — both carry itemId and title).
 interface DownloadDonePayload {
   itemId: string;
+  episodeId?: string | null;
   title: string;
 }
 
-// Mirrors the Rust serde_json payload for "download-failed".
+// Mirrors the Rust serde_json payload for "download-failed". For an episode
+// failure the payload also carries ino/fileName so RETRY can re-issue the
+// episode download (books omit them and rebuild from the title).
 interface DownloadFailedPayload {
   itemId: string;
+  episodeId?: string | null;
   title: string;
   error: string;
+  ino?: string | null;
+  fileName?: string | null;
 }
 
 export interface DownloadProgressToastProps {
@@ -71,21 +86,22 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
 
     // Update the progress bar on every chunk that arrives from Rust.
     listen<DownloadProgressPayload>('download-progress', event => {
-      const { itemId, title, bytesDownloaded, totalBytes } = event.payload;
+      const { itemId, episodeId, title, bytesDownloaded, totalBytes } = event.payload;
+      const key = dlKey(itemId, episodeId);
       setDownloads(prev => {
         const next = new Map(prev);
-        next.set(itemId, { title, bytesDownloaded, totalBytes });
+        next.set(key, { itemId, episodeId, title, bytesDownloaded, totalBytes });
         return next;
       });
-      setFailed(prev => { const next = new Map(prev); next.delete(itemId); return next; });
+      setFailed(prev => { const next = new Map(prev); next.delete(key); return next; });
     }).then(fn => { unlistenProgress = fn; });
 
     // Remove the completed entry and fire the success callback.
     listen<DownloadDonePayload>('download-complete', event => {
-      const { itemId, title } = event.payload;
+      const { itemId, episodeId, title } = event.payload;
       setDownloads(prev => {
         const next = new Map(prev);
-        next.delete(itemId);
+        next.delete(dlKey(itemId, episodeId));
         return next;
       });
       onComplete(title);
@@ -93,10 +109,10 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
 
     // Remove the cancelled entry and fire the cancel callback for the info toast.
     listen<DownloadDonePayload>('download-cancelled', event => {
-      const { itemId, title } = event.payload;
+      const { itemId, episodeId, title } = event.payload;
       setDownloads(prev => {
         const next = new Map(prev);
-        next.delete(itemId);
+        next.delete(dlKey(itemId, episodeId));
         return next;
       });
       onCancel(title);
@@ -104,13 +120,14 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
 
     // Remove the failed entry and fire the error callback.
     listen<DownloadFailedPayload>('download-failed', event => {
-      const { itemId, title, error } = event.payload;
+      const { itemId, episodeId, title, error } = event.payload;
+      const key = dlKey(itemId, episodeId);
       setDownloads(prev => {
         const next = new Map(prev);
-        next.delete(itemId);
+        next.delete(key);
         return next;
       });
-      setFailed(prev => { const next = new Map(prev); next.set(event.payload.itemId, event.payload); return next; });
+      setFailed(prev => { const next = new Map(prev); next.set(key, event.payload); return next; });
       onFailed(title, error);
     }).then(fn => { unlistenFailed = fn; });
 
@@ -142,7 +159,7 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
       gap: 8,
       pointerEvents: 'none',
     }}>
-      {Array.from(downloads.entries()).map(([itemId, { title, bytesDownloaded, totalBytes }]) => {
+      {Array.from(downloads.entries()).map(([key, { itemId, episodeId, title, bytesDownloaded, totalBytes }]) => {
         // pct is null when Content-Length was absent — frontend shows indeterminate bar.
         const pct = totalBytes > 0
           ? Math.min(100, (bytesDownloaded / totalBytes) * 100)
@@ -150,7 +167,7 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
 
         return (
           // Re-enable pointer events on the card itself so the cancel button works.
-          <div key={itemId} style={{
+          <div key={key} style={{
             minWidth: 260,
             maxWidth: 420,
             background: 'var(--onyx-panel2)',
@@ -188,7 +205,7 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
                   download-cancelled event will dismiss this card once the partial
                   file has been cleaned up. */}
               <button
-                onClick={() => cancelDownload(itemId).catch(e => log.error('downloads', 'cancelDownload failed', { itemId, err: String(e) }))}
+                onClick={() => cancelDownload(itemId, episodeId ?? undefined).catch(e => log.error('downloads', 'cancelDownload failed', { itemId, episodeId, err: String(e) }))}
                 title="Cancel download"
                 style={{
                   flexShrink: 0,
@@ -249,13 +266,17 @@ export default function DownloadProgressToast({ serverUrl, onComplete, onCancel,
           </div>
         );
       })}
-      {Array.from(failed.values()).map(entry => (
-        <div key={entry.itemId} style={{ minWidth: 260, maxWidth: 420, background: 'var(--onyx-panel2)', border: '1px solid rgba(220,100,100,0.45)', borderRadius: 8, padding: '11px 14px', pointerEvents: 'auto' }}>
+      {Array.from(failed.entries()).map(([key, entry]) => (
+        <div key={key} style={{ minWidth: 260, maxWidth: 420, background: 'var(--onyx-panel2)', border: '1px solid rgba(220,100,100,0.45)', borderRadius: 8, padding: '11px 14px', pointerEvents: 'auto' }}>
           <div style={{ fontSize: 13, color: 'var(--onyx-text)', marginBottom: 7 }}>Download failed: “{entry.title}”</div>
           <button onClick={() => {
-            setFailed(prev => { const next = new Map(prev); next.delete(entry.itemId); return next; });
-            downloadItem(serverUrl, entry.itemId, `${entry.title}.zip`, entry.title, '')
-              .catch(e => log.error('downloads', 'retry download command failed', { itemId: entry.itemId, err: String(e) }));
+            setFailed(prev => { const next = new Map(prev); next.delete(key); return next; });
+            // Episode retries re-issue the per-file episode download (needs the
+            // echoed ino + fileName); book retries rebuild the whole-item ZIP.
+            const retry = entry.episodeId && entry.ino
+              ? downloadEpisode(serverUrl, entry.itemId, entry.episodeId, entry.ino, entry.fileName ?? `${entry.title}.mp3`, entry.title, '')
+              : downloadItem(serverUrl, entry.itemId, `${entry.title}.zip`, entry.title, '');
+            retry.catch(e => log.error('downloads', 'retry download command failed', { itemId: entry.itemId, episodeId: entry.episodeId, err: String(e) }));
           }} style={{ padding: '5px 10px', borderRadius: 5, border: '1px solid var(--onyx-accent-edge)', background: 'var(--onyx-accent-dim)', color: 'var(--onyx-accent)', cursor: 'pointer', fontFamily: MONO, fontSize: 10 }}>RETRY</button>
         </div>
       ))}

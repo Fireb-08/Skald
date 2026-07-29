@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import lyreIcon from '../../assets/lyre.png';
 
@@ -20,6 +20,10 @@ export interface TitlebarProps {
   // HTTP is a legitimate self-hosted setup, so this only surfaces the missing
   // transport encryption — it never blocks the connection.
   isUnencrypted?: boolean;
+  // Re-attempt the server from the OFFLINE pill. Should re-fetch the library and
+  // clear offline mode on success (and stay offline if the server is still down).
+  // Returns a promise so the button can show a "Retrying…" state until it settles.
+  onRetry?: () => void | Promise<void>;
 }
 
 type DragStyle = CSSProperties & { WebkitAppRegion?: string };
@@ -63,9 +67,15 @@ const RESIZE_EDGES: Array<{
   { direction: 'SouthEast', style: { bottom: 0, right: 0, width: 10, height: 10, cursor: 'nwse-resize' } },
 ];
 
-export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted, trailing }: TitlebarProps) {
+export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRefresh, isUnencrypted, trailing, onRetry }: TitlebarProps) {
   const themeName = isDark ? 'Onyx' : 'Folio';
   const mono = "'JetBrains Mono', ui-monospace, monospace";
+  const [retrying, setRetrying] = useState(false);
+  const retry = async () => {
+    if (retrying || !onRetry) return;
+    setRetrying(true);
+    try { await onRetry(); } finally { setRetrying(false); }
+  };
 
   const bar: DragStyle = {
     position: 'absolute', top: 0, left: 0, right: 0, height: 44,
@@ -145,11 +155,35 @@ export default function Titlebar({ subtitle, isDark, minimal, isOffline, lastRef
             color: '#d4834a',                       // amber warning tone
             border: '1px solid rgba(212,131,74,0.4)',
             borderRadius: 4,
-            padding: '2px 6px',
+            padding: '2px 4px 2px 6px',
             background: 'rgba(212,131,74,0.08)',
             lineHeight: 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
           }}>
-            offline{lastRefresh ? ` · refreshed ${new Date(lastRefresh).toLocaleString()}` : ''}
+            <span>offline{lastRefresh ? ` · refreshed ${new Date(lastRefresh).toLocaleString()}` : ''}</span>
+            {onRetry && (
+              <button
+                onClick={retry}
+                disabled={retrying}
+                title="Try to reconnect to your server"
+                style={{
+                  // no-drag so the click lands (the titlebar itself is a drag region).
+                  WebkitAppRegion: 'no-drag',
+                  fontFamily: mono, fontSize: 9, letterSpacing: '0.1em',
+                  textTransform: 'uppercase' as const,
+                  color: '#d4834a',
+                  border: '1px solid rgba(212,131,74,0.5)',
+                  borderRadius: 3,
+                  padding: '1px 5px',
+                  background: 'rgba(212,131,74,0.12)',
+                  cursor: retrying ? 'default' : 'pointer',
+                  opacity: retrying ? 0.6 : 1,
+                  lineHeight: 1,
+                } as DragStyle}
+              >{retrying ? 'Retrying…' : 'Retry'}</button>
+            )}
           </div>
         )}
         {/* Transport-encryption indicator (review L6) — same amber family as

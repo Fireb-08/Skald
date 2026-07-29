@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, Dispatch, SetStateAction } fr
 import { listen } from '@tauri-apps/api/event';
 import type { LibraryItem, MediaProgress, ListeningStats, Bookmark as AbsBookmark, User, UserPermissions, DownloadRecord, ServerSettings, Task, Library, PodcastEpisode } from '../api/abs';
 import { type AdvFilter, type SearchScope, EMPTY_ADV_FILTER } from '../lib/shelfFilters';
-import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, saveChapterCache, loadChapterCache, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
+import { fetchLibraries, fetchLibraryItems, fetchItem, saveToken, fetchListeningStats, getMe, getDownloads, takeCorruptPersistenceNotices, saveLibraryCache, loadLibraryCache, flushOfflineProgress, listOfflineProgress, saveChapterCache, loadChapterCache, pauseAudio, seekAudio, downloadItem, removeDownload, fetchServerSettings, getLocalLibraries, getLocalLibraryItems, getLocalLibraryProgress, scanLocalLibrary, getLocalPodcastItems } from '../api/abs';
 import { log } from '../lib/log';
 // The one paused→playing coordinator, shared with the transport controls. Safe
 // to import here: playbook.ts takes only the OnyxState *type* back, so nothing
@@ -14,6 +14,7 @@ import { ALL_LIBRARIES_ID, allLibrariesShelf, loadAllLibrarySources, type AllLib
 import { useLiveSync, type PlaybackSyncConflict, type SyncHealth } from './useLiveSync';
 import { prependActivity } from '../lib/activity';
 import { readLastRefresh, writeLastRefresh } from '../lib/offlineFreshness';
+import { offlinePodcastItems } from '../lib/offlinePodcasts';
 
 export type { ServerSettings };
 
@@ -794,6 +795,27 @@ export function useOnyxState(): OnyxState {
       })
       .catch(e => log.error('downloads', 'initial registry load failed', { err: String(e) }));
 
+    // Hydrate mediaProgress from the offline queue so downloaded books/episodes
+    // show their resume position + percentage before (and without) any server
+    // fetch. Merged as LOWER priority than whatever is already present, so the
+    // server payload (applyServerProgress) and live tick always win when online.
+    listOfflineProgress()
+      .then(entries => {
+        if (!entries.length) return;
+        const mapped: MediaProgress[] = entries.map(e => ({
+          id: e.episodeId ? `${e.itemId}-${e.episodeId}` : e.itemId,
+          libraryItemId: e.itemId,
+          episodeId: e.episodeId ?? null,
+          duration: e.duration,
+          currentTime: e.currentTime,
+          progress: e.progress,
+          isFinished: e.isFinished,
+          lastUpdate: e.recordedAt,
+        }));
+        setMediaProgress(prev => mergeProgress(mapped, prev));
+      })
+      .catch(e => log.error('downloads', 'offline progress hydrate failed', { err: String(e) }));
+
     // Re-load whenever a download completes. The download-complete event fires
     // after ZIP extraction and registry write, so getDownloads() returns the
     // updated record immediately.
@@ -991,6 +1013,10 @@ export function useOnyxState(): OnyxState {
 
   useEffect(() => {
     if (!currentBookId) { setCurrentBookChapters([]); return; }
+    // A podcast episode carries its own chapters on the episode object (the Player
+    // uses those), so skip this book-item chapter fetch entirely — for a
+    // downloaded episode it would otherwise hit the server and fail offline.
+    if (currentEpisodeId) { setCurrentBookChapters([]); return; }
     // Local-library items already carry their chapters from the scan — use them
     // directly and skip the (server-bound, would-fail) fetchItem path entirely.
     const localItem = library.find(b => b.id === currentBookId);
@@ -1274,8 +1300,14 @@ export function useOnyxState(): OnyxState {
   // Prefer the active library's copy; fall back to the playing-item snapshot when
   // the playing item lives in another library (so the player/mini stay correct
   // after a library switch), then to the first item as a last resort.
-  const currentBook  = library.find(b => b.id === currentBookId) ?? playingItem ?? library[0];
-  const focusedBook  = library.find(b => b.id === focusedBookId) ?? library[0];
+  // Offline, the cached server library has no entry for a downloaded podcast, so
+  // fold the synthetic podcast items in — otherwise currentBook/focusedBook fall
+  // back to library[0] (a book) and the Player renders the episode as that book.
+  const resolveLibrary = isOffline
+    ? [...library, ...offlinePodcastItems(downloads).filter(p => !library.some(b => b.id === p.id))]
+    : library;
+  const currentBook  = resolveLibrary.find(b => b.id === currentBookId) ?? playingItem ?? resolveLibrary[0];
+  const focusedBook  = resolveLibrary.find(b => b.id === focusedBookId) ?? resolveLibrary[0];
   // Total duration for the transport. Books carry an authoritative media.duration.
   // Podcast items do not (duration is per-episode), so use the playing episode's
   // duration, falling back to the duration LibVLC reports via playback-tick once
@@ -1331,10 +1363,29 @@ export function useOnyxState(): OnyxState {
     serverUrlRef.current        = serverUrl;
   });
 
+  // Episode-finished observer. Fired once when a downloaded podcast episode
+  // reaches its end (see the tick listener). Honors the same opt-in as books
+  // (Settings → Downloads → Behaviour, `onyx.downloads.keepAfterFinish`): default
+  // is KEEP (key absent or 'true'); only 'false' removes the local copy on finish.
+  // Best-effort — a failure (e.g. the file still briefly held by LibVLC) is logged
+  // and the record is left for a later prune, never thrown.
+  const handleEpisodeFinished = useCallback((itemId: string, episodeId: string) => {
+    const keep = localStorage.getItem('onyx.downloads.keepAfterFinish') !== 'false';
+    if (!keep && downloadsRef.current.some(d => d.itemId === itemId && d.episodeId === episodeId)) {
+      removeDownload(itemId, episodeId)
+        .then(() => {
+          setDownloads(prev => prev.filter(d => !(d.itemId === itemId && d.episodeId === episodeId)));
+          log.info('downloads', 'auto-removed finished episode download', { itemId, episodeId });
+        })
+        .catch(e => log.warn('downloads', 'auto-remove finished episode failed', { err: String(e) }));
+    }
+  // Reads via refs / stable setters → safe to memoize once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Book-finished observer (Settings → Downloads → Behaviour). Fired once when a
-  // book reaches its end (see the tick listener). Episodes are excluded (the
-  // download registry is book-only). Both actions are best-effort and gated on
-  // their opt-in toggles; failures are logged, never thrown.
+  // book reaches its end (see the tick listener). Both actions are best-effort and
+  // gated on their opt-in toggles; failures are logged, never thrown.
   const handleBookFinished = useCallback((itemId: string) => {
     // A4 — remove the local download after finishing, unless the user keeps them.
     // Default is KEEP (key absent or 'true'); only 'false' triggers removal.
@@ -1379,17 +1430,21 @@ export function useOnyxState(): OnyxState {
         setPlaying(payload.isPlaying);
         if (payload.duration > 0) setTickDuration(payload.duration);
 
-        // Book-finished observer (auto-download-next / remove-on-finish). The tick
+        // Finished observer (auto-download-next / remove-on-finish). The tick
         // commits currentTime = duration on a true end (see session.rs), giving one
         // uniform finish signal across online / downloaded / local playback. Books
-        // only (episodes are not in the download registry); fire once per finish.
-        const finishId = currentBookIdRef.current;
-        if (finishId && !currentEpisodeIdRef.current && payload.duration > 0) {
+        // and downloaded episodes are handled separately; the guard key folds the
+        // episode id in so an episode finish isn't confused with its podcast.
+        const finishBookId = currentBookIdRef.current;
+        const finishEpId = currentEpisodeIdRef.current;
+        if (finishBookId && payload.duration > 0) {
+          const finishKey = finishEpId ? `${finishBookId}|${finishEpId}` : finishBookId;
           const atEnd = payload.currentTime >= payload.duration - 1.5;
-          if (atEnd && finishedHandledRef.current !== finishId) {
-            finishedHandledRef.current = finishId;
-            handleBookFinished(finishId);
-          } else if (!atEnd && finishedHandledRef.current === finishId) {
+          if (atEnd && finishedHandledRef.current !== finishKey) {
+            finishedHandledRef.current = finishKey;
+            if (finishEpId) handleEpisodeFinished(finishBookId, finishEpId);
+            else handleBookFinished(finishBookId);
+          } else if (!atEnd && finishedHandledRef.current === finishKey) {
             finishedHandledRef.current = ''; // re-armed (restarted / scrubbed back)
           }
         }

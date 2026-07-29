@@ -23,9 +23,10 @@ export function revealDownloadsDir(): Promise<void> {
 }
 
 /** Reveal a completed download resolved from the backend registry. Single-file
- *  books are selected in Explorer; multi-file books open their directory. */
-export function revealDownloadLocation(itemId: string): Promise<void> {
-  return invoke('reveal_download_location', { itemId });
+ *  books/episodes are selected in Explorer; multi-file books open their directory.
+ *  Pass episodeId to reveal a specific downloaded podcast episode. */
+export function revealDownloadLocation(itemId: string, episodeId?: string): Promise<void> {
+  return invoke('reveal_download_location', { itemId, episodeId });
 }
 
 /** Relocate the downloads root: moves existing files, repoints the registry, and
@@ -50,8 +51,18 @@ export function revealPath(path: string): Promise<void> {
 // Mirrors src-tauri/src/downloads.rs DownloadRecord (camelCase via serde rename_all).
 export interface DownloadRecord {
   itemId: string;
+  // Set for a downloaded podcast episode; absent for a book (whole-item download).
+  // The registry is keyed by (itemId, episodeId), so look downloaded episodes up by
+  // BOTH fields — matching on itemId alone would return an arbitrary sibling episode.
+  episodeId?: string | null;
   title: string;
   author: string;
+  // For a podcast episode: the parent podcast's author (metadata.author),
+  // captured at download so the offline shelf can show a byline. Absent for books.
+  podcastAuthor?: string | null;
+  // For a podcast episode: the episode's own publish date (Unix ms), captured at
+  // download so offline ordering/date use the real date, not the download time.
+  publishedAt?: number | null;
   filePath: string;    // absolute path to the audio file on disk
   fileSize: number;    // bytes — used for storage totals
   downloadedAt: number; // Unix ms — used to show relative time
@@ -74,6 +85,27 @@ export function downloadItem(
   return invoke('download_item', { serverUrl, itemId, fileName, title, author });
 }
 
+/** Streams a single podcast episode's audio file to local storage for offline
+ *  playback. Fetches GET /api/items/{id}/file/{ino}/download (one file, no ZIP)
+ *  and records it under (itemId, episodeId) in the downloads registry. Emits the
+ *  same download-progress/-complete/-failed/-cancelled events as downloadItem,
+ *  with an `episodeId` field on each payload. `ino` is the episode's audioFile
+ *  inode (addresses the file on the server); `title` is the episode title and
+ *  `author` the podcast title (shown as the parent line in the Downloads list). */
+export function downloadEpisode(
+  serverUrl: string,
+  itemId: string,
+  episodeId: string,
+  ino: string,
+  fileName: string,
+  title: string,
+  author: string,
+  podcastAuthor?: string | null,
+  publishedAt?: number | null,
+): Promise<string> {
+  return invoke('download_episode', { serverUrl, itemId, episodeId, ino, fileName, title, author, podcastAuthor, publishedAt });
+}
+
 /** Returns all records in the downloads registry.
  *  Used by Settings → Downloads on mount to populate the list. */
 export function getDownloads(): Promise<DownloadRecord[]> {
@@ -90,9 +122,11 @@ export function takeCorruptPersistenceNotices(): Promise<string[]> {
 
 /** Deletes the audio file from disk and removes its registry entry.
  *  Returns an error if the file was already gone (registry still cleaned up).
- *  Used by the delete button in Settings → Downloads. */
-export function removeDownload(itemId: string): Promise<void> {
-  return invoke('remove_download', { itemId });
+ *  Pass episodeId to remove a single downloaded podcast episode (leaving its
+ *  siblings in place). Used by the delete button in Settings → Downloads and the
+ *  episode "Remove download" action. */
+export function removeDownload(itemId: string, episodeId?: string): Promise<void> {
+  return invoke('remove_download', { itemId, episodeId });
 }
 
 /** Marks a downloaded book as server-deleted — the item was removed from ABS
@@ -106,8 +140,8 @@ export function markServerDeleted(itemId: string): Promise<void> {
  *  Safe to call when the itemId is not actively downloading — returns normally.
  *  The Rust streaming loop emits a 'download-cancelled' event and deletes the
  *  partial file; callers listen for that event rather than awaiting this call. */
-export function cancelDownload(itemId: string): Promise<void> {
-  return invoke('cancel_download', { itemId });
+export function cancelDownload(itemId: string, episodeId?: string): Promise<void> {
+  return invoke('cancel_download', { itemId, episodeId });
 }
 
 // ── Offline progress queue ─────────────────────────────────────────────────
@@ -133,11 +167,19 @@ export function flushOfflineProgress(serverUrl: string): Promise<number> {
   return invoke('flush_offline_progress', { serverUrl });
 }
 
-// Returns the offline progress queue entry for a book, or null if none exists.
-// Called by the offline playback path to restore the last saved position when
-// the server is unreachable and st.mediaProgress has no entry for the book.
-export function getOfflineProgress(itemId: string): Promise<OfflineProgressEntry | null> {
-  return invoke('get_offline_progress', { itemId });
+// Returns the offline progress queue entry for a book or podcast episode, or null
+// if none exists. Called by the offline playback path to restore the last saved
+// position when the server is unreachable and st.mediaProgress has no entry.
+// Pass episodeId for a downloaded episode so the right entry is resolved.
+export function getOfflineProgress(itemId: string, episodeId?: string): Promise<OfflineProgressEntry | null> {
+  return invoke('get_offline_progress', { itemId, episodeId });
+}
+
+// Returns the entire offline progress queue. Used on an offline launch to
+// hydrate mediaProgress from locally-queued positions so downloaded books and
+// episodes show their resume point/percentage without a server.
+export function listOfflineProgress(): Promise<OfflineProgressEntry[]> {
+  return invoke('list_offline_progress');
 }
 
 /** Number of locally retained progress writes awaiting safe ABS reconciliation. */

@@ -112,12 +112,12 @@ export default function AppearanceSection({ st }: AppearanceSectionProps) {
           </SegGroup>
         </Row>
 
-        <Row label="Cover size">
-          <SegGroup>
-            {SIZES.map(v => (
-              <Seg key={v} active={v === st.coverSize} onClick={() => st.setCoverSize(v)}>{v} · {COVER_SIZES[v]} px</Seg>
-            ))}
-          </SegGroup>
+        {/* Stacked: 6 cover-size pills are too wide to sit beside the label
+            without squeezing it into a cramped wrap — put them on their own line. */}
+        <Row label="Cover size" stack>
+          {SIZES.map(v => (
+            <Seg key={v} active={v === st.coverSize} onClick={() => st.setCoverSize(v)}>{v} · {COVER_SIZES[v]} px</Seg>
+          ))}
         </Row>
 
         <Row label="Browse tile style" hint="How series, authors, genres and other shelf tabs present each group.">
